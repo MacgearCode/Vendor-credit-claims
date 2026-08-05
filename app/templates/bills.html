@@ -15,9 +15,18 @@
 
 {% if error %}<p class="banner error">{{ error }}</p>{% endif %}
 
+{# The plain input is the real control; app.js wraps it in a drop zone. Without JS
+   the input shows as normal and the form still submits. #}
 <form class="uploadbar" method="post" action="/vendor-bills" enctype="multipart/form-data">
-  <input type="file" name="files" accept=".pdf,.zip" multiple required>
-  <button class="btn" type="submit">Read invoices</button>
+  <label class="dropzone" id="dropzone">
+    <input type="file" name="files" id="billFiles" accept=".pdf,.zip" multiple>
+    <span class="dropzone-prompt">
+      <span class="dropzone-lead">Drop invoice PDFs or a .zip here</span>
+      <span class="dropzone-sub">or click to choose files</span>
+    </span>
+    <span class="dropzone-files" id="dropzoneFiles" hidden></span>
+  </label>
+  <button class="btn" type="submit" id="billSubmit">Read invoices</button>
 </form>
 
 {% if run %}
@@ -142,4 +151,90 @@
 {% else %}
 <p class="hint">Nothing exported yet.</p>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Drag-and-drop for the invoice upload. Progressive enhancement: the file input
+// works on its own, and this only runs if the browser supports DataTransfer,
+// which is what lets a drop be written back into the input the form submits.
+(function(){
+  var zone = document.getElementById('dropzone');
+  var input = document.getElementById('billFiles');
+  var list = document.getElementById('dropzoneFiles');
+  var submit = document.getElementById('billSubmit');
+  if(!zone || !input || !window.DataTransfer) return;
+
+  zone.classList.add('enhanced');
+
+  var ACCEPTED = /\.(pdf|zip)$/i;
+
+  function describe(files){
+    if(!files.length){
+      list.hidden = true;
+      submit.disabled = true;
+      return;
+    }
+    var names = [];
+    var bytes = 0;
+    for(var i = 0; i < files.length; i++){ names.push(files[i].name); bytes += files[i].size; }
+    var mb = (bytes / 1048576).toFixed(1);
+    var label = files.length === 1 ? names[0] : files.length + ' files';
+    list.textContent = label + '  (' + mb + ' MB)';
+    list.title = names.join('\n');   // full list on hover when it's a batch
+    list.hidden = false;
+    submit.disabled = false;
+  }
+
+  function reject(skipped){
+    list.textContent = 'Ignored ' + skipped.length + ' file(s) that are not .pdf or .zip: '
+                     + skipped.join(', ');
+    list.hidden = false;
+    submit.disabled = !input.files.length;
+  }
+
+  ['dragenter','dragover'].forEach(function(ev){
+    zone.addEventListener(ev, function(e){
+      e.preventDefault();
+      e.stopPropagation();
+      zone.classList.add('dragging');
+    });
+  });
+
+  ['dragleave','dragend'].forEach(function(ev){
+    zone.addEventListener(ev, function(e){
+      // dragleave also fires moving between child elements; ignore those
+      if(ev === 'dragleave' && zone.contains(e.relatedTarget)) return;
+      zone.classList.remove('dragging');
+    });
+  });
+
+  zone.addEventListener('drop', function(e){
+    e.preventDefault();
+    e.stopPropagation();
+    zone.classList.remove('dragging');
+
+    var dropped = e.dataTransfer.files;
+    var keep = new DataTransfer();
+    var skipped = [];
+    for(var i = 0; i < dropped.length; i++){
+      if(ACCEPTED.test(dropped[i].name)) keep.items.add(dropped[i]);
+      else skipped.push(dropped[i].name);
+    }
+    if(keep.files.length){
+      // Writing back to input.files is the point — the form posts the input, not
+      // the drop event, so a dropped file that never lands here is never uploaded.
+      input.files = keep.files;
+      describe(keep.files);
+    } else if(skipped.length){
+      // Nothing usable was dropped, so leave any existing selection alone. A
+      // stray .txt landing on the zone must not silently bin a staged batch.
+      reject(skipped);
+    }
+  });
+
+  input.addEventListener('change', function(){ describe(input.files); });
+  describe(input.files);   // a browser-restored selection after Back
+})();
+</script>
 {% endblock %}

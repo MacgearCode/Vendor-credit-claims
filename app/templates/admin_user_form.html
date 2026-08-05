@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}{{ "Edit user" if u else "New user" }}{% endblock %}
+{% block brandword %}Users{% endblock %}
+{# base.html supplies the "Users" link for admins #}
+
+{% block content %}
+<h1 class="home-title">{{ "Edit user" if u else "New user" }}</h1>
+<p><a href="/admin/users">← All users</a></p>
+
+{% if error %}<p class="banner error">{{ error }}</p>{% endif %}
+{% if notice %}<p class="banner warn">{{ notice }}</p>{% endif %}
+
+{% if set_link %}
+<div class="card setlink">
+  <p><strong>Single-use link for {{ u.email }}</strong> — valid for 24 hours.
+     Send it to them; they choose their own password.</p>
+  <div class="copyrow">
+    <input id="setlink" type="text" readonly value="{{ set_link }}">
+    <button type="button" class="btn" onclick="navigator.clipboard.writeText(document.getElementById('setlink').value);this.textContent='Copied'">Copy</button>
+  </div>
+  <p class="hint">Generating another link kills this one. Don't post it in a
+     shared channel — anyone holding it can set the password.</p>
+</div>
+{% endif %}
+
+<form class="card formcard" method="post"
+      action="{{ '/admin/users/' ~ u.id if u else '/admin/users/new' }}">
+  <label>Email
+    <input name="email" type="email" value="{{ u.email if u else '' }}" required>
+  </label>
+  <label>Name
+    <input name="name" type="text" value="{{ u.name if u else '' }}">
+  </label>
+  <label>Role
+    <select name="role" id="role">
+      {% for r in roles %}
+      <option value="{{ r }}" {{ 'selected' if (u.role if u else 'user') == r }}>{{ role_labels[r] }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <fieldset class="split-group wide" id="toolbox">
+    <legend>Tools this person can use</legend>
+    {% for k in tool_keys %}
+    <label class="chk">
+      <input type="checkbox" name="tools" value="{{ k }}" {{ 'checked' if k in selected }}>
+      {{ tool_labels[k] }}
+    </label>
+    {% endfor %}
+    <p class="hint" id="adminnote" hidden>Admins reach every tool regardless of these ticks.</p>
+  </fieldset>
+
+  <label class="chk">
+    <input type="checkbox" name="active" {{ 'checked' if (u.active if u else True) }}>
+    Active — can sign in
+  </label>
+
+  {% if not u %}
+  <p class="hint">No password is set here. Saving generates a single-use link for
+     them to choose their own.</p>
+  {% endif %}
+
+  <div class="formact">
+    <button class="btn" type="submit">{{ "Save changes" if u else "Create user" }}</button>
+  </div>
+</form>
+
+{% if u %}
+<div class="formact rowactions">
+  <form method="post" action="/admin/users/{{ u.id }}/set-password-link">
+    <button class="btn ghost" type="submit">Generate set-password link</button>
+  </form>
+  <form method="post" action="/admin/users/{{ u.id }}/delete"
+        data-confirm="Delete {{ u.email }}? This cannot be undone."
+        data-confirm-ok="Delete user">
+    <button class="btn danger-btn" type="submit">Delete user</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Admins always have every tool, so the tickboxes are noise on an admin account.
+(function(){
+  var role = document.getElementById('role');
+  var box = document.getElementById('toolbox');
+  var note = document.getElementById('adminnote');
+  if(!role || !box) return;
+  function apply(){
+    var admin = role.value === 'admin';
+    box.querySelectorAll('input[type=checkbox]').forEach(function(cb){
+      cb.disabled = admin;
+      if(admin) cb.checked = true;
+    });
+    note.hidden = !admin;
+  }
+  role.addEventListener('change', apply);
+  apply();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Users{% endblock %}
+{% block brandword %}Users{% endblock %}
+{# base.html already puts a "Users" link here for admins — don't repeat it #}
+{% block nav %}
+  <a class="btn" href="/admin/users/new">+ New user</a>
+{% endblock %}
+
+{% block content %}
+<h1 class="home-title">Users</h1>
+<p class="hint">Tick which tools each person can reach. Admins always see everything,
+  including this page.</p>
+
+{% if rows %}
+<table class="grid">
+  <thead>
+    <tr>
+      <th>Email</th><th>Name</th><th>Role</th><th>Tools</th>
+      <th>Status</th><th>Last sign-in</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.u.email }}</td>
+      <td>{{ r.u.name }}</td>
+      <td><span class="pill {{ 'pg-blue' if r.u.role == 'admin' else 'pg-grey' }}">{{ r.u.role }}</span></td>
+      <td>
+        {% if r.tools %}
+          {% for t in r.tools %}<span class="chip">{{ t }}</span>{% endfor %}
+        {% else %}
+          <span class="hint">none</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if not r.u.active %}<span class="pill pg-red">disabled</span>
+        {% elif r.pending %}<span class="pill pg-amber">no password yet</span>
+        {% else %}<span class="pill pg-green">active</span>{% endif %}
+      </td>
+      <td>{{ r.u.last_login|sydney if r.u.last_login else '—' }}</td>
+      <td><a href="/admin/users/{{ r.u.id }}">Edit</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="hint">No accounts yet. Everyone is signing in with the shared login —
+  create your own admin account, check it works, then have the shared password removed.</p>
+{% endif %}
+{% endblock %}

@@ -16,8 +16,10 @@
       <img class="login-logo" src="/static/macgear-logo.png?v={{ asset_ver }}" alt="MacGear">
       <h1>Internal Tools and Apps</h1>
       <p class="hint">Sign in to continue.</p>
+      {% if notice %}<div class="banner warn">{{ notice }}</div>{% endif %}
       {% if error %}<div class="banner error">{{ error }}</div>{% endif %}
-      <label>Username
+      {# name stays "username" so the legacy shared login keeps posting the same field #}
+      <label>Email
         <input name="username" autocomplete="username" autofocus required>
       </label>
       <label>Password

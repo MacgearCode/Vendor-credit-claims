@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}No access{% endblock %}
+{% block content %}
+<div class="card denied">
+  <h1>No access</h1>
+  <p>Your account doesn't have access to <strong>{{ tool }}</strong>.</p>
+  <p class="hint">If you need it, ask an admin to tick it on your account.</p>
+  <p><a class="btn" href="/">Back to the tools</a></p>
+</div>
+{% endblock %}

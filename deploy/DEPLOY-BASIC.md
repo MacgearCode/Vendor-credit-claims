@@ -182,6 +182,47 @@ data is upserted).
 
 ---
 
+## Moving off the shared login to per-user accounts
+
+The app has real accounts now, managed at **/admin/users** by any admin. The old
+shared `APP_USERNAME` / `APP_PASSWORD` still works *alongside* them and signs you
+in as an admin — that is deliberate, so a bad rollout can't lock everyone out.
+
+Do it in this order:
+
+1. **Set `PUBLIC_BASE_URL`** in `deploy/.env` to `https://apps.macgeargroup.com`,
+   then recreate the container. Without it, set-password links are built from the
+   app's internal address (`http://claims:8000`) and nobody can open them.
+   ```bash
+   cd /opt/vendor-credit-claims/deploy && docker compose -f docker-compose.basic.yml up -d
+   ```
+2. **Sign in with the shared login** and create your own admin account at
+   `/admin/users/new`. Copy the single-use link it shows you.
+3. **Open the link, set your password**, then sign out and sign back in *as
+   yourself*. Confirm you can reach `/admin/users`. Do not skip this.
+4. **Create everyone else**, ticking only the tools each person needs. Send each
+   person their own link — one at a time, not in a group chat; whoever holds a
+   link can set that password.
+5. **Blank `APP_PASSWORD`** in `deploy/.env` and recreate the container. The
+   shared login stops working; per-user accounts continue.
+   ```bash
+   docker compose -f docker-compose.basic.yml up -d
+   ```
+
+**Never blank `APP_PASSWORD` while the users table is empty** — the app treats
+"no shared password and no accounts" as local dev and disables auth completely.
+
+**If you lose the last admin account**, put `APP_PASSWORD` back in `deploy/.env`,
+recreate the container, and sign in with the shared credentials to fix it. The
+app refuses to demote, disable or delete the only remaining active admin, so this
+should only happen if the row is removed outside the app.
+
+Links expire after 24 hours and are single use. Generating a new one for someone
+kills their previous link. Passwords are stored as PBKDF2-SHA256 hashes; an admin
+never sees or sets another person's password.
+
+---
+
 ## Renaming the subdomain (promos → apps, done 2026-08-05)
 
 The app outgrew `promos.macgeargroup.com` when it gained a second tool. Steps, in

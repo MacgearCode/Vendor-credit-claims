@@ -63,6 +63,8 @@ h3{margin:.6rem 0;font-size:1rem}
 .btn{display:inline-block;background:var(--brand);color:#fff;border:0;border-radius:8px;
   padding:.5rem .9rem;font-size:.9rem;cursor:pointer}
 .btn:hover{background:#26427a;text-decoration:none}
+/* a disabled submit must not look clickable — used by the bill upload drop zone */
+.btn:disabled,.btn:disabled:hover{background:#aab4c4;cursor:not-allowed}
 .btn.small{padding:.35rem .7rem;font-size:.85rem}
 .btn.ghost{background:#fff;color:var(--brand);border:1px solid var(--brand)}
 .btn.ghost:hover{background:#eef2fb}
@@ -276,6 +278,30 @@ td.cell-down{background:#f8d7da;color:#842029;font-weight:600}
 .uploadbar,.downloadbar{display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;
   margin:1rem 0;padding:.9rem 1.1rem;border:1px solid var(--line);
   border-radius:var(--radius);background:var(--card)}
+.uploadbar{align-items:stretch}
+
+/* Drop zone. Without JS the .enhanced class is never added, so the bare file
+   input shows and everything below is inert. */
+.dropzone{flex:1;min-width:260px;display:flex;align-items:center;gap:.6rem}
+.dropzone.enhanced{flex-direction:column;justify-content:center;gap:.25rem;
+  padding:1.4rem 1rem;cursor:pointer;text-align:center;
+  border:2px dashed var(--line);border-radius:var(--radius);
+  transition:border-color .12s ease,background .12s ease}
+.dropzone.enhanced:hover{border-color:var(--brand)}
+.dropzone.enhanced.dragging{border-color:var(--brand);background:#eef3fb}
+/* visually hidden, still focusable and still the control the form posts */
+.dropzone.enhanced input[type=file]{position:absolute;width:1px;height:1px;
+  padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.dropzone-prompt{display:none;flex-direction:column;gap:.15rem;pointer-events:none}
+.dropzone.enhanced .dropzone-prompt{display:flex}
+.dropzone-lead{font-weight:600}
+.dropzone-sub{font-size:.82rem;color:var(--muted)}
+.dropzone-files{font-size:.85rem;color:var(--brand);font-weight:600;
+  word-break:break-all;pointer-events:none}
+.dropzone.enhanced.dragging .dropzone-lead{color:var(--brand)}
+
+[data-theme="dark"] .dropzone.enhanced.dragging{background:#1d2942}
+[data-theme="dark"] .dropzone-files{color:#6ea8fe}
 .banner.warn{background:#fff3cd;color:#8a6d00;border:1px solid #ffe69c}
 .pill.warn{background:#fff3cd;color:#8a6d00}
 /* numbers the CSV will differ on, so they get looked at rather than scrolled past */
@@ -300,3 +326,21 @@ table.grid tfoot .totrow td{border-top:2px solid var(--line);font-weight:600;
 [data-theme="dark"] .warnline{color:#e0a106}
 [data-theme="dark"] .chip{background:#222b37;color:#c7d0db}
 [data-theme="dark"] table.grid tfoot .totrow td{background:#222b37}
+
+/* ---- user management ------------------------------------------------------- */
+.topbar nav .whoami{font-size:.85rem;opacity:.85;max-width:200px;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.formcard{max-width:640px;padding:1.3rem;display:flex;flex-direction:column;gap:.9rem;
+  margin:1rem 0}
+.formcard label{display:flex;flex-direction:column;gap:.3rem;font-size:.85rem;
+  color:var(--muted)}
+.formcard label.chk{flex-direction:row;align-items:center;gap:.45rem;color:var(--ink)}
+.formcard input[type=text],.formcard input[type=email],.formcard select{font-size:1rem}
+.formact{display:flex;gap:.8rem;align-items:center;margin:1rem 0;max-width:640px}
+.formact form{display:inline}
+/* the set-password link: wide, readonly, obviously copyable */
+.setlink{max-width:640px;padding:1.1rem;margin:1rem 0}
+.copyrow{display:flex;gap:.6rem;margin:.5rem 0}
+.copyrow input{flex:1;font-family:ui-monospace,Consolas,monospace;font-size:.82rem}
+.denied{max-width:520px;padding:1.6rem;margin:2rem auto;text-align:center}
+.denied h1{margin-bottom:.6rem}

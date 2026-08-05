@@ -6,6 +6,12 @@ Two tools behind one login. `/` is a landing page; each tool has its own path.
 |---|---|
 | `/promos` | **Vendor Promos** — promotional credit claims, the original app |
 | `/vendor-bills` | **PDF Bill Upload** — Amazon Advertising invoices → NetSuite vendor bill CSV |
+| `/admin/users` | **Users** — accounts and per-tool access (admins only) |
+
+Everyone signs in with their own email and password. Admins see every tool and
+manage accounts; everyone else sees only the tools ticked on their account —
+enforced on the URL, not just hidden from the landing page. New accounts get a
+single-use link and choose their own password; nobody else ever knows it.
 
 Live at **https://apps.macgeargroup.com** (was `promos.macgeargroup.com`, which now
 redirects). See [CLAUDE.md](CLAUDE.md) for how the two tools share the shell, and

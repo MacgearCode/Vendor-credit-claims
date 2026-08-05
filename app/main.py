@@ -7,7 +7,7 @@ import shutil
 import time
 import urllib.request
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, File, Request, Response, UploadFile
@@ -15,17 +15,20 @@ from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
                                RedirectResponse, StreamingResponse)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .db import (Base, UPLOAD_DIR, engine, ensure_schema, get_db,
+from .db import (Base, SessionLocal, UPLOAD_DIR, engine, ensure_schema, get_db,
                  migrate_statuses, rebuild_reference_tables)
 from .export import build_workbook
 from .models import (Attachment, CustomerClaim, LineItem, ProcessedInvoice,
-                     Product, PromoRetailer, Promotion, Retailer, VendorRequest)
+                     Product, PromoRetailer, Promotion, Retailer, User,
+                     VendorRequest)
 from .service import build_promo_view
 from .pricing_sync import sync_pricing
-from . import bill_export, bill_service, workflow
+from .security import (hash_password, hash_token, make_reset_token, sign,
+                       unsign, verify_password)
+from . import bill_export, bill_service, perms, workflow
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 rebuild_reference_tables()   # drop legacy products/retailers so they rebuild country-scoped
@@ -71,70 +74,169 @@ except OSError:
 templates.env.globals["asset_ver"] = asset_ver
 
 
-# ---- authentication (shared username/password, signed-cookie session) --------
-# Auth runs inside the app so we get a styled /login page instead of the browser's
-# basic-auth popup. Configure via env on the droplet:
-#   APP_USERNAME  shared username testers type (default "macgear")
-#   APP_PASSWORD  shared password — if blank, auth is DISABLED (handy for local dev)
-#   APP_SECRET    random string used to sign the session cookie (set a long one!)
+# ---- authentication (per-user accounts, signed-cookie session) ---------------
+# Users live in the `users` table and are managed at /admin/users. Env on the droplet:
+#   APP_SECRET    random string signing the session cookie (set a long one!)
+#   APP_USERNAME  legacy shared username (default "macgear")
+#   APP_PASSWORD  legacy shared password — see the fallback note below
+#
+# LEGACY SHARED LOGIN: while APP_PASSWORD is set, those credentials still sign you
+# in as a synthetic admin. It is the migration path off the old single shared
+# login and the way back in if the last real admin account is lost. Blank
+# APP_PASSWORD once real admin accounts exist and are known to work.
+#
+# If APP_PASSWORD is blank AND no users exist, auth is disabled entirely — that
+# is local dev, and it is why a deployment must always set one or the other.
 APP_USERNAME = os.environ.get("APP_USERNAME", "macgear")
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 APP_SECRET = os.environ.get("APP_SECRET", "") or "dev-insecure-secret-change-me"
 COOKIE_NAME = "claims_session"
 COOKIE_MAX_AGE = 60 * 60 * 24 * 30          # 30 days
-# paths reachable without a login (static assets, the login page itself, and the
-# token-authenticated pricing sync endpoint that n8n posts to)
-_AUTH_EXEMPT_PREFIXES = ("/static", "/login", "/logout", "/admin/sync-pricing")
-templates.env.globals["auth_enabled"] = bool(APP_PASSWORD)
+RESET_TOKEN_TTL_MIN = 60 * 24               # set-password links last a day
+# paths reachable without a login (static assets, the login and set-password
+# pages, and the token-authenticated pricing sync endpoint that n8n posts to)
+_AUTH_EXEMPT_PREFIXES = ("/static", "/login", "/logout", "/set-password",
+                         "/admin/sync-pricing")
 
 
-def _make_token() -> str:
-    sig = hmac.new(APP_SECRET.encode(), b"authenticated", hashlib.sha256).hexdigest()
-    return f"authenticated.{sig}"
+class LegacyAdmin:
+    """Stand-in user for the shared APP_PASSWORD login. Quacks like a User for
+    perms.py and the templates, but has no database row and cannot be edited."""
+    id = None
+    email = APP_USERNAME
+    name = "Shared login"
+    role = "admin"
+    allowed_tools = None
+    active = True
+    is_legacy = True
 
 
-def _valid_token(tok: str) -> bool:
-    if not tok or "." not in tok:
-        return False
-    msg, _, sig = tok.rpartition(".")
-    expected = hmac.new(APP_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(sig, expected)
+def _any_users(db: Session) -> bool:
+    return db.scalar(select(func.count()).select_from(User)) > 0
+
+
+def _user_from_cookie(request: Request):
+    """Resolve the signed cookie to a user, or None. The cookie holds either a
+    user id or the literal "legacy" for the shared login."""
+    value = unsign(request.cookies.get(COOKIE_NAME, ""), APP_SECRET)
+    if not value:
+        return None
+    if value == "legacy":
+        return LegacyAdmin() if APP_PASSWORD else None
+    if not value.isdigit():
+        return None
+    db = SessionLocal()
+    try:
+        user = db.get(User, int(value))
+        if user and user.active:
+            db.expunge(user)       # detached copy for the request; never written back
+            return user
+        return None
+    finally:
+        db.close()
+
+
+# Which tool owns which URL prefix. Enforced in the middleware rather than on
+# each handler: a tool has a dozen routes and forgetting one is a silent hole.
+# Longest prefix wins, so a new tool nested under an existing one still works.
+_TOOL_PATHS = [
+    ("/vendor-bills", "vendor_bills"),
+    ("/promos", "promos"),
+    ("/promo", "promos"),          # /promo/new, /promo/{id}, /promo/{id}/...
+    ("/line", "promos"),
+    ("/retailer", "promos"),
+    ("/claim", "promos"),
+    ("/vendor-request", "promos"),
+    ("/attachment", "promos"),
+    ("/help", "promos"),
+]
+
+
+def _tool_for_path(path: str) -> str | None:
+    best = None
+    for prefix, key in _TOOL_PATHS:
+        if (path == prefix or path.startswith(prefix + "/")) and (
+                best is None or len(prefix) > len(best[0])):
+            best = (prefix, key)
+    return best[1] if best else None
 
 
 @app.middleware("http")
 async def require_login(request: Request, call_next):
-    if not APP_PASSWORD:                     # auth disabled (no password configured)
-        return await call_next(request)
     path = request.url.path
-    if any(path == p or path.startswith(p + "/") or path.startswith(p)
-           for p in _AUTH_EXEMPT_PREFIXES):
+    if any(path == p or path.startswith(p + "/") for p in _AUTH_EXEMPT_PREFIXES):
         return await call_next(request)
-    if not _valid_token(request.cookies.get(COOKIE_NAME, "")):
+
+    # Auth off only when there is nothing at all to authenticate against.
+    if not APP_PASSWORD:
+        db = SessionLocal()
+        try:
+            if not _any_users(db):
+                request.state.user = None
+                return await call_next(request)
+        finally:
+            db.close()
+
+    user = _user_from_cookie(request)
+    if user is None:
         return RedirectResponse("/login", status_code=303)
+    request.state.user = user
+
+    if path.startswith("/admin/users") and not perms.is_admin(user):
+        return templates.TemplateResponse(request, "denied.html",
+                                          {"tool": "User management"}, status_code=403)
+
+    tool = _tool_for_path(path)
+    if tool and not perms.can_access(user, tool):
+        return templates.TemplateResponse(
+            request, "denied.html",
+            {"tool": perms.TOOL_LABELS.get(tool, tool)}, status_code=403)
+
     return await call_next(request)
+
+
+def current_user(request: Request):
+    return getattr(request.state, "user", None)
+
+
+templates.env.globals["current_user"] = current_user
+templates.env.globals["perms"] = perms
 
 
 @app.get("/login", response_class=HTMLResponse)
 def login_form(request: Request):
-    if not APP_PASSWORD or _valid_token(request.cookies.get(COOKIE_NAME, "")):
+    if _user_from_cookie(request):
         return RedirectResponse("/", status_code=303)
-    return templates.TemplateResponse(request, "login.html", {"error": ""})
+    notice = ("Your password has been set — please sign in."
+              if request.query_params.get("msg") == "set" else "")
+    return templates.TemplateResponse(request, "login.html",
+                                      {"error": "", "notice": notice})
 
 
 @app.post("/login")
-async def login_submit(request: Request):
+async def login_submit(request: Request, db: Session = Depends(get_db)):
     form = await request.form()
-    user = form.get("username", "")
+    ident = (form.get("username", "") or "").strip()
     pw = form.get("password", "")
-    ok = (hmac.compare_digest(user, APP_USERNAME)
-          and hmac.compare_digest(pw, APP_PASSWORD))
-    if not ok:
+
+    user = db.scalar(select(User).where(User.email == ident.lower()))
+    if user and user.active and user.password_hash and verify_password(pw, user.password_hash):
+        user.last_login = datetime.utcnow()
+        db.commit()
+        token = sign(str(user.id), APP_SECRET)
+    elif (APP_PASSWORD and hmac.compare_digest(ident, APP_USERNAME)
+            and hmac.compare_digest(pw, APP_PASSWORD)):
+        token = sign("legacy", APP_SECRET)
+    else:
+        # One message for every failure — a distinct "no such user" would let
+        # anyone enumerate who has an account here.
         return templates.TemplateResponse(
             request, "login.html",
-            {"error": "Incorrect username or password."},
+            {"error": "Incorrect email or password.", "notice": ""},
             status_code=401)
+
     resp = RedirectResponse("/", status_code=303)
-    resp.set_cookie(COOKIE_NAME, _make_token(), max_age=COOKIE_MAX_AGE,
+    resp.set_cookie(COOKIE_NAME, token, max_age=COOKIE_MAX_AGE,
                     httponly=True, samesite="lax")
     return resp
 
@@ -144,6 +246,64 @@ def logout():
     resp = RedirectResponse("/login", status_code=303)
     resp.delete_cookie(COOKIE_NAME)
     return resp
+
+
+# ---- set / reset password (public, single-use token) -------------------------
+def _issue_set_password_link(db: Session, user: User, request: Request) -> str:
+    """Mint a single-use token, persist only its SHA-256 digest, and return the
+    link for the admin to copy. There is no mailer in this app, so the link is
+    shown on screen and passed on by hand."""
+    raw = make_reset_token()
+    user.reset_token_hash = hash_token(raw)
+    user.reset_expires_at = datetime.utcnow() + timedelta(minutes=RESET_TOKEN_TTL_MIN)
+    db.commit()
+    base = os.environ.get("PUBLIC_BASE_URL", "") or str(request.base_url).rstrip("/")
+    return f"{base}/set-password?token={raw}"
+
+
+def _user_for_token(db: Session, raw: str):
+    if not raw:
+        return None
+    user = db.scalar(select(User).where(User.reset_token_hash == hash_token(raw)))
+    if not user or not user.reset_expires_at or user.reset_expires_at < datetime.utcnow():
+        return None
+    return user
+
+
+@app.get("/set-password", response_class=HTMLResponse)
+def set_password_form(request: Request, token: str = "", db: Session = Depends(get_db)):
+    user = _user_for_token(db, token)
+    return templates.TemplateResponse(request, "set_password.html", {
+        "token": token, "email": user.email if user else "",
+        "invalid": user is None, "error": ""})
+
+
+@app.post("/set-password", response_class=HTMLResponse)
+async def set_password_submit(request: Request, db: Session = Depends(get_db)):
+    form = await request.form()
+    token = form.get("token", "")
+    pw = form.get("password", "")
+    confirm = form.get("confirm", "")
+    user = _user_for_token(db, token)
+
+    ctx = {"token": token, "email": user.email if user else "", "invalid": user is None}
+    if user is None:
+        return templates.TemplateResponse(request, "set_password.html",
+                                          {**ctx, "error": ""}, status_code=400)
+    if len(pw) < 10:
+        return templates.TemplateResponse(
+            request, "set_password.html",
+            {**ctx, "error": "Use at least 10 characters."}, status_code=400)
+    if pw != confirm:
+        return templates.TemplateResponse(
+            request, "set_password.html",
+            {**ctx, "error": "The two passwords do not match."}, status_code=400)
+
+    user.password_hash = hash_password(pw)
+    user.reset_token_hash = None       # single use
+    user.reset_expires_at = None
+    db.commit()
+    return RedirectResponse("/login?msg=set", status_code=303)
 
 
 # live FX (local->USD) for guidance on the new-promo form, cached ~6h, fails soft
@@ -210,18 +370,22 @@ def _parse_date(v):
 
 # ---- landing page ------------------------------------------------------------
 # The app hosts more than promotions now, so "/" is a tool picker and each tool
-# owns a path below it. Add a tile here when a tool is added.
+# owns a path below it. Add a tile here when a tool is added, and its key to
+# perms.TOOL_KEYS / TOOL_LABELS.
 TOOLS = [
-    {"href": "/promos", "title": "Vendor Promos",
+    {"key": "promos", "href": "/promos", "title": "Vendor Promos",
      "blurb": "Promotional credit claims — customer claims in, vendor credits out."},
-    {"href": "/vendor-bills", "title": "PDF Bill Upload",
+    {"key": "vendor_bills", "href": "/vendor-bills", "title": "PDF Bill Upload",
      "blurb": "Amazon Advertising invoices → NetSuite vendor bill import CSV."},
 ]
 
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
-    return templates.TemplateResponse(request, "home.html", {"tools": TOOLS})
+    user = current_user(request)
+    allowed = perms.effective_tools(user) if user else perms.TOOL_KEYS
+    tiles = [t for t in TOOLS if t["key"] in allowed]
+    return templates.TemplateResponse(request, "home.html", {"tools": tiles})
 
 
 # ---- dashboard ---------------------------------------------------------------
@@ -766,3 +930,135 @@ def vendor_bill_mark_imported(invoice_number: str, db: Session = Depends(get_db)
         row.imported = not row.imported
         db.commit()
     return RedirectResponse("/vendor-bills", status_code=303)
+
+
+# ==============================================================================
+# User management  —  /admin/users  (admin only; enforced in the middleware)
+# ==============================================================================
+
+@app.get("/admin/users", response_class=HTMLResponse)
+def admin_users(request: Request, db: Session = Depends(get_db)):
+    users = db.scalars(select(User).order_by(User.role, User.email)).all()
+    rows = [{"u": u,
+             "tools": [perms.TOOL_LABELS[t] for t in perms.effective_tools(u)],
+             "pending": not u.password_hash} for u in users]
+    return templates.TemplateResponse(request, "admin_users.html", {"rows": rows})
+
+
+def _user_form_ctx(u: User | None, notice: str = "", link: str = "",
+                   error: str = "") -> dict:
+    return {"u": u,
+            "roles": perms.ROLES, "role_labels": perms.ROLE_LABELS,
+            "tool_keys": perms.TOOL_KEYS, "tool_labels": perms.TOOL_LABELS,
+            "selected": perms.effective_tools(u) if u else [],
+            "notice": notice, "set_link": link, "error": error}
+
+
+@app.get("/admin/users/new", response_class=HTMLResponse)
+def admin_user_new(request: Request):
+    return templates.TemplateResponse(request, "admin_user_form.html", _user_form_ctx(None))
+
+
+@app.get("/admin/users/{user_id}", response_class=HTMLResponse)
+def admin_user_edit(user_id: int, request: Request, db: Session = Depends(get_db)):
+    u = db.get(User, user_id)
+    if not u:
+        return RedirectResponse("/admin/users", status_code=303)
+    return templates.TemplateResponse(request, "admin_user_form.html", _user_form_ctx(u))
+
+
+# Order matters: decorators apply bottom-up, so the literal /new must be the
+# LOWER one or "{user_id}" is registered first and tries to parse "new" as an int.
+@app.post("/admin/users/{user_id}", response_class=HTMLResponse)
+@app.post("/admin/users/new", response_class=HTMLResponse)
+async def admin_user_save(request: Request, user_id: int | None = None,
+                          db: Session = Depends(get_db)):
+    form = await request.form()
+    email = (form.get("email", "") or "").strip().lower()
+    name = (form.get("name", "") or "").strip()
+    role = form.get("role", "user")
+    if role not in perms.ROLES:
+        role = "user"
+    allowed = perms.normalize_allowed(role, form.getlist("tools"))
+    active = form.get("active") == "on"
+
+    u = db.get(User, user_id) if user_id else None
+
+    if u is None:
+        if not email:
+            return templates.TemplateResponse(
+                request, "admin_user_form.html",
+                _user_form_ctx(None, error="An email address is required."),
+                status_code=400)
+        if db.scalar(select(User).where(User.email == email)):
+            return templates.TemplateResponse(
+                request, "admin_user_form.html",
+                _user_form_ctx(None, error=f"{email} already has an account."),
+                status_code=400)
+        # No password is set here. The user chooses their own via the link below,
+        # so nobody — including whoever creates the account — ever knows it.
+        u = User(email=email, password_hash="")
+        db.add(u)
+        new_account = True
+    else:
+        if email and email != u.email:
+            clash = db.scalar(select(User).where(User.email == email, User.id != u.id))
+            if clash:
+                return templates.TemplateResponse(
+                    request, "admin_user_form.html",
+                    _user_form_ctx(u, error=f"{email} already has an account."),
+                    status_code=400)
+            u.email = email
+        new_account = False
+
+    # Guard against removing the last way in: the final active admin must stay
+    # an active admin, or the next deploy with APP_PASSWORD blank locks everyone out.
+    if not new_account and u.role == "admin" and (role != "admin" or not active):
+        others = db.scalar(select(func.count()).select_from(User).where(
+            User.role == "admin", User.active.is_(True), User.id != u.id))
+        if not others:
+            return templates.TemplateResponse(
+                request, "admin_user_form.html",
+                _user_form_ctx(u, error="This is the only active admin — promote "
+                                        "someone else before changing this account."),
+                status_code=400)
+
+    u.name = name
+    u.role = role
+    u.allowed_tools = allowed
+    u.active = active
+    db.commit()
+
+    if new_account:
+        link = _issue_set_password_link(db, u, request)
+        return templates.TemplateResponse(request, "admin_user_form.html", _user_form_ctx(
+            u, notice="Account created. Send them the link below so they can set a password.",
+            link=link))
+    return RedirectResponse("/admin/users", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/set-password-link", response_class=HTMLResponse)
+def admin_user_reset(user_id: int, request: Request, db: Session = Depends(get_db)):
+    u = db.get(User, user_id)
+    if not u:
+        return RedirectResponse("/admin/users", status_code=303)
+    link = _issue_set_password_link(db, u, request)
+    return templates.TemplateResponse(request, "admin_user_form.html", _user_form_ctx(
+        u, notice="New single-use link generated. Any earlier link is now dead.",
+        link=link))
+
+
+@app.post("/admin/users/{user_id}/delete")
+def admin_user_delete(user_id: int, request: Request, db: Session = Depends(get_db)):
+    u = db.get(User, user_id)
+    if u:
+        others = db.scalar(select(func.count()).select_from(User).where(
+            User.role == "admin", User.active.is_(True), User.id != u.id))
+        if u.role == "admin" and not others:
+            return templates.TemplateResponse(
+                request, "admin_user_form.html",
+                _user_form_ctx(u, error="This is the only active admin — it cannot be deleted."),
+                status_code=400)
+        db.delete(u)
+        db.commit()
+    return RedirectResponse("/admin/users", status_code=303)

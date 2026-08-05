@@ -143,6 +143,28 @@ class VendorRequest(Base):
     promotion: Mapped[Promotion] = relationship(back_populates="vendor_request")
 
 
+class User(Base):
+    """A person who can sign in. Tool access is resolved through app/perms.py.
+
+    Passwords are never set by an admin — a new user gets a single-use link and
+    chooses their own, so nobody but the account holder ever knows it. Only the
+    token's SHA-256 digest is stored, never the raw token.
+    """
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String, unique=True, index=True)
+    name: Mapped[str] = mapped_column(String, default="")
+    password_hash: Mapped[str] = mapped_column(String, default="")
+    role: Mapped[str] = mapped_column(String, default="user")          # admin|user
+    # JSON list of tool keys; NULL means "use the role default" — see perms.py
+    allowed_tools: Mapped[str | None] = mapped_column(Text, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    last_login: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    reset_token_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    reset_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class ProcessedInvoice(Base):
     """A vendor invoice that has been converted to a NetSuite import CSV.
 

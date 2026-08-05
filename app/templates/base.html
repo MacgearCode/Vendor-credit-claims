@@ -19,8 +19,13 @@
     <nav>
       {# each tool fills this with its own links; the landing page leaves it empty #}
       {% block nav %}{% endblock %}
+      {% set me = current_user(request) %}
+      {% if me and perms.is_admin(me) %}<a href="/admin/users">Users</a>{% endif %}
       <button type="button" id="themeToggle" class="theme-toggle" aria-label="Toggle dark mode">🌙</button>
-      {% if auth_enabled %}<a class="signout" href="/logout">Sign out</a>{% endif %}
+      {% if me %}
+        <span class="whoami" title="{{ me.email }}">{{ me.name or me.email }}</span>
+        <a class="signout" href="/logout">Sign out</a>
+      {% endif %}
     </nav>
   </header>
   <main>

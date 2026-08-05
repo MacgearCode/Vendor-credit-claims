@@ -25,6 +25,10 @@ services:
       # shared secret for the POST /admin/sync-pricing endpoint (n8n sends it). Optional;
       # if unset the endpoint rejects all calls. Set in deploy/.env.
       - PRICING_SYNC_TOKEN=${PRICING_SYNC_TOKEN:-}
+      # Public origin, used to build set-password links for new users. Behind Caddy
+      # the request's own base URL can resolve to http://claims:8000, which would
+      # produce links nobody outside the docker network can open. Set it explicitly.
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-}
     networks: [caddy]
     # no published ports — Caddy reaches it as http://claims:8000 on the shared network
 
