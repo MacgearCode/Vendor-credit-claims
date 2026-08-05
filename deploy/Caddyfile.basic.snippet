@@ -1,13 +1,21 @@
-# Add this block to the droplet's existing Caddyfile (the one that already serves n8n),
-# then reload Caddy. Caddy obtains a Let's Encrypt cert for the subdomain automatically
+# Add these blocks to the droplet's existing Caddyfile (the one that already serves n8n),
+# then reload Caddy. Caddy obtains a Let's Encrypt cert for each hostname automatically
 # once DNS points at the droplet.
 #
-# Replace claims.yourcompany.com with your real subdomain.
-#
-# Auth is handled INSIDE the app now (a styled /login page that checks the shared
-# username/password from deploy/.env) — so there is no basic_auth block here anymore.
+# Auth is handled INSIDE the app (a styled /login page that checks the shared
+# username/password from deploy/.env) — so there is no basic_auth block here.
 # Caddy just terminates HTTPS and proxies through.
+#
+# `claims` below is the docker service name in docker-compose.basic.yml, not a hostname.
+# Leave it as is — n8n posts to http://claims:8000 for the nightly pricing sync.
 
-claims.yourcompany.com {
+apps.macgeargroup.com {
     reverse_proxy claims:8000
+}
+
+# Was promos.macgeargroup.com until 2026-08-05, when the app grew a second tool and a
+# promos-specific name stopped fitting. Keep this block: sales and finance have the old
+# URL bookmarked. {uri} preserves the path, so an old /promo/12 link still resolves.
+promos.macgeargroup.com {
+    redir https://apps.macgeargroup.com{uri} permanent
 }

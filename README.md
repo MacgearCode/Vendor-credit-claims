@@ -1,10 +1,25 @@
-# Vendor Credit Claims
+# Macgear internal tools (Vendor Credit Claims)
 
-A web app to manage promotional credit claims end-to-end — create promos, track inbound
+Two tools behind one login. `/` is a landing page; each tool has its own path.
+
+| Path | Tool |
+|---|---|
+| `/promos` | **Vendor Promos** — promotional credit claims, the original app |
+| `/vendor-bills` | **PDF Bill Upload** — Amazon Advertising invoices → NetSuite vendor bill CSV |
+
+Live at **https://apps.macgeargroup.com** (was `promos.macgeargroup.com`, which now
+redirects). See [CLAUDE.md](CLAUDE.md) for how the two tools share the shell, and
+[deploy/DEPLOY-BASIC.md](deploy/DEPLOY-BASIC.md) to deploy or change the hostname.
+
+---
+
+## Vendor Promos
+
+Manage promotional credit claims end-to-end — create promos, track inbound
 **customer claims**, and raise outbound **vendor credit requests** — replacing the
 Monday.com + per-promo Excel workflow. See [SPEC.md](SPEC.md) for the full domain model.
 
-## What it does (Phase 1)
+### What it does (Phase 1)
 
 - **Create a promotion** — brand, dates, AUD→USD rate, a default 3-way funding split
   (Retailer / MacGear / Brand), and the retailers running it (rebate pre-filled per retailer).
@@ -18,6 +33,37 @@ Monday.com + per-promo Excel workflow. See [SPEC.md](SPEC.md) for the full domai
   Credited) with variance vs the expected claim, and a vendor request (Not Sent → Sent →
   Approved → Credited) with AUD/USD amounts. Dashboard shows all promos at a glance.
 
+---
+
+## PDF Bill Upload
+
+Turns Amazon Advertising tax invoice PDFs into a NetSuite **Vendor Bill** import
+CSV, with the advertising spend split across brands (classes) so the P&L lands on
+the right brand without anyone re-keying it. Built for the accounts team, who
+can't run a PowerShell script.
+
+1. Drop in a day's PDFs, several, or the whole zip.
+2. Check the review table against the invoices — ex-tax, GST as the invoice states
+   it, GST as NetSuite will calculate it, and the brand split.
+3. Download the CSV and import it in NetSuite (**Setup → Import/Export → Import
+   CSV Records**, saved mapping *Amazon Advertising Vendor Bill*).
+
+Things it deliberately surfaces rather than hides:
+
+- **A 1c GST difference on some invoices.** Amazon rounds GST once on the invoice
+  total; NetSuite rounds per line and sums. About two in five land a cent high.
+  Expected, not a parse error.
+- **Invoices already exported**, flagged before you download. External ID on the
+  import is the invoice number, so NetSuite would reject a second import anyway.
+- **A portfolio that matches no brand rule**, which otherwise falls silently to
+  MOVA. That's the warning that says a new brand has started advertising.
+
+The command-line version this was ported from still lives in `vendorbill/`, and
+its README documents the NetSuite import mapping and reference values in full —
+read that before touching the config block in `app/bill_calc.py`.
+
+---
+
 ## Run it
 
 ```powershell
@@ -26,7 +72,7 @@ Monday.com + per-promo Excel workflow. See [SPEC.md](SPEC.md) for the full domai
 ```
 
 That creates the virtualenv + seeds the database on first run, then serves the app at
-**http://127.0.0.1:8000**. Stop with Ctrl+C.
+**http://127.0.0.1:8030**. Stop with Ctrl+C.
 
 Manual equivalent:
 

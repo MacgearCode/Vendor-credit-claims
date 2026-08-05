@@ -14,12 +14,11 @@
   <header class="topbar">
     <a class="brand" href="/">
       <img class="brand-logo" src="/static/macgear-logo.png?v={{ asset_ver }}" alt="MacGear">
-      <span class="brand-word">Promotions</span>
+      <span class="brand-word">{% block brandword %}Internal Tools{% endblock %}</span>
     </a>
     <nav>
-      <a href="/">Dashboard</a>
-      <a href="/help">Help</a>
-      <a class="btn" href="/promo/new">+ New Promotion</a>
+      {# each tool fills this with its own links; the landing page leaves it empty #}
+      {% block nav %}{% endblock %}
       <button type="button" id="themeToggle" class="theme-toggle" aria-label="Toggle dark mode">🌙</button>
       {% if auth_enabled %}<a class="signout" href="/logout">Sign out</a>{% endif %}
     </nav>

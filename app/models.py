@@ -143,6 +143,32 @@ class VendorRequest(Base):
     promotion: Mapped[Promotion] = relationship(back_populates="vendor_request")
 
 
+class ProcessedInvoice(Base):
+    """A vendor invoice that has been converted to a NetSuite import CSV.
+
+    Belongs to the Vendor Bill Importer tool, not to the promo hierarchy above.
+    Its only job is the duplicate guard: External ID on the NetSuite import is
+    the invoice number, so re-importing one that has already been billed is
+    rejected by NetSuite. Better to say so before the file is downloaded than to
+    let someone find out on the Import Job Status page.
+    """
+    __tablename__ = "processed_invoices"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    invoice_number: Mapped[str] = mapped_column(String, unique=True, index=True)
+    invoice_date: Mapped[str] = mapped_column(String, default="")   # dd/mm/yyyy, as imported
+    period_label: Mapped[str] = mapped_column(String, default="")
+    currency: Mapped[str] = mapped_column(String, default="")
+    subtotal_ex_tax: Mapped[float] = mapped_column(Float, default=0.0)
+    tax_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    total_inc_tax: Mapped[float] = mapped_column(Float, default=0.0)
+    brand_split: Mapped[dict] = mapped_column(JSON, default=dict)   # {class: amount}
+    warnings: Mapped[list] = mapped_column(JSON, default=list)
+    exported_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # Set by hand once the CSV has actually gone into NetSuite, so the log
+    # distinguishes "downloaded" from "posted".
+    imported: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 class Attachment(Base):
     """A file uploaded against a customer/retailer block (e.g. the claim document)."""
     __tablename__ = "attachments"

@@ -1,6 +1,6 @@
 # Deploying Vendor Credit Claims (DigitalOcean droplet, behind your n8n Caddy, Entra SSO)
 
-End state: `https://claims.yourcompany.com` → Caddy (HTTPS) → oauth2-proxy (Microsoft
+End state: `https://apps.macgeargroup.com` → Caddy (HTTPS) → oauth2-proxy (Microsoft
 Entra login) → the app. Only people in your M365 tenant with your email domain can get in.
 n8n keeps running untouched. Data (SQLite DB + uploaded files) lives in `data/` on the droplet.
 
@@ -18,8 +18,8 @@ In your DNS provider, add an **A record**:
 |------|-------------------|--------------------------|
 | A    | `claims`          | `<your droplet IP>`      |
 
-(Full host becomes `claims.yourcompany.com`.) Give it a few minutes to propagate;
-verify with `ping claims.yourcompany.com` showing the droplet IP.
+(Full host becomes `apps.macgeargroup.com`.) Give it a few minutes to propagate;
+verify with `ping apps.macgeargroup.com` showing the droplet IP.
 
 ---
 
@@ -30,7 +30,7 @@ Portal: https://portal.azure.com → **Microsoft Entra ID → App registrations 
 1. **Name:** `Vendor Credit Claims (SSO)`
 2. **Supported account types:** *Accounts in this organizational directory only* (single tenant).
 3. **Redirect URI:** platform **Web**, value:
-   `https://claims.yourcompany.com/oauth2/callback`
+   `https://apps.macgeargroup.com/oauth2/callback`
 4. Click **Register**, then copy:
    - **Application (client) ID**  → `OAUTH2_PROXY_CLIENT_ID`
    - **Directory (tenant) ID**    → `ENTRA_TENANT_ID`
@@ -110,7 +110,7 @@ The app seeds its product/retailer reference data and creates the database on fi
 Edit the Caddyfile found in step 4 and append (see `Caddyfile.snippet`):
 
 ```
-claims.yourcompany.com {
+apps.macgeargroup.com {
     reverse_proxy oauth2-proxy:4180
 }
 ```
@@ -128,7 +128,7 @@ Caddy will fetch a Let's Encrypt certificate for the subdomain automatically.
 
 ## 7. Test
 
-Open `https://claims.yourcompany.com` → you should be redirected to a Microsoft login →
+Open `https://apps.macgeargroup.com` → you should be redirected to a Microsoft login →
 after signing in with a tenant account on your domain, you land on the dashboard.
 Try with a non-allowed account to confirm it's blocked.
 

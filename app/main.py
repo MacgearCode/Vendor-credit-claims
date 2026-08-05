@@ -7,9 +7,10 @@ import shutil
 import time
 import urllib.request
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 
-from fastapi import Depends, FastAPI, File, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Request, Response, UploadFile
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
                                RedirectResponse, StreamingResponse)
 from fastapi.staticfiles import StaticFiles
@@ -20,11 +21,11 @@ from sqlalchemy.orm import Session
 from .db import (Base, UPLOAD_DIR, engine, ensure_schema, get_db,
                  migrate_statuses, rebuild_reference_tables)
 from .export import build_workbook
-from .models import (Attachment, CustomerClaim, LineItem, Product, PromoRetailer,
-                     Promotion, Retailer, VendorRequest)
+from .models import (Attachment, CustomerClaim, LineItem, ProcessedInvoice,
+                     Product, PromoRetailer, Promotion, Retailer, VendorRequest)
 from .service import build_promo_view
 from .pricing_sync import sync_pricing
-from . import workflow
+from . import bill_export, bill_service, workflow
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 rebuild_reference_tables()   # drop legacy products/retailers so they rebuild country-scoped
@@ -46,8 +47,19 @@ def pct(v):
     return "" if v is None else f"{v * 100:.1f}%"
 
 
+# SQLite stores server_default=now() timestamps in UTC, and the droplet runs UTC
+# too, so a bare timestamp reads a day early for most of the Sydney working day.
+def sydney(dt):
+    if dt is None:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(ZoneInfo("Australia/Sydney")).strftime("%d/%m/%Y")
+
+
 templates.env.filters["money"] = money
 templates.env.filters["pct"] = pct
+templates.env.filters["sydney"] = sydney
 # slug for pill css classes, and the workflow taxonomy, available in all templates
 templates.env.filters["slug"] = lambda s: (s or "").lower().replace(" ", "")
 templates.env.globals.update(workflow.context())
@@ -196,8 +208,24 @@ def _parse_date(v):
     return datetime.strptime(v, "%Y-%m-%d").date() if v else None
 
 
-# ---- dashboard ---------------------------------------------------------------
+# ---- landing page ------------------------------------------------------------
+# The app hosts more than promotions now, so "/" is a tool picker and each tool
+# owns a path below it. Add a tile here when a tool is added.
+TOOLS = [
+    {"href": "/promos", "title": "Vendor Promos",
+     "blurb": "Promotional credit claims — customer claims in, vendor credits out."},
+    {"href": "/vendor-bills", "title": "PDF Bill Upload",
+     "blurb": "Amazon Advertising invoices → NetSuite vendor bill import CSV."},
+]
+
+
 @app.get("/", response_class=HTMLResponse)
+def home(request: Request):
+    return templates.TemplateResponse(request, "home.html", {"tools": TOOLS})
+
+
+# ---- dashboard ---------------------------------------------------------------
+@app.get("/promos", response_class=HTMLResponse)
 def dashboard(request: Request, brand: str = "", status: str = "", country: str = "",
               db: Session = Depends(get_db)):
     q = select(Promotion).order_by(Promotion.created_at.desc())
@@ -339,7 +367,7 @@ def promo_detail(promo_id: int, request: Request, view: str = "internal",
                  db: Session = Depends(get_db)):
     promo = db.get(Promotion, promo_id)
     if not promo:
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse("/promos", status_code=303)
     pv = build_promo_view(promo)
     retailers = db.scalars(select(Retailer).where(Retailer.country == promo.country)
                            .order_by(Retailer.name)).all()
@@ -450,7 +478,7 @@ async def edit_line(line_id: int, request: Request, db: Session = Depends(get_db
     form = await request.form()
     line = db.get(LineItem, line_id)
     if not line:
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse("/promos", status_code=303)
     line.product_code = form.get("product_code", "").strip()
     line.description = form.get("description", "").strip()
     line.rrp_inc = _parse_float(form.get("rrp_inc"))
@@ -569,7 +597,7 @@ async def upload_attachment(pr_id: int, file: UploadFile = File(...),
 def download_attachment(att_id: int, db: Session = Depends(get_db)):
     att = db.get(Attachment, att_id)
     if not att:
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse("/promos", status_code=303)
     path = os.path.join(UPLOAD_DIR, att.stored_name)
     if not os.path.exists(path):
         return RedirectResponse(f"/promo/{att.promo_retailer.promo_id}", status_code=303)
@@ -581,7 +609,7 @@ def download_attachment(att_id: int, db: Session = Depends(get_db)):
 def delete_attachment(att_id: int, db: Session = Depends(get_db)):
     att = db.get(Attachment, att_id)
     if not att:
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse("/promos", status_code=303)
     promo_id = att.promo_retailer.promo_id
     path = os.path.join(UPLOAD_DIR, att.stored_name)
     if os.path.exists(path):
@@ -628,7 +656,7 @@ async def update_details(promo_id: int, request: Request, db: Session = Depends(
     form = await request.form()
     promo = db.get(Promotion, promo_id)
     if not promo:
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse("/promos", status_code=303)
     promo.name = form.get("name", "").strip()
     promo.claim_number = form.get("claim_number", "").strip()
     promo.brand = form.get("brand", "").strip()
@@ -660,7 +688,7 @@ def delete_promo(promo_id: int, db: Session = Depends(get_db)):
         _remove_attachment_files(promo.retailers)
         db.delete(promo)
         db.commit()
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse("/promos", status_code=303)
 
 
 # ---- excel export ------------------------------------------------------------
@@ -668,7 +696,7 @@ def delete_promo(promo_id: int, db: Session = Depends(get_db)):
 def export_promo(promo_id: int, view: str, db: Session = Depends(get_db)):
     promo = db.get(Promotion, promo_id)
     if not promo:
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse("/promos", status_code=303)
     pv = build_promo_view(promo)
     if view not in ("internal", "sales", "vendor"):
         view = "internal"
@@ -678,3 +706,63 @@ def export_promo(promo_id: int, view: str, db: Session = Depends(get_db)):
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+# ==============================================================================
+# Vendor Bill Importer  —  Amazon Advertising PDFs -> NetSuite import CSV
+# ==============================================================================
+# Nothing here touches the promo tables. The flow is upload -> review -> download,
+# with the download logging each invoice number so the same bill can't quietly be
+# imported twice (NetSuite keys on External ID and would reject it anyway, but a
+# warning here is cheaper than a failed import job).
+
+@app.get("/vendor-bills", response_class=HTMLResponse)
+def vendor_bills(request: Request, db: Session = Depends(get_db)):
+    return templates.TemplateResponse(request, "bills.html", {
+        "run": None, "payload": "", "history": bill_service.history(db)})
+
+
+@app.post("/vendor-bills", response_class=HTMLResponse)
+async def vendor_bills_upload(request: Request, files: list[UploadFile] = File(default=[]),
+                              db: Session = Depends(get_db)):
+    uploads = [(f.filename, await f.read()) for f in files if f and f.filename]
+
+    if not uploads:
+        return templates.TemplateResponse(request, "bills.html", {
+            "run": None, "payload": "", "history": bill_service.history(db),
+            "error": "Choose at least one PDF or a .zip of PDFs."})
+
+    run = bill_service.analyse(uploads, db)
+    payload = ""
+    if run.rows:
+        payload = bill_service.payload_for(run, bill_export.csv_text(run.rows))
+    return templates.TemplateResponse(request, "bills.html", {
+        "run": run, "payload": payload, "history": bill_service.history(db)})
+
+
+@app.post("/vendor-bills/download")
+async def vendor_bills_download(request: Request, db: Session = Depends(get_db)):
+    form = await request.form()
+    try:
+        payload = bill_service.read_payload(form.get("payload", ""))
+    except Exception:
+        return RedirectResponse("/vendor-bills", status_code=303)
+
+    bill_service.record_export(payload, db)
+    numbers = [i["number"] for i in payload.get("invoices", [])]
+    fname = bill_export.filename_for(numbers)
+    return Response(
+        content=payload["csv"],
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+@app.post("/vendor-bills/{invoice_number}/imported")
+def vendor_bill_mark_imported(invoice_number: str, db: Session = Depends(get_db)):
+    """Tick an invoice off once its CSV has actually gone into NetSuite."""
+    row = db.scalar(select(ProcessedInvoice)
+                    .where(ProcessedInvoice.invoice_number == invoice_number))
+    if row:
+        row.imported = not row.imported
+        db.commit()
+    return RedirectResponse("/vendor-bills", status_code=303)

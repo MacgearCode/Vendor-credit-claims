@@ -1,0 +1,9 @@
+{# Shared chrome for the Vendor Promos tool. Sits between base.html (which owns
+   the shell for every tool) and the individual promo pages. #}
+{% extends "base.html" %}
+{% block brandword %}Promotions{% endblock %}
+{% block nav %}
+  <a href="/promos">Dashboard</a>
+  <a href="/help">Help</a>
+  <a class="btn" href="/promo/new">+ New Promotion</a>
+{% endblock %}

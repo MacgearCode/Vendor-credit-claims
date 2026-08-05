@@ -1,5 +1,9 @@
-# Launch the Vendor Credit Claims app on http://127.0.0.1:8000
+# Launch the Vendor Credit Claims app on http://127.0.0.1:8030
 # First run: it auto-creates the DB and seeds reference data if needed.
+#
+# Local dev port is 8030 (was 8000, which collided with 3PL Portal and stopped
+# the two running side by side). The container still serves on 8000 internally —
+# do not change the Docker/Caddy/n8n references.
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
@@ -16,5 +20,5 @@ if (-not (Test-Path "data\app.db")) {
     .\.venv\Scripts\python.exe -m app.seed
 }
 
-Write-Host "Starting app at http://127.0.0.1:8000  (Ctrl+C to stop)"
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
+Write-Host "Starting app at http://127.0.0.1:8030  (Ctrl+C to stop)"
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8030

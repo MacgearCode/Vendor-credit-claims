@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}PDF Bill Upload{% endblock %}
+{% block brandword %}Vendor Bills{% endblock %}
+{% block nav %}
+  <a href="/vendor-bills">Upload</a>
+{% endblock %}
+
+{% block content %}
+<h1 class="home-title">PDF Bill Upload</h1>
+<p class="hint">
+  Amazon Advertising tax invoices → a NetSuite Vendor Bill import CSV. Drop in a
+  day's PDFs or the whole zip; check the figures against the invoices, then
+  download.
+</p>
+
+{% if error %}<p class="banner error">{{ error }}</p>{% endif %}
+
+<form class="uploadbar" method="post" action="/vendor-bills" enctype="multipart/form-data">
+  <input type="file" name="files" accept=".pdf,.zip" multiple required>
+  <button class="btn" type="submit">Read invoices</button>
+</form>
+
+{% if run %}
+  {% if run.failures %}
+  <div class="banner error">
+    <strong>{{ run.failures|length }} file(s) could not be read.</strong>
+    <ul>{% for f in run.failures %}<li>{{ f }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  {% if run.results %}
+  <h2>Review</h2>
+  <table class="grid">
+    <thead>
+      <tr>
+        <th>Invoice</th><th>Date</th>
+        <th class="num">Ex tax</th><th class="num">GST (invoice)</th>
+        <th class="num">GST (NetSuite)</th><th class="num">Bill total</th>
+        <th>Brand split</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in run.results %}
+      <tr{% if r.invoice.warnings or r.already_exported %} class="flagged"{% endif %}>
+        <td>
+          {{ r.invoice.number }}
+          {% if r.already_exported %}
+          <span class="pill warn">exported {{ r.already_exported }}</span>
+          {% endif %}
+        </td>
+        <td>{{ r.invoice.date_ns }}</td>
+        <td class="num">{{ r.invoice.subtotal_ex_tax }}</td>
+        <td class="num">{{ r.invoice.tax_amount }}</td>
+        <td class="num{% if r.netsuite_tax != r.invoice.tax_amount %} differs{% endif %}">
+          {{ r.netsuite_tax }}
+        </td>
+        <td class="num">{{ r.netsuite_total }}</td>
+        <td>
+          {% for brand, amount in r.split %}
+          <span class="chip">{{ brand }} {{ amount }}</span>
+          {% endfor %}
+        </td>
+      </tr>
+      {% if r.invoice.warnings %}
+      <tr class="warnrow">
+        <td colspan="7">
+          {% for w in r.invoice.warnings %}
+          <div class="warnline">{{ w }}</div>
+          {% endfor %}
+        </td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr class="totrow">
+        <td colspan="5">{{ run.results|length }} invoice(s), {{ run.rows|length }} line(s)</td>
+        <td class="num">{{ run.grand_total }}</td>
+        <td>total charged, per the invoices</td>
+      </tr>
+    </tfoot>
+  </table>
+
+  {% if run.duplicate_count %}
+  <p class="banner error">
+    {{ run.duplicate_count }} invoice(s) have already been exported. NetSuite keys
+    the import on External ID, so re-importing one will be rejected as a duplicate.
+    Remove those PDFs and read the batch again unless you are deliberately
+    replacing a deleted bill.
+  </p>
+  {% endif %}
+
+  {% if run.warning_count %}
+  <p class="banner warn">
+    {{ run.warning_count }} warning(s) above. A GST difference of a cent is
+    expected — Amazon rounds once on the invoice total, NetSuite rounds per line.
+    Anything else should be understood before you import.
+  </p>
+  {% endif %}
+
+  <form method="post" action="/vendor-bills/download" class="downloadbar">
+    <input type="hidden" name="payload" value="{{ payload }}">
+    <button class="btn" type="submit">Download NetSuite CSV</button>
+    <span class="hint">Downloading records these invoices in the log below.</span>
+  </form>
+  {% else %}
+  <p class="hint">No invoices were read from that upload.</p>
+  {% endif %}
+{% endif %}
+
+<h2>Already exported</h2>
+{% if history %}
+<table class="grid">
+  <thead>
+    <tr>
+      <th>Invoice</th><th>Date</th><th>Period</th>
+      <th class="num">Ex tax</th><th class="num">GST</th><th class="num">Total</th>
+      <th>Exported</th><th>In NetSuite</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for h in history %}
+    <tr>
+      <td>{{ h.invoice_number }}</td>
+      <td>{{ h.invoice_date }}</td>
+      <td>{{ h.period_label }}</td>
+      <td class="num">{{ h.subtotal_ex_tax|money }}</td>
+      <td class="num">{{ h.tax_amount|money }}</td>
+      <td class="num">{{ h.total_inc_tax|money }}</td>
+      <td>{{ h.exported_at|sydney }}</td>
+      <td>
+        <form method="post" action="/vendor-bills/{{ h.invoice_number }}/imported">
+          <button class="link" type="submit">
+            {% if h.imported %}✓ imported{% else %}mark imported{% endif %}
+          </button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="hint">Nothing exported yet.</p>
+{% endif %}
+{% endblock %}

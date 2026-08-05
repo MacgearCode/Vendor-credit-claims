@@ -1,6 +1,6 @@
-# Deploying Vendor Credit Claims — shared username/password (no SSO)
+# Deploying the Macgear internal tools site — shared username/password (no SSO)
 
-End state: `https://claims.yourcompany.com` → Caddy (HTTPS) → the app, which shows its own
+End state: `https://apps.macgeargroup.com` → Caddy (HTTPS) → the app, which shows its own
 styled **/login** page and checks a shared username/password. Anyone you give the shared
 credentials to can get in. n8n keeps running untouched. Data (SQLite DB + uploaded files)
 lives in `data/` on the droplet.
@@ -23,12 +23,12 @@ In your DNS provider add an **A record**:
 
 | Type | Name      | Value (points to)   |
 |------|-----------|---------------------|
-| A    | `claims`  | `170.64.200.224`    |
+| A    | `apps`    | `170.64.200.224`    |
 
-(Full host becomes `claims.yourcompany.com`.) Give it a few minutes, then verify:
+(Full host becomes `apps.macgeargroup.com`.) Give it a few minutes, then verify:
 
 ```bash
-ping claims.yourcompany.com      # should show 170.64.200.224
+ping apps.macgeargroup.com      # should show 170.64.200.224
 ```
 
 Caddy can't get an HTTPS certificate until this resolves to the droplet.
@@ -111,7 +111,7 @@ Edit the Caddyfile from step 3 and append (see `Caddyfile.basic.snippet`) — no
 **no `basic_auth` block**, the app handles login itself:
 
 ```
-claims.yourcompany.com {
+apps.macgeargroup.com {
     reverse_proxy claims:8000
 }
 ```
@@ -129,9 +129,14 @@ Caddy fetches a Let's Encrypt certificate for the subdomain automatically.
 
 ## 7. Test
 
-Open `https://claims.yourcompany.com` → the app's **/login** page appears → enter the
-`APP_USERNAME` / `APP_PASSWORD` from `.env` → you land on the dashboard. "Sign out" is in
-the top nav. Share that username/password with your testers.
+Open `https://apps.macgeargroup.com` → the app's **/login** page appears → enter the
+`APP_USERNAME` / `APP_PASSWORD` from `.env` → you land on the **tool picker**. From there:
+
+- **Vendor Promos** → `/promos`, the promotions dashboard.
+- **PDF Bill Upload** → `/vendor-bills`. Upload one of last month's Amazon Advertising
+  PDFs and check the review table matches the invoice before telling accounts it's live.
+
+"Sign out" is in the top nav. Share the username/password with whoever needs it.
 
 ---
 
@@ -174,6 +179,43 @@ data is upserted).
   the Caddyfile — remove it (see the migration note below) and reload Caddy.
 - **Everyone got logged out:** `APP_SECRET` changed (or wasn't set, so it defaults per
   build). Set a fixed `APP_SECRET` in `.env` and recreate the container.
+
+---
+
+## Renaming the subdomain (promos → apps, done 2026-08-05)
+
+The app outgrew `promos.macgeargroup.com` when it gained a second tool. Steps, in
+this order — the redirect can't be added until the new name has a certificate:
+
+1. **DNS:** add an **A record** `apps` → `170.64.200.224`. Leave the `promos`
+   record in place; it's what the redirect answers on.
+   ```bash
+   dig +short apps.macgeargroup.com     # must return 170.64.200.224 before step 3
+   ```
+2. **Deploy the new code** (the two-tool version) so the site being pointed at is
+   the one people are meant to land on:
+   ```bash
+   cd /opt/vendor-credit-claims && git pull
+   cd deploy && docker compose -f docker-compose.basic.yml up -d --build
+   ```
+3. **Caddy:** replace the old `promos.macgeargroup.com { reverse_proxy claims:8000 }`
+   block with **both** blocks from `Caddyfile.basic.snippet` — the new site and the
+   redirect — then reload:
+   ```bash
+   docker exec $CADDY caddy reload --config /etc/caddy/Caddyfile
+   ```
+4. **Verify both:**
+   ```bash
+   curl -sI https://apps.macgeargroup.com/login | head -1        # 200
+   curl -sI https://promos.macgeargroup.com/promos | head -2     # 301 -> apps...
+   ```
+
+Nothing else needs touching. The docker service is still `claims`, so **n8n's
+pricing sync keeps working unchanged** — it posts to `http://claims:8000` on the
+shared docker network and never resolves the public hostname.
+
+Tell sales and finance the new URL, but the old one keeps working: the redirect
+preserves the path, so bookmarks to a specific promo still land correctly.
 
 ---
 

@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "promo_base.html" %}
 {% block content %}
 <div class="head-row">
   <h1>Promotions</h1>
@@ -40,7 +40,7 @@
   </div>
 </section>
 
-<form method="get" action="/" class="filterbar">
+<form method="get" action="/promos" class="filterbar">
   <label>Country
     <select name="country">
       <option value="">All countries</option>
@@ -60,12 +60,12 @@
     </select>
   </label>
   <button class="btn small">Filter</button>
-  {% if sel_brand or sel_status or sel_country %}<a href="/" class="clear">clear</a>{% endif %}
+  {% if sel_brand or sel_status or sel_country %}<a href="/promos" class="clear">clear</a>{% endif %}
   <span class="filter-count">{{ rows|length }} shown</span>
 </form>
 
 {% if not rows %}
-  <p class="hint">No promotions match the filter. <a href="/">Clear filter</a></p>
+  <p class="hint">No promotions match the filter. <a href="/promos">Clear filter</a></p>
 {% else %}
 <table class="grid">
   <thead>

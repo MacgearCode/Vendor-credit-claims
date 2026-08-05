@@ -2,8 +2,8 @@
 # then reload Caddy. Caddy will obtain a Let's Encrypt cert for the subdomain
 # automatically once DNS points at the droplet.
 #
-# Replace claims.yourcompany.com with your real subdomain.
+# The real hostname is apps.macgeargroup.com (was promos. until 2026-08-05).
 
-claims.yourcompany.com {
+apps.macgeargroup.com {
     reverse_proxy oauth2-proxy:4180
 }
