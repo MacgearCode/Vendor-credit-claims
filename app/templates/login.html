@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sign in · MacGear Credit Claims</title>
+  <title>Sign in · MacGear Internal Tools and Apps</title>
   <script>
     // apply saved theme before first paint to avoid a flash of the light theme
     (function(){try{if(localStorage.getItem('theme')==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();
@@ -14,7 +14,7 @@
   <main class="login-wrap">
     <form method="post" action="/login" class="card login-card" autocomplete="on">
       <img class="login-logo" src="/static/macgear-logo.png?v={{ asset_ver }}" alt="MacGear">
-      <h1>Promotions</h1>
+      <h1>Internal Tools and Apps</h1>
       <p class="hint">Sign in to continue.</p>
       {% if error %}<div class="banner error">{{ error }}</div>{% endif %}
       <label>Username

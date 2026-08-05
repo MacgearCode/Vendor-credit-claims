@@ -93,7 +93,8 @@ button.link.danger,.danger{color:var(--danger)}
 .login-card{display:flex;flex-direction:column;gap:.2rem;padding:1.8rem}
 .login-card .login-logo{height:44px;width:auto;max-width:100%;align-self:flex-start;
   display:block;margin-bottom:.5rem}
-.login-card h1{margin:0 0 .1rem}
+/* sized to keep "Internal Tools and Apps" on one line in the 380px card */
+.login-card h1{margin:0 0 .1rem;font-size:1.5rem;line-height:1.2}
 .login-card label{display:flex;flex-direction:column;gap:.25rem;margin:.6rem 0 0;font-size:.85rem;color:var(--muted)}
 .login-card input{font-size:1rem}
 .login-card .btn{margin-top:1.1rem}
