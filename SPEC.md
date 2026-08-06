@@ -76,8 +76,19 @@ Totals: `Brand/Supplier claim AUD = Σ supplierClaimAmt`; `MacGear claim AUD = �
 - Customer claim: Not Received → Received → Verified → Credited (+ amount, date, check value)
 - Vendor request: Not Sent → Sent → Approved → Credited (+ amount AUD/USD, date)
 
-## Open questions
-- Source for the product master (Master Price Level / Query) — manual import, or NetSuite?
-- Multi-user / auth needed, or single-user internal tool?
-- Hosting: local, or alongside the self-hosted n8n box?
-- Migrate existing in-flight promos from Monday.com, or start fresh?
+## Open questions — resolved
+
+This was the pre-build spec; these were all settled during implementation and are
+recorded here so the file isn't read as still-open.
+
+- **Product master source** — NetSuite. Saved searches `customsearch1084` (AU) /
+  `customsearch1413` (NZ) → RESTlet → n8n → `POST /admin/sync-pricing`, nightly.
+  The Excel template is bootstrap-only now. See `netsuite/PRICING_SYNC.md`.
+- **Multi-user / auth** — multi-user. Per-user accounts with per-tool access,
+  managed at `/admin/users`; roles admin and user. See `CLAUDE.md`.
+- **Hosting** — alongside n8n, on the DigitalOcean droplet behind its Caddy, at
+  `https://apps.macgeargroup.com`. See `deploy/DEPLOY-BASIC.md`.
+- **Monday.com migration** — started fresh; no migration was done.
+
+Still open: whether to move from in-app accounts to M365 Entra SSO
+(`deploy/DEPLOY.md` has the runbook ready).

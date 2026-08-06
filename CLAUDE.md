@@ -6,7 +6,7 @@ page of tiles; each tool owns a path below it.
 Live at **https://apps.macgeargroup.com**. It was `promos.macgeargroup.com` until
 2026-08-05, when the second tool made a promos-specific name wrong; that host now
 301s to the new one, path preserved, and the redirect should stay. The folder name
-and the GitHub repo (`Aaron-Steel/Vendor-credit-claims`) still say claims/promos —
+and the GitHub repo (`MacgearCode/Vendor-credit-claims`) still say claims/promos —
 renaming those would break the droplet's clone path for no real gain.
 
 | Path | Tool | Audience |
@@ -87,8 +87,14 @@ Vendor Promos: `calc.py`, `service.py`, `export.py`, `workflow.py`,
 Vendor Bill Importer: `bill_calc.py`, `bill_pdf.py`, `bill_export.py`,
 `bill_service.py`, template `bills.html`.
 
+Auth and admin templates: `login.html`, `set_password.html`, `denied.html`,
+`admin_users.html`, `admin_user_form.html`. The first two are standalone pages
+(no `base.html`) because they render before there is a session to build a nav from.
+
 Promo pages extend `promo_base.html` (which supplies the promo nav), not
-`base.html` directly.
+`base.html` directly. Everything else extends `base.html` and fills
+`{% block nav %}` — don't add a "Users" link there, `base.html` already does it
+for admins.
 
 ## Vendor Bill Importer — the parts worth knowing
 

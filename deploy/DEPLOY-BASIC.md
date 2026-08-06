@@ -1,16 +1,20 @@
-# Deploying the Macgear internal tools site — shared username/password (no SSO)
+# Deploying the Macgear internal tools site (no SSO)
 
 End state: `https://apps.macgeargroup.com` → Caddy (HTTPS) → the app, which shows its own
-styled **/login** page and checks a shared username/password. Anyone you give the shared
-credentials to can get in. n8n keeps running untouched. Data (SQLite DB + uploaded files)
+styled **/login** page. n8n keeps running untouched. Data (SQLite DB + uploaded files)
 lives in `data/` on the droplet.
 
-> **Already running the older basic-auth version?** See "Migrating from Caddy basic_auth"
-> at the bottom — it's a 3-line change (env vars in, `basic_auth` block out).
+**Sign-in is per user.** Accounts live in the app's `users` table and are managed at
+`/admin/users` by any admin; each person has their own email and password, and each is
+granted the tools they need. The old shared `APP_USERNAME` / `APP_PASSWORD` still works
+alongside them and signs in as an admin — the migration path and the break-glass way back
+in. See "Moving off the shared login" below.
 
-> This is the quick "let a couple of people test it" path. When you're ready for proper
-> per-person Microsoft logins, switch to `DEPLOY.md` (the Entra SSO version) — it reuses
-> the same app container.
+> **Already running the older Caddy `basic_auth` version?** See "Migrating from Caddy
+> basic_auth" at the bottom — it's a 3-line change (env vars in, `basic_auth` block out).
+
+> Per-person Microsoft logins are still an option for later: `DEPLOY.md` (the Entra SSO
+> version) reuses the same app container and would sit in front of this.
 
 Do the steps in order. You'll collect: a subdomain, the droplet IP, Caddy's docker
 network name, and the Caddyfile path inside the Caddy container.
@@ -41,7 +45,7 @@ SSH in (`ssh root@170.64.200.224`), then clone from GitHub:
 
 ```bash
 mkdir -p /opt && cd /opt
-git clone https://github.com/Aaron-Steel/Vendor-credit-claims.git vendor-credit-claims
+git clone https://github.com/MacgearCode/Vendor-credit-claims.git vendor-credit-claims
 cd vendor-credit-claims
 ```
 
@@ -55,15 +59,23 @@ token as the password. Or make a deploy key — but a one-off token paste is fin
 The app container must join the same docker network Caddy is on so Caddy can reach it.
 
 ```bash
-docker ps                                      # find the caddy container name
-CADDY=$(docker ps --filter name=caddy -q)      # grab its id
-docker inspect $CADDY -f '{{json .NetworkSettings.Networks}}'   # network name(s)
-docker inspect $CADDY -f '{{json .Mounts}}'                     # where the Caddyfile lives
+docker ps --format '{{.ID}}  {{.Names}}  {{.Image}}' | grep -i caddy
+CADDY=$(docker ps --filter ancestor=caddy -q | head -1)
+docker inspect $CADDY -f '{{.Name}} -> {{.Config.Image}}'        # sanity-check: ONE container
+docker inspect $CADDY -f '{{json .NetworkSettings.Networks}}'    # network name(s)
+docker inspect $CADDY -f '{{json .Mounts}}'                      # where the Caddyfile lives
 ```
 
-- Note the **network name** (commonly `root_default`) — goes in `.env` as `CADDY_NETWORK`.
-- Note the **Caddyfile path** on the host (the `Source` of the mount whose `Destination`
-  is something like `/etc/caddy/Caddyfile`) — you'll edit that file in step 6.
+Filter on **`ancestor=caddy`** (the image), not `name=caddy`. The n8n compose project is
+called `n8n-docker-caddy`, so a name filter matches the n8n container too, `$CADDY` ends
+up holding two ids, and every `docker exec $CADDY …` below fails.
+
+On this droplet the answers are:
+
+- Caddy container: `n8n-docker-caddy-caddy-1`
+- Network: `n8n-docker-caddy_default` — goes in `.env` as `CADDY_NETWORK`
+- Caddyfile on the host: `/opt/n8n-docker-caddy/caddy_config/Caddyfile`, mounted at
+  `/etc/caddy/Caddyfile` inside the container — that's the path you edit in step 6.
 
 ---
 
@@ -72,7 +84,8 @@ docker inspect $CADDY -f '{{json .Mounts}}'                     # where the Cadd
 ```bash
 cd /opt/vendor-credit-claims/deploy
 cp .env.basic.example .env
-nano .env            # set CADDY_NETWORK, APP_USERNAME, APP_PASSWORD, APP_SECRET (see step 5)
+nano .env            # CADDY_NETWORK, APP_USERNAME, APP_PASSWORD, APP_SECRET,
+                     # PUBLIC_BASE_URL — see step 5
 
 docker compose -f docker-compose.basic.yml up -d --build
 docker compose -f docker-compose.basic.yml logs -f    # watch it start; Ctrl-C to stop watching
@@ -83,19 +96,25 @@ database, and starts serving on port 8000 inside the network (not exposed to the
 
 ---
 
-## 5. Set the shared login
+## 5. Set the auth environment
 
-Auth lives in the app now — no bcrypt hashing, no Caddy directive. In `deploy/.env` set:
+Auth lives in the app — no bcrypt hashing, no Caddy directive. In `deploy/.env` set:
 
 ```
-APP_USERNAME=macgear                  # what testers type
+APP_USERNAME=macgear                  # the shared fallback login
 APP_PASSWORD=ChooseAStrongSharedPassword
 APP_SECRET=<paste output of: openssl rand -hex 32>
+PUBLIC_BASE_URL=https://apps.macgeargroup.com
 ```
 
 - `APP_SECRET` signs the login cookie. Use a long random string and keep it stable —
   changing it just signs everyone out (no data impact).
-- If `APP_PASSWORD` is left blank the app **disables** auth — only do that for local dev.
+- `PUBLIC_BASE_URL` is what set-password links are built from. Leave it out and the app
+  falls back to the request's own base URL, which behind Caddy is the container's internal
+  address — links nobody outside the docker network can open.
+- **`APP_PASSWORD` blank *and* no accounts yet = auth disabled entirely.** That is the
+  local-dev shortcut and must never be a deployment's state. Once real accounts exist you
+  can blank it safely; see "Moving off the shared login".
 
 After editing `.env`, apply it:
 
@@ -136,7 +155,10 @@ Open `https://apps.macgeargroup.com` → the app's **/login** page appears → e
 - **PDF Bill Upload** → `/vendor-bills`. Upload one of last month's Amazon Advertising
   PDFs and check the review table matches the invoice before telling accounts it's live.
 
-"Sign out" is in the top nav. Share the username/password with whoever needs it.
+"Sign out" is in the top nav.
+
+Don't hand the shared credentials out — go straight to "Moving off the shared login"
+below and give each person their own account instead.
 
 ---
 
@@ -148,9 +170,18 @@ cd /opt/vendor-credit-claims && git pull
 cd deploy && docker compose -f docker-compose.basic.yml up -d --build
 ```
 
-**Change the shared password:** edit `APP_USERNAME` / `APP_PASSWORD` in `deploy/.env`, then
-`docker compose -f docker-compose.basic.yml up -d`. No Caddy change, no rebuild needed.
-(Existing sessions stay valid until they expire or you also rotate `APP_SECRET`.)
+**Add or remove a person, or change what they can reach:** `/admin/users` in the app.
+No deploy, no restart, no env change.
+
+**Someone forgot their password:** open their account at `/admin/users`, hit
+*Generate set-password link*, send it to them. It's single use and lasts 24 hours,
+and it kills any earlier link for that account. You never see their password.
+
+**Change the shared fallback password:** edit `APP_USERNAME` / `APP_PASSWORD` in
+`deploy/.env`, then `docker compose -f docker-compose.basic.yml up -d`. No Caddy change,
+no rebuild. (Existing sessions stay valid until they expire or you rotate `APP_SECRET`.)
+
+**Rotate `APP_SECRET`:** same procedure. Everyone is signed out; no data impact.
 
 **Back up the data** (DB + uploaded files) — the important one:
 ```bash
@@ -172,13 +203,28 @@ data is upserted).
   in `.env` matches step 3, and `docker compose -f docker-compose.basic.yml ps` shows the
   `claims` container up.
 - **No HTTPS cert:** DNS isn't pointing at the droplet yet, or ports 80/443 aren't open.
-- **/login rejects the password:** check `APP_USERNAME` / `APP_PASSWORD` in `deploy/.env`,
-  then `docker compose -f docker-compose.basic.yml up -d` to reload them (env changes need
-  the container recreated).
+- **/login rejects the shared password:** check `APP_USERNAME` / `APP_PASSWORD` in
+  `deploy/.env`, then `docker compose -f docker-compose.basic.yml up -d` to reload them
+  (env changes need the container recreated).
+- **/login rejects a real account:** the account may be inactive, or have no password set
+  yet — `/admin/users` shows "no password yet" against it. Generate a fresh link.
+  The error message is deliberately the same either way, so it never reveals whether an
+  email has an account.
+- **A set-password link 404s or points at `claims:8000`:** `PUBLIC_BASE_URL` isn't set.
+  Add it to `deploy/.env`, recreate the container, then generate a *new* link — the old
+  one has the wrong host baked in.
+- **"Link expired":** the link was already used, is over 24 hours old, or a newer link was
+  generated for that account. Generate another.
+- **No sign-in page at all:** `APP_PASSWORD` is blank *and* the `users` table is empty, so
+  the app has disabled auth. Set one or create an account immediately.
 - **Browser still pops a basic-auth box:** you've still got the old `basic_auth` block in
   the Caddyfile — remove it (see the migration note below) and reload Caddy.
 - **Everyone got logged out:** `APP_SECRET` changed (or wasn't set, so it defaults per
   build). Set a fixed `APP_SECRET` in `.env` and recreate the container.
+- **Locked out entirely:** put `APP_PASSWORD` back in `deploy/.env`, recreate the
+  container, sign in with the shared credentials and fix the accounts. The app won't let
+  you demote, disable or delete the last active admin, so this needs the row to have been
+  removed outside the app.
 
 ---
 

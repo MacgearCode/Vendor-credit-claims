@@ -100,9 +100,13 @@ Two nodes total:
    the RESTlet, and POSTs each to `http://claims:8000/admin/sync-pricing`. The node returns
    one summary per country, e.g. `{"country":"AU","received":1760,"inserted":3,"updated":1757,"pruned":2}`.
 
-   `http://claims:8000` works because n8n and the app share the Docker network (no Caddy, no
-   basic-auth). If your n8n runs elsewhere, set `APP_URL` to
-   `https://promos.macgeargroup.com/admin/sync-pricing` and add the site's basic-auth header.
+   `http://claims:8000` works because n8n and the app share the Docker network, bypassing
+   Caddy and the app's login entirely — `/admin/sync-pricing` authenticates on the
+   `X-Sync-Token` header alone, not on a user session. That is why renaming the public
+   hostname (promos → apps, 2026-08-05) and adding per-user accounts both left this sync
+   untouched. If your n8n ever runs elsewhere, set `APP_URL` to
+   `https://apps.macgeargroup.com/admin/sync-pricing`; the token header still carries it,
+   no user credentials needed.
 
 > Prefer not to store secrets in the node? Set them as environment variables on the n8n
 > container and replace each constant with e.g. `$env.NETSUITE_CONSUMER_KEY`.
