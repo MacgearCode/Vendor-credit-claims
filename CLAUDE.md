@@ -25,6 +25,7 @@ warehouse host in the droplet `.env` broke the warm-up — compare the host, not
 | Path | What | Audience |
 |---|---|---|
 | `/` | Home — internal sales (sell-in $ tick only), sell-through snapshot, report + tool cards | everyone |
+| `/reports/sales` | Sales Explorer — Macgear revenue, any FY period vs LY, build-your-own matrix, Excel | staff with Sell-in $ |
 | `/reports/items` | Item Explorer — search + leaderboards; `/reports/items/i/<code>` = one item | staff, vendors |
 | `/reports/table` | Sell-Through Table — the weekly workbook live; `/reports/table/export.xlsx` | staff, vendors |
 | `/reports/sell-through` | Sell-Through Dashboard (from `Sell Through/prototype/`) | staff, vendors |
@@ -172,6 +173,33 @@ sell-through snapshot (last week's units, WoW, top 5) in their scope.
   change" chip is the newest NetSuite Last Modified in the data, read as
   **Brisbane** time (scheduled exports) and shown in Sydney time.
 
+**Sales Explorer** (`app/sales_explorer.py`, `templates/sales_explorer.html`, built
+2026-10-15 to carry the core of the Power BI sales report). Revenue = home-page
+definition; **financial-year periods** (Apr–Mar): quick (today / yesterday / this week /
+MTD / QTD / YTD), full year, Q1–Q4, months; FY selector FY23→; filters account manager
+(invoice rep), brand, retailer (customer group); every figure vs the **same dates LY**
+(to-date vs to-date while a period runs). Matrix: up to 3 row levels from Retailer,
+Account (store), Brand, Account manager, Item, Month — expandable tree, sortable,
+share bars, GP only with `margin`; Excel = the matrix flattened. Needs the `sales`
+area AND `sell_in_value` (route-checked; not listed in menus without it); never vendors.
+- **Speed:** per-click warehouse queries took ~6 s, so each region's sales live in memory
+  as a sorted columnar summary — monthly (month × customer × brand × rep, all history,
+  AU ~190k rows) + daily (this & last month and the same span LY). A range is answered
+  from whole months plus days at the partial edges (`_parts`, bisect). Slices 0.02–0.06 s;
+  build ~15–19 s, warmed at startup, monthly TTL 30 min, daily 5 min. **Item** isn't in
+  the summary (~1M rows): Item matrices query the warehouse grouped by only the needed
+  ids (0.2–3.3 s, cached).
+- ⚠️ **Never filter `reporting.fact_sales_line` on `brand_id` in SQL** — the planner
+  takes a path that ran past 80 s (0.13 s without it). Brand is grouped on and filtered
+  in Python; rep_id / customer_id filters are fine in SQL. All warehouse connections now
+  carry `statement_timeout` 60 s (`warehouse.STATEMENT_TIMEOUT_MS`).
+- Growth % only off a positive LY (a net-negative LY day from credits made "+166%");
+  very large growth shows as a multiple ("404×").
+- Checked 2026-10-15: NZ FY27 YTD, FY26 and FY27 Q2 — every brand = independent SQL
+  to $1; item-path totals = summary totals (rep / retailer / brand filters).
+- Targets: columns/cards say "not loaded" until `reporting.sales_target` exists (see
+  home page note).
+
 **Receipt strip** (`app/receipts.py`, `templates/_st_status.html`, 2026-10-15) —
 "who have we received" for sell-through, a one-line collapsible bar at the top
 of home, Item Explorer (landing + item), the table and the dashboard: "w/e 11 Oct
@@ -307,6 +335,7 @@ Shared shell:
 | `app/items.py` | Item Explorer data: search, leaderboard, one item (scoped, capability-gated) |
 | `app/st_table.py` | Sell-Through Table data + Excel export |
 | `app/notify.py` | Invite / password-reset email via the shared n8n webhook |
+| `app/sales_explorer.py` | Sales Explorer: in-memory revenue summary, FY periods, matrix, Excel |
 | `app/receipts.py` | Which retailers' sell-through is in for the latest week (the strip) |
 | `app/sales.py` | Home page internal sales (FY periods, pace, targets hook) |
 | `app/security.py` | PBKDF2 hashing, cookie signing, set-password tokens |

@@ -39,6 +39,7 @@ class WarehouseUnavailable(RuntimeError):
 # The cluster allows ~22 usable connections and Power BI holds many of them, so
 # the site never opens more than this many at once; extra requests queue briefly.
 MAX_CONNECTIONS = int(os.environ.get("REPORTING_MAX_CONNECTIONS", "4"))
+STATEMENT_TIMEOUT_MS = 60_000
 _slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
 
 
@@ -56,7 +57,10 @@ class _Connection:
         if not _slots.acquire(timeout=60):
             raise WarehouseUnavailable("too many warehouse queries at once — try again shortly")
         try:
-            self.conn = psycopg.connect(url, connect_timeout=10)
+            # No query may run longer than this: one pathological plan once held a
+            # connection for minutes. The caller sees WarehouseUnavailable.
+            self.conn = psycopg.connect(url, connect_timeout=10,
+                                        options=f"-c statement_timeout={STATEMENT_TIMEOUT_MS}")
         except psycopg.OperationalError as e:
             _slots.release()
             raise WarehouseUnavailable(str(e).splitlines()[0]) from e
@@ -76,7 +80,10 @@ def connect():
 
 def query(sql: str, params=None) -> list[tuple]:
     with connect() as conn, conn.cursor() as cur:
-        cur.execute(sql, params)
+        try:
+            cur.execute(sql, params)
+        except psycopg.errors.QueryCanceled as e:
+            raise WarehouseUnavailable("the query took too long and was stopped") from e
         return cur.fetchall()
 
 

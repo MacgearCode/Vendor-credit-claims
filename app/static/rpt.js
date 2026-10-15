@@ -106,7 +106,7 @@
       var every = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(plotW / 70))));
       for (var i = 0; i < n; i++) {
         if ((n - 1 - i) % every === 0) {
-          h += '<text x="' + x(i).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="11" fill="' + faint + '">' + esc(wk(labels[i])) + "</text>";
+          h += '<text x="' + x(i).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="11" fill="' + faint + '">' + esc(opts.xLabel ? opts.xLabel(labels[i], i) : wk(labels[i])) + "</text>";
         }
       }
       // Bars side by side; bars sharing a `stack` key stack in one slot.

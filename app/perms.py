@@ -31,10 +31,11 @@ import json
 
 # Area keys. Reports must match the `key` of each entry in main.REPORTS, tools
 # the `key` of each entry in main.TOOLS.
-REPORT_KEYS = ["sell_through", "items", "st_table"]
+REPORT_KEYS = ["sales", "sell_through", "items", "st_table"]
 TOOL_KEYS = ["promos", "vendor_bills"]
 AREA_KEYS = REPORT_KEYS + TOOL_KEYS
-AREA_LABELS = {"sell_through": "Sell-Through Dashboard", "items": "Item Explorer",
+AREA_LABELS = {"sales": "Sales Explorer (needs Sell-in $)",
+               "sell_through": "Sell-Through Dashboard", "items": "Item Explorer",
                "st_table": "Sell-Through Table",
                "promos": "Vendor Promos", "vendor_bills": "PDF Bill Upload"}
 

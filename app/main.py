@@ -31,7 +31,7 @@ from .pricing_sync import sync_pricing
 from .security import (hash_password, hash_token, make_reset_token, sign,
                        unsign, verify_password)
 from . import (bill_export, bill_service, items, notify, perms, receipts, sales,
-               sell_through, st_table, warehouse, workflow)
+               sales_explorer, sell_through, st_table, warehouse, workflow)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 rebuild_reference_tables()   # drop legacy products/retailers so they rebuild country-scoped
@@ -153,6 +153,7 @@ def _user_from_cookie(request: Request):
 # each handler: a tool has a dozen routes and forgetting one is a silent hole.
 # Longest prefix wins, so a new tool nested under an existing one still works.
 _TOOL_PATHS = [
+    ("/reports/sales", "sales"),
     ("/reports/sell-through", "sell_through"),
     ("/reports/items", "items"),
     ("/reports/table", "st_table"),
@@ -478,6 +479,8 @@ def _parse_date(v):
 # Add a tile here when a report or tool is added, its key to perms.REPORT_KEYS /
 # TOOL_KEYS and AREA_LABELS, and its URL prefix to _TOOL_PATHS.
 REPORTS = [
+    {"key": "sales", "href": "/reports/sales", "title": "Sales Explorer", "icon": "$",
+     "blurb": "Macgear revenue by any period, vs last year — build the table however you like."},
     {"key": "items", "href": "/reports/items", "title": "Item Explorer", "icon": "◎",
      "blurb": "Search any product: sell-through, stock and cover by retailer, with trends and insights."},
     {"key": "st_table", "href": "/reports/table", "title": "Sell-Through Table", "icon": "▦",
@@ -503,7 +506,10 @@ def nav_tools(request: Request) -> list[dict]:
 
 
 def nav_reports(request: Request) -> list[dict]:
-    return [r for r in REPORTS if r["key"] in _allowed(request)]
+    # Sales Explorer is all Macgear $: list it only for people who may see them.
+    caps = _caps(request)
+    return [r for r in REPORTS if r["key"] in _allowed(request)
+            and (r["key"] != "sales" or "sell_in_value" in caps)]
 
 
 templates.env.globals["nav_tools"] = nav_tools
@@ -653,6 +659,9 @@ def _warm_reports():
     once used (warehouse.refresh_due)."""
     items._units_by_item()
     sales.summary(sales_today(), True)
+    for region in perms.REGIONS:
+        sales_explorer.cubes(region, sales_today())
+        sales_explorer.options(region, sales_today())
     receipts.status(None, list(perms.REGIONS), sales_today())
     sell_through.for_user(None, list(perms.REGIONS))
     for region in perms.REGIONS:
@@ -856,6 +865,88 @@ def report_table_xlsx(request: Request, region: str = "", grain: str = "retailer
                                   f"week ending {f['week']}"] if x)
     body = st_table.to_xlsx(t, "Macgear Sell-Through", desc)
     name = f"Macgear_Sell_Through_{f['region']}_{f['grain']}_WE{f['week'].replace('-', '')}.xlsx"
+    return Response(body, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+# ---- Sales Explorer ----------------------------------------------------------------
+# Macgear's own revenue: Sales Explorer access AND the sell_in_value capability (the
+# middleware checks the first; these routes check the second). Never vendors.
+def _sx_args(request: Request, region: str, p: str, fy: int, dims: str,
+             brand: str, rep: str, retailer: str):
+    caps = _caps(request)
+    if "sell_in_value" not in caps:
+        return None
+    region, regions = _region(request, region)
+    today = sales_today()
+    fy = fy or (sales.fy_start(today).year + 1)
+    f = {"brand": int(brand) if brand.lstrip("-").isdigit() else None,
+         "rep": int(rep) if rep.lstrip("-").isdigit() else None,
+         "retailer": retailer or None}
+    dl = [d for d in (dims or "retailer").split(",") if d in sales_explorer.DIMS]
+    return {"region": region, "regions": regions, "today": today, "code": p or "ytd",
+            "fy": fy, "dims": dl, "f": f, "margin": "margin" in caps}
+
+
+def _sx_denied(request):
+    return templates.TemplateResponse(request, "denied.html", {
+        "message": "Sales Explorer shows Macgear's sales $ — ask an admin to tick "
+                   "\"Sell-in $\" on your account."}, status_code=403)
+
+
+@app.get("/reports/sales", response_class=HTMLResponse)
+def report_sales(request: Request, region: str = "", p: str = "ytd", fy: int = 0, dims: str = "",
+                 brand: str = "", rep: str = "", retailer: str = ""):
+    a = _sx_args(request, region, p, fy, dims, brand, rep, retailer)
+    if a is None:
+        return _sx_denied(request)
+    try:
+        data = sales_explorer.explore(a["region"], a["code"], a["fy"], a["today"], a["dims"],
+                                      a["f"], a["margin"])
+        opts = sales_explorer.options(a["region"], a["today"])
+    except warehouse.WarehouseUnavailable as e:
+        return templates.TemplateResponse(request, "denied.html",
+                                          {"message": _warehouse_error(e)}, status_code=503)
+    return templates.TemplateResponse(request, "sales_explorer.html", {
+        "data": data, "opts": opts, "a": {k: v for k, v in a.items() if k != "today"},
+        "regions": a["regions"], "dims_all": sales_explorer.DIMS,
+        "fy_months": sales_explorer.FY_MONTHS, "has_targets": False})
+
+
+@app.get("/reports/sales/data")
+def report_sales_data(request: Request, region: str = "", p: str = "ytd", fy: int = 0,
+                      dims: str = "", brand: str = "", rep: str = "", retailer: str = ""):
+    a = _sx_args(request, region, p, fy, dims, brand, rep, retailer)
+    if a is None:
+        return JSONResponse({"error": "no access"}, status_code=403)
+    try:
+        return JSONResponse(sales_explorer.explore(a["region"], a["code"], a["fy"], a["today"],
+                                                   a["dims"], a["f"], a["margin"]))
+    except warehouse.WarehouseUnavailable as e:
+        return JSONResponse({"error": _warehouse_error(e)}, status_code=503)
+
+
+@app.get("/reports/sales/export.xlsx")
+def report_sales_xlsx(request: Request, region: str = "", p: str = "ytd", fy: int = 0,
+                      dims: str = "", brand: str = "", rep: str = "", retailer: str = ""):
+    a = _sx_args(request, region, p, fy, dims, brand, rep, retailer)
+    if a is None:
+        return _sx_denied(request)
+    try:
+        data = sales_explorer.explore(a["region"], a["code"], a["fy"], a["today"], a["dims"],
+                                      a["f"], a["margin"])
+        nm = sales_explorer.names()
+    except warehouse.WarehouseUnavailable as e:
+        return Response(_warehouse_error(e), status_code=503)
+    f = a["f"]
+    desc = " · ".join(x for x in [
+        a["region"], data["period"]["label"], f"{data['period']['from']} to {data['period']['to']}",
+        "vs same dates LY",
+        f"brand {nm['brand'].get(f['brand'], f['brand'])}" if f["brand"] is not None else "",
+        f"account manager {nm['rep'].get(f['rep'], f['rep'])}" if f["rep"] is not None else "",
+        f"retailer {f['retailer']}" if f["retailer"] else ""] if x)
+    body = sales_explorer.to_xlsx(data, "Macgear Sales", desc)
+    name = f"Macgear_Sales_{a['region']}_{data['period']['from']}_{data['period']['to']}.xlsx"
     return Response(body, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
 

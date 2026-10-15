@@ -1,0 +1,364 @@
+{% extends "_rpt_base.html" %}
+{% block title %}Sales Explorer · Macgear Reporting{% endblock %}
+{% block pagename %}Sales Explorer{% endblock %}
+{% block home_href %}/reports/sales{% endblock %}
+{% block head %}
+<style>
+  .sx-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+  .sx-periods{display:flex;flex-direction:column;gap:8px;margin-top:14px}
+  .sx-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .sx-row .r-muted{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;min-width:64px}
+  .sx-pill{border:1px solid var(--r-line-2);background:transparent;color:var(--r-ink-2);border-radius:999px;padding:6px 12px;
+    font-size:13px;font-weight:600;cursor:pointer}
+  .sx-pill:hover{border-color:var(--r-muted);color:var(--r-ink)}
+  .sx-pill[aria-pressed="true"]{background:var(--r-accent);border-color:var(--r-accent);color:#fff}
+  .sx-pill.future{opacity:.35;cursor:not-allowed}
+  .sx-quick{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:16px}
+  .sx-quick button{all:unset;cursor:pointer;display:block}
+  .sx-quick .r-stat{height:100%}
+  .sx-quick .r-stat.on{border-color:var(--r-accent);box-shadow:0 0 0 1px var(--r-accent) inset}
+  .sx-hero{display:grid;grid-template-columns:1.2fr 2fr;gap:16px;margin-top:16px}
+  .sx-big{font-size:clamp(34px,4.6vw,54px);font-weight:800;letter-spacing:-.035em;line-height:1;margin:8px 0}
+  .sx-builder{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .sx-chip{display:inline-flex;align-items:center;gap:6px;background:var(--r-accent-soft);color:var(--r-accent);border-radius:999px;
+    padding:6px 8px 6px 12px;font-size:13px;font-weight:700}
+  .sx-chip button{all:unset;cursor:pointer;width:20px;height:20px;border-radius:50%;text-align:center;line-height:20px;font-size:14px}
+  .sx-chip button:hover{background:var(--r-accent);color:#fff}
+  .sx-arrow{color:var(--r-faint);font-weight:700}
+  .sx-presets{display:flex;gap:6px;flex-wrap:wrap}
+  .sx-presets button{all:unset;cursor:pointer;font-size:12px;color:var(--r-muted);border:1px dashed var(--r-line-2);border-radius:8px;padding:4px 9px}
+  .sx-presets button:hover{color:var(--r-ink);border-color:var(--r-muted)}
+  table.sx-tbl td.l{max-width:420px}
+  .sx-tw{display:inline-flex;align-items:center;gap:6px}
+  .sx-tg{all:unset;cursor:pointer;width:18px;height:18px;border-radius:5px;text-align:center;line-height:18px;font-size:11px;
+    background:var(--r-card-2);color:var(--r-muted);flex:none}
+  .sx-tg:hover{color:var(--r-ink)}
+  .sx-tbl tr.lv0 td{font-weight:600}
+  .sx-tbl tr.lv1 td.l{padding-left:34px}
+  .sx-tbl tr.lv2 td.l{padding-left:58px}
+  .sx-tbl tr.lv1 td, .sx-tbl tr.lv2 td{font-size:12.5px}
+  .sx-tbl tr.tot td{font-weight:800;background:var(--r-card-2)}
+  .sx-nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:360px;display:inline-block;vertical-align:bottom}
+  .sx-loading{opacity:.5;transition:opacity .15s}
+  @media (max-width:900px){.sx-hero{grid-template-columns:1fr}.sx-quick{grid-template-columns:1fr 1fr}}
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="r-card">
+  <div class="sx-bar">
+    <div><p class="r-eyebrow">Macgear revenue · financial year (April–March)</p><h2 style="margin:0;font-size:22px">Sales Explorer</h2></div>
+    <div class="r-filters">
+      {% if regions|length > 1 %}
+      <div class="r-seg" id="regionSeg" role="group" aria-label="Region">
+        {% for r in regions %}<button type="button" data-region="{{ r }}" aria-pressed="{{ 'true' if r == a.region else 'false' }}">{{ r }}</button>{% endfor %}
+      </div>
+      {% endif %}
+      <select class="r-select" id="fySel" aria-label="Financial year">
+        {% for y in opts.fys|reverse %}<option value="{{ y }}" {{ 'selected' if y == a.fy }}>FY{{ '%02d'|format(y % 100) }}</option>{% endfor %}
+      </select>
+      <a class="r-btn ghost" id="xlsx" href="#">⬇ Excel</a>
+    </div>
+  </div>
+
+  <div class="sx-periods" id="periods">
+    <div class="sx-row"><span class="r-muted">Quick</span>
+      {% for c, l in [('today','Today'),('yesterday','Yesterday'),('week','This week'),('mtd','Month to date'),('qtd','Quarter to date'),('ytd','Year to date')] %}
+      <button type="button" class="sx-pill" data-p="{{ c }}">{{ l }}</button>{% endfor %}
+    </div>
+    <div class="sx-row"><span class="r-muted">Quarter</span>
+      <button type="button" class="sx-pill" data-p="fy">Full year</button>
+      {% for q in range(1, 5) %}<button type="button" class="sx-pill" data-p="q{{ q }}">Q{{ q }}</button>{% endfor %}
+    </div>
+    <div class="sx-row"><span class="r-muted">Month</span>
+      {% for m in fy_months %}<button type="button" class="sx-pill" data-p="m{{ loop.index }}">{{ m }}</button>{% endfor %}
+    </div>
+  </div>
+
+  <div class="r-filters" style="margin-top:14px">
+    <label class="r-muted" style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;display:flex;flex-direction:column;gap:4px">Account manager
+      <select class="r-select" id="repSel"><option value="">All</option>
+        {% for r in opts.reps %}<option value="{{ r.id }}" {{ 'selected' if a.f.rep == r.id }}>{{ r.name }}</option>{% endfor %}</select></label>
+    <label class="r-muted" style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;display:flex;flex-direction:column;gap:4px">Brand
+      <select class="r-select" id="brandSel"><option value="">All</option>
+        {% for b in opts.brands %}<option value="{{ b.id }}" {{ 'selected' if a.f.brand == b.id }}>{{ b.name }}</option>{% endfor %}</select></label>
+    <label class="r-muted" style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;display:flex;flex-direction:column;gap:4px">Retailer
+      <select class="r-select" id="retSel"><option value="">All</option>
+        {% for r in opts.retailers %}<option value="{{ r }}" {{ 'selected' if a.f.retailer == r }}>{{ r }}</option>{% endfor %}</select></label>
+  </div>
+</section>
+
+<div class="sx-quick" id="quick"></div>
+
+<div class="sx-hero" id="hero">
+  <section class="r-card" id="kpiCard"></section>
+  <section class="r-card">
+    <div class="r-card-h"><div><p class="r-eyebrow" id="trendEyebrow">By month</p><h2 id="trendTitle">Revenue</h2></div></div>
+    <div class="r-chart" id="trend" style="height:230px"></div>
+    <div class="r-legend" id="trendLegend"></div>
+  </section>
+</div>
+
+<section class="r-card r-sec">
+  <div class="r-card-h">
+    <div><p class="r-eyebrow">Build your table</p><h2 id="tblTitle">Breakdown</h2></div>
+    <div class="sx-presets" id="presets">
+      <span class="r-muted" style="font-size:12px">Try:</span>
+      <button type="button" data-d="retailer,brand">Retailer › Brand</button>
+      <button type="button" data-d="brand,item">Brand › Item</button>
+      <button type="button" data-d="rep,retailer">Account manager › Retailer</button>
+      <button type="button" data-d="month,brand">Month › Brand</button>
+      <button type="button" data-d="retailer,account">Retailer › Store/account</button>
+    </div>
+  </div>
+  <div class="sx-builder" id="builder"></div>
+  <p class="r-muted" id="tblNote" style="font-size:12.5px;margin:10px 0"></p>
+  <div class="r-tablewrap" id="tblWrap"><table class="r-table sx-tbl" id="tbl"></table></div>
+  <div style="display:flex;gap:10px;margin-top:10px" id="tblActions">
+    <button type="button" class="r-btn ghost" id="expandAll">Expand all</button>
+    <button type="button" class="r-btn ghost" id="collapseAll">Collapse all</button>
+  </div>
+</section>
+
+<p class="r-note">Revenue = Macgear's NetSuite sales (sales account, ex-GST, net of credits; AU → NZ intercompany excluded), each country in its own
+  currency. Periods follow the financial year (April–March). "LY" = the same dates a year earlier; a period still running compares to-date with to-date.
+  Account manager = the sales rep on the invoice. {% if a.margin %}GP uses NetSuite's estimated cost, not posted COGS.{% endif %}
+  {% if not has_targets %}Targets aren't loaded yet — the Target columns appear once they are.{% endif %}</p>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  "use strict";
+  var D = {{ data|tojson }};
+  var DIMS = {{ dims_all|tojson }};
+  var S = {region: {{ a.region|tojson }}, p: {{ a.code|tojson }}, fy: {{ a.fy|tojson }},
+           dims: {{ a.dims|tojson }}, brand: {{ (a.f.brand if a.f.brand is not none else '')|tojson }},
+           rep: {{ (a.f.rep if a.f.rep is not none else '')|tojson }}, retailer: {{ (a.f.retailer or '')|tojson }}};
+  var sort = {key: "v", dir: -1}, open = {}, seq = 0;
+  var col = {acc: RPT.css("--r-accent"), amb: RPT.css("--r-amber"), muted: RPT.css("--r-muted"), pos: RPT.css("--r-pos")};
+
+  function qs() {
+    var o = {region: S.region, p: S.p, fy: S.fy, dims: S.dims.join(",")};
+    if (S.brand !== "") o.brand = S.brand;
+    if (S.rep !== "") o.rep = S.rep;
+    if (S.retailer) o.retailer = S.retailer;
+    return new URLSearchParams(o).toString();
+  }
+  function money(v, full) { return RPT.money(v, D.currency, full); }
+  // Growth off a tiny base ("+40,334%") says nothing — past +500% show it as a multiple.
+  function gtxt(g) {
+    if (g == null) return "—";
+    if (g > 500) return (g / 100 + 1).toFixed(g > 1900 ? 0 : 1) + "×";
+    return RPT.delta(g).txt;
+  }
+  function growth(g) { var d = RPT.delta(g); return '<span class="' + d.cls + '">' + d.arrow + " " + gtxt(g) + "</span>"; }
+
+  // ---- load ----
+  function load() {
+    var my = ++seq;
+    document.body.classList.add("sx-loading");
+    try { history.replaceState(null, "", "?" + qs()); } catch (e) {}
+    document.getElementById("xlsx").href = "/reports/sales/export.xlsx?" + qs();
+    fetch("/reports/sales/data?" + qs(), {credentials: "same-origin"})
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (my !== seq) return;
+        document.body.classList.remove("sx-loading");
+        if (j.error) { alert(j.error); return; }
+        D = j; open = {}; render();
+      }).catch(function () { document.body.classList.remove("sx-loading"); });
+  }
+
+  // ---- controls ----
+  function paintPeriods() {
+    var cur = new Date(), curFy = cur.getMonth() >= 3 ? cur.getFullYear() + 1 : cur.getFullYear();
+    document.querySelectorAll("#periods [data-p]").forEach(function (b) {
+      var p = b.getAttribute("data-p");
+      b.setAttribute("aria-pressed", p === S.p ? "true" : "false");
+      var fut = false;
+      if (/^m\d+$/.test(p)) {
+        var mi = +p.slice(1), mo = (mi + 2) % 12, y = S.fy - 1 + (mo < 3 ? 1 : 0);
+        fut = new Date(y, mo, 1) > cur;
+      } else if (/^q\d$/.test(p)) {
+        var qi = +p.slice(1), qm = [3, 6, 9, 0][qi - 1], qy = S.fy - 1 + (qi === 4 ? 1 : 0);
+        fut = new Date(qy, qm, 1) > cur;
+      }
+      var quick = ["today", "yesterday", "week", "mtd", "qtd", "ytd"].indexOf(p) >= 0;
+      b.classList.toggle("future", fut);
+      b.disabled = fut;
+      if (quick) b.title = S.fy !== curFy ? "Always the current period" : "";
+    });
+  }
+  document.getElementById("periods").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-p]"); if (!b || b.disabled) return;
+    S.p = b.getAttribute("data-p"); paintPeriods(); load();
+  });
+  document.getElementById("fySel").addEventListener("change", function (e) {
+    S.fy = +e.target.value;
+    if (["today", "yesterday", "week", "mtd", "qtd", "ytd"].indexOf(S.p) >= 0) S.p = "fy";
+    paintPeriods(); load();
+  });
+  var rs = document.getElementById("regionSeg");
+  if (rs) rs.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-region]"); if (!b) return;
+    S.region = b.getAttribute("data-region");
+    // brand / rep / retailer lists differ by region: reload the page for fresh lists
+    location.href = "/reports/sales?" + new URLSearchParams({region: S.region, p: S.p, fy: S.fy, dims: S.dims.join(",")});
+  });
+  [["repSel", "rep"], ["brandSel", "brand"], ["retSel", "retailer"]].forEach(function (x) {
+    document.getElementById(x[0]).addEventListener("change", function (e) { S[x[1]] = e.target.value; load(); });
+  });
+
+  // ---- quick cards ----
+  function renderQuick() {
+    document.getElementById("quick").innerHTML = D.quick.map(function (q) {
+      return '<button type="button" data-q="' + q.code + '"><div class="r-stat' + (S.p === q.code ? " on" : "") + '"><div class="lbl">' + q.label +
+        '</div><div class="val">' + money(q.v) + '</div><div class="sub">' + growth(q.growth) + " vs LY (" + money(q.ly) + ")</div></div></button>";
+    }).join("");
+  }
+  document.getElementById("quick").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-q]"); if (!b) return;
+    S.p = b.getAttribute("data-q"); paintPeriods(); load();
+  });
+
+  // ---- KPI + trend ----
+  function renderKpis() {
+    var K = D.kpis, P = D.period;
+    var html = '<p class="r-eyebrow">' + RPT.esc(P.label) + " · " + D.region + "</p>";
+    if (P.future) { document.getElementById("kpiCard").innerHTML = html + '<p class="r-muted">That period hasn\'t started yet.</p>'; return; }
+    html += '<div class="sx-big">' + money(K.v, true) + "</div>" +
+      '<div class="r-meta">' + '<span class="r-chip ' + (K.growth >= 0 ? "pos" : "neg") + '">' + RPT.delta(K.growth).arrow + " " + gtxt(K.growth) + " vs LY</span>" +
+      '<span class="r-chip">LY <b>&nbsp;' + money(K.ly) + "</b></span>" +
+      '<span class="r-chip">' + (K.v - K.ly >= 0 ? "+" : "−") + money(Math.abs(K.v - K.ly)) + "</span></div>" +
+      '<div class="r-stats" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-top:14px">' +
+      stat("Units", RPT.int(K.q), "") +
+      (D.margin ? stat("Est. GP", money(K.gp), K.gp_pct == null ? "—" : K.gp_pct.toFixed(1) + "% margin") : "") +
+      stat("Target", "—", "not loaded yet") + "</div>" +
+      '<p class="r-muted" style="font-size:12px;margin:12px 0 0">' + fmtDate(P.from) + " – " + fmtDate(P.to) + " vs " + fmtDate(P.ly_from) + " – " + fmtDate(P.ly_to) + "</p>";
+    document.getElementById("kpiCard").innerHTML = html;
+  }
+  function stat(l, v, s) { return '<div class="r-stat" style="box-shadow:none;padding:12px 14px"><div class="lbl">' + l + '</div><div class="val" style="font-size:22px">' + v + '</div><div class="sub">' + s + "</div></div>"; }
+  function fmtDate(iso) { return iso ? RPT.wk(iso, true) : ""; }
+
+  function renderTrend() {
+    var T = D.trend;
+    var labels = T.labels.map(function (m, i) { var mo = (i + 3) % 12, y = S.fy - 1 + (mo < 3 ? 1 : 0); return y + "-" + (mo < 9 ? "0" : "") + (mo + 1) + "-01"; });
+    document.getElementById("trendEyebrow").textContent = "By month · " + T.fy + " vs " + T.prev_fy;
+    var series = [{name: T.fy, values: T.cur, color: col.acc, type: "bar"}, {name: T.prev_fy, values: T.prev, color: col.amb, type: "line", dash: true}];
+    RPT.chart(document.getElementById("trend"), {labels: labels, series: series,
+      fmt: function (v) { return money(v, true); }, axis: function (v) { return money(v); },
+      xLabel: function (l, i) { return T.labels[i]; },
+      tipLabel: function (l, i) { return T.labels[i] + " — " + T.fy + " vs " + T.prev_fy; }});
+    document.getElementById("trendLegend").innerHTML = series.map(function (s) { return '<span><i style="background:' + s.color + '"></i>' + s.name + "</span>"; }).join("");
+  }
+
+  // ---- matrix builder ----
+  function renderBuilder() {
+    var el = document.getElementById("builder"), html = '<span class="r-muted" style="font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase">Rows</span>';
+    S.dims.forEach(function (d, i) {
+      if (i) html += '<span class="sx-arrow">›</span>';
+      html += '<span class="sx-chip">' + DIMS[d] + (S.dims.length > 1 ? '<button type="button" data-rm="' + d + '" aria-label="Remove ' + DIMS[d] + '">×</button>' : "") + "</span>";
+    });
+    var rest = Object.keys(DIMS).filter(function (d) { return S.dims.indexOf(d) < 0; });
+    if (S.dims.length < 3 && rest.length) {
+      html += '<select class="r-select" id="addDim" aria-label="Add a level"><option value="">+ add level</option>' +
+        rest.map(function (d) { return '<option value="' + d + '">' + DIMS[d] + "</option>"; }).join("") + "</select>";
+    }
+    el.innerHTML = html;
+    var add = document.getElementById("addDim");
+    if (add) add.addEventListener("change", function () { if (add.value) { S.dims.push(add.value); load(); renderBuilder(); } });
+  }
+  document.getElementById("builder").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-rm]"); if (!b) return;
+    S.dims = S.dims.filter(function (d) { return d !== b.getAttribute("data-rm"); }); renderBuilder(); load();
+  });
+  document.getElementById("presets").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-d]"); if (!b) return;
+    S.dims = b.getAttribute("data-d").split(","); renderBuilder(); load();
+  });
+
+  // tree: level -> {name, v, ly, q, lq, gp, kids}
+  function tree() {
+    var root = {kids: {}};
+    D.rows.forEach(function (r) {
+      var node = root;
+      r.k.forEach(function (name) {
+        var n = node.kids[name];
+        if (!n) n = node.kids[name] = {name: name, v: 0, ly: 0, q: 0, lq: 0, gp: 0, kids: {}};
+        n.v += r.v; n.ly += r.ly; n.q += r.q; n.lq += r.lq; n.gp += (r.gp || 0);
+        node = n;
+      });
+    });
+    return root;
+  }
+  function sorted(kids) {
+    var arr = Object.keys(kids).map(function (k) { return kids[k]; });
+    var k = sort.key, d = sort.dir;
+    var monthDim = false;
+    return arr.sort(function (a, b) {
+      var x, y;
+      if (k === "name") { x = a.name; y = b.name; return x < y ? -d : x > y ? d : 0; }
+      if (k === "yoy") { x = a.v - a.ly; y = b.v - b.ly; }
+      else if (k === "yoyp") { x = a.ly > 0 ? (a.v - a.ly) / a.ly : -1e9; y = b.ly > 0 ? (b.v - b.ly) / b.ly : -1e9; }
+      else if (k === "gpp") { x = a.v ? a.gp / a.v : -1e9; y = b.v ? b.gp / b.v : -1e9; }
+      else { x = a[k]; y = b[k]; }
+      return (x - y) * d;
+    });
+  }
+  function renderTable() {
+    var t = tree(), total = D.kpis.v || 0, nd = S.dims.length;
+    var cols = [["name", D.dim_labels.join(" › "), "l"], ["v", "Revenue"], ["ly", "LY"], ["yoy", "YoY $"], ["yoyp", "YoY %"], ["share", "Share"], ["q", "Units"]];
+    if (D.margin) cols.push(["gp", "Est. GP"], ["gpp", "GP %"]);
+    var head = "<thead><tr>" + cols.map(function (c) {
+      return '<th class="' + (c[2] || "") + '" data-s="' + c[0] + '">' + c[1] + (sort.key === c[0] ? '<span class="sm">' + (sort.dir > 0 ? "▲" : "▼") + "</span>" : "") + "</th>";
+    }).join("") + "</tr></thead>";
+    var rows = [];
+    function line(n, lvl, path) {
+      var hasKids = Object.keys(n.kids).length > 0 && lvl < nd - 1, id = path.join("\u0001"), isOpen = !!open[id];
+      var yoy = n.v - n.ly, yp = n.ly > 0 ? yoy / n.ly * 100 : null, sh = total ? n.v / total * 100 : 0;
+      var cells = '<td class="l"><span class="sx-tw">' + (hasKids ? '<button class="sx-tg" data-open="' + RPT.esc(id) + '">' + (isOpen ? "−" : "+") + "</button>" : '<span style="width:18px"></span>') +
+        '<span class="sx-nm" title="' + RPT.esc(n.name) + '">' + RPT.esc(n.name) + "</span></span></td>" +
+        "<td><b>" + money(n.v, true) + "</b></td><td>" + money(n.ly, true) + "</td>" +
+        '<td class="' + (yoy >= 0 ? "up" : "down") + '">' + (yoy >= 0 ? "+" : "−") + money(Math.abs(yoy), true) + "</td>" +
+        "<td>" + (yp == null ? '<span class="r-faint">' + (n.ly < 0 ? "n/a" : "new") + "</span>" : growth(yp)) + "</td>" +
+        '<td><div class="r-sharebar" title="' + sh.toFixed(1) + '%"><i style="width:' + Math.min(100, sh).toFixed(1) + '%"></i></div></td>' +
+        "<td>" + RPT.int(n.q) + "</td>" +
+        (D.margin ? "<td>" + money(n.gp, true) + "</td><td>" + (n.v ? (n.gp / n.v * 100).toFixed(1) + "%" : "—") + "</td>" : "");
+      rows.push('<tr class="lv' + lvl + '">' + cells + "</tr>");
+      if (hasKids && isOpen) sorted(n.kids).forEach(function (k) { line(k, lvl + 1, path.concat([k.name])); });
+    }
+    var top = sorted(t.kids);
+    var shown = top.slice(0, 500);
+    shown.forEach(function (n) { line(n, 0, [n.name]); });
+    var K = D.kpis;
+    var tot = '<tr class="tot"><td class="l">Total</td><td>' + money(K.v, true) + "</td><td>" + money(K.ly, true) + '</td><td class="' + (K.v >= K.ly ? "up" : "down") + '">' +
+      (K.v >= K.ly ? "+" : "−") + money(Math.abs(K.v - K.ly), true) + "</td><td>" + (K.growth == null ? "—" : growth(K.growth)) + "</td><td>100%</td><td>" + RPT.int(K.q) + "</td>" +
+      (D.margin ? "<td>" + money(K.gp, true) + "</td><td>" + (K.gp_pct == null ? "—" : K.gp_pct.toFixed(1) + "%") + "</td>" : "") + "</tr>";
+    document.getElementById("tbl").innerHTML = head + "<tbody>" + (D.period.future ? "" : tot) + rows.join("") + "</tbody>";
+    document.getElementById("tblTitle").textContent = "By " + D.dim_labels.join(" › ");
+    document.getElementById("tblNote").textContent = D.period.future ? "" :
+      RPT.int(top.length) + " " + D.dim_labels[0].toLowerCase() + (top.length === 1 ? "" : "s") + (top.length > 500 ? " — showing the top 500 (the Excel has them all)" : "") +
+      " · " + D.period.label + " vs the same dates last year" + (nd > 1 ? " · + opens the next level" : "");
+    document.getElementById("tblActions").hidden = nd < 2;
+  }
+  document.getElementById("tbl").addEventListener("click", function (e) {
+    var o = e.target.closest("[data-open]");
+    if (o) { var id = o.getAttribute("data-open"); open[id] = !open[id]; renderTable(); return; }
+    var th = e.target.closest("th[data-s]"); if (!th) return;
+    var k = th.getAttribute("data-s");
+    if (k === "share") k = "v";
+    if (sort.key === k) sort.dir *= -1; else { sort.key = k; sort.dir = k === "name" ? 1 : -1; }
+    renderTable();
+  });
+  document.getElementById("expandAll").addEventListener("click", function () {
+    D.rows.forEach(function (r) { for (var i = 1; i < r.k.length; i++) open[r.k.slice(0, i).join("\u0001")] = true; }); renderTable();
+  });
+  document.getElementById("collapseAll").addEventListener("click", function () { open = {}; renderTable(); });
+
+  function render() { renderQuick(); renderKpis(); renderTrend(); renderTable(); }
+  paintPeriods(); renderBuilder(); render();
+  document.getElementById("xlsx").href = "/reports/sales/export.xlsx?" + qs();
+})();
+</script>
+{% endblock %}

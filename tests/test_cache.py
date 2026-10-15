@@ -99,7 +99,7 @@ def test_connections_are_capped(monkeypatch):
             with lock:
                 live[0] -= 1
 
-    def fake_connect(url, connect_timeout):
+    def fake_connect(url, connect_timeout, **kw):
         with lock:
             live[0] += 1
             peak[0] = max(peak[0], live[0])
