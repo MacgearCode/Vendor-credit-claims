@@ -168,8 +168,49 @@ def refresh_due(now: float | None = None) -> int:
     return len(due)
 
 
+# ---- watches: rebuild as soon as new data lands, not on a timer -----------------
+# A watch is a cheap query whose answer changes whenever its data does (e.g. the newest
+# NetSuite Last Modified). The refresher runs every watch each minute; when one changes,
+# every cache entry whose key starts with one of its prefixes is marked stale and the
+# recently used ones are rebuilt at once. NetSuite lands every ~30 min (Zone) -> 15-min
+# Windmill load; with a watch the site follows within ~a minute instead of a TTL.
+_watches: list = []          # [probe, prefixes, last_value]
+
+
+def watch(probe, prefixes: tuple):
+    _watches.append([probe, tuple(prefixes), None])
+
+
+def expire(prefixes: tuple) -> int:
+    """Mark matching entries stale (they keep serving until rebuilt)."""
+    n = 0
+    with _lock:
+        for k, e in _cache.items():
+            if k and isinstance(k[0], str) and k[0].startswith(prefixes):
+                e.built = 0.0
+                n += 1
+    return n
+
+
+def check_watches() -> list:
+    """Run every probe; expire what changed. Returns the prefixes that fired."""
+    fired = []
+    for w in _watches:
+        try:
+            value = w[0]()
+        except Exception as e:                 # a failed probe changes nothing
+            log.warning("watch probe failed: %s", e)
+            continue
+        if w[2] is not None and value != w[2]:
+            expire(w[1])
+            fired.extend(w[1])
+        w[2] = value
+    return fired
+
+
 def start_refresher(warm=None, every: int = 60):
-    """Background thread: run `warm()` once, then keep used entries fresh."""
+    """Background thread: run `warm()` once, then each minute check the data
+    watches and keep used entries fresh."""
     def loop():
         if warm:
             try:
@@ -181,6 +222,7 @@ def start_refresher(warm=None, every: int = 60):
         while True:
             time.sleep(every)
             try:
+                check_watches()
                 refresh_due()
             except Exception as e:
                 log.warning("cache refresh loop: %s", e)

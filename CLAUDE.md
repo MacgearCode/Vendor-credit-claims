@@ -167,9 +167,20 @@ sell-through snapshot (last week's units, WoW, top 5) in their scope.
   + **AU→NZ intercompany $506,110** ($9,107,643) — so their search includes
   intercompany, which the warehouse rule (2026-10-14) excludes. Asked the user
   which the site should show; don't change `net_sales` without that answer.
-- **How fresh:** NetSuite → Zone export (15 min) → S3 → Windmill load (every 15
-  min, :05/:20/:35/:50) → warehouse → site cache (sales TTL 5 min, refreshed in
-  the background) ⇒ typically 15–35 min from invoice to home page. The "latest
+- **How fresh (measured 2026-10-16):** NetSuite → Zone export → S3 lands **every
+  30 min, at :17 and :47** (the runbook's "15 min" isn't what Zone is set to) →
+  Windmill load every 15 min (:05/:20/:35/:50, all OK, <8 s) picks each file up ~3 min
+  later → site. The site no longer waits on a TTL: `sales.data_version()` (newest Last
+  Modified + recent line count, ~0.1 s) is a **warehouse watch** checked every minute;
+  when it changes every sales/stock cache entry (`SALES_CACHE_PREFIXES`) is expired
+  and the used ones rebuilt at once ⇒ invoice → home page ≈ Zone wait (≤30 min) + ~3
+  + ~1–2 min. Setting the Zone sales export to 15 min is the remaining big lever
+  (user's change in Zone).
+- **The recurring "NetSuite says more" question = intercompany.** AU Oct-to-date
+  2026-10-16: site $8,774,786 + AU→NZ intercompany $506,110 = $9,280,896 = the user's
+  NetSuite figure. The home tiles now show "Excl. $… intercompany to NZ"
+  (`sales.intercompany()`); revenue still excludes it (warehouse rule) until the user
+  decides otherwise. The "latest
   change" chip is the newest NetSuite Last Modified in the data, read as
   **Brisbane** time (scheduled exports) and shown in Sydney time.
 

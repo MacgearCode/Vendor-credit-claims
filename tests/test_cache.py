@@ -115,3 +115,26 @@ def test_connections_are_capped(monkeypatch):
     [t.start() for t in ts]
     [t.join() for t in ts]
     assert peak[0] <= warehouse.MAX_CONNECTIONS and live[0] == 0
+
+
+def test_watch_expires_and_rebuilds_as_soon_as_data_changes():
+    warehouse._watches.clear()
+    builds = {"s": 0, "o": 0}
+    warehouse.cached(("sales_daily", 1), lambda: builds.__setitem__("s", builds["s"] + 1), ttl=3600)
+    warehouse.cached(("other",), lambda: builds.__setitem__("o", builds["o"] + 1), ttl=3600)
+    version = ["v1"]
+    warehouse.watch(lambda: version[0], ("sales_",))
+    assert warehouse.check_watches() == []          # first look just records the value
+    version[0] = "v2"                                # new NetSuite load landed
+    assert warehouse.check_watches() == ["sales_"]
+    assert warehouse.refresh_due() == 1              # only the sales entry, at once
+    assert builds == {"s": 2, "o": 1}
+    assert warehouse.check_watches() == []           # unchanged -> nothing
+    warehouse._watches.clear()
+
+
+def test_a_failing_probe_changes_nothing():
+    warehouse._watches.clear()
+    warehouse.watch(lambda: (_ for _ in ()).throw(RuntimeError("down")), ("x",))
+    assert warehouse.check_watches() == []
+    warehouse._watches.clear()

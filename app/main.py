@@ -706,6 +706,7 @@ async def _lifespan(app):
     _check_deployment()
     # Tests and machines without a warehouse URL skip the warm-up entirely.
     if os.environ.get("REPORTING_DB_URL"):
+        warehouse.watch(sales.data_version, sales.SALES_CACHE_PREFIXES)
         warehouse.start_refresher(lambda: _warm_reports())
     yield
 

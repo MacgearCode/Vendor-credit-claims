@@ -139,6 +139,33 @@ def tops(start: date, end: date) -> dict:
     return out
 
 
+def data_version():
+    """Changes whenever NetSuite sales land: newest Last Modified plus the line count of
+    the last few days (the count catches a load that only removes lines). ~30 ms."""
+    since = int((date.today() - timedelta(days=4)).strftime("%Y%m%d"))
+    return tuple(warehouse.query(
+        "select max(last_modified), count(*) from reporting.fact_sales_line where date_key >= %s",
+        (since,))[0])
+
+
+# Everything built from NetSuite sales or stock: rebuilt as soon as a new load lands.
+SALES_CACHE_PREFIXES = ("sales_daily", "sales_tops", "sales_fresh", "sales_ic",
+                        "sx_day", "sx_month", "sx_items", "sx_opts", "item")
+
+
+def intercompany(start: date, end: date) -> dict:
+    """AU -> NZ intercompany sales on the Sales account, per region — EXCLUDED from
+    revenue (warehouse rule), shown beside it so the tile reconciles to a NetSuite
+    search that includes it."""
+    rk = {warehouse.region_key(c): c for c in REGIONS}
+    rows = warehouse.query("""
+        select s.region_key, sum(s.amount) from reporting.fact_sales_line s
+        where s.account_id = 54 and s.is_intercompany
+          and s.date_key between %(lo)s and %(hi)s
+        group by 1""", {"lo": _key(start), "hi": _key(end)})
+    return {rk[r]: round(float(v or 0)) for r, v in rows if r in rk}
+
+
 def targets() -> dict:
     """{region: {month_start: amount}} from reporting.sales_target, or {} while it
     doesn't exist. Expected shape (one row per country x month; finer rows —
@@ -188,6 +215,7 @@ def summary(today: date, margin: bool) -> dict:
     m_end = today.replace(day=month_days)
     tg = warehouse.cached(("sales_targets",), targets)
     top = warehouse.cached(("sales_tops", m0, today), lambda: tops(m0, today), ttl=SALES_TTL)
+    ic = warehouse.cached(("sales_ic", m0, today), lambda: intercompany(m0, today), ttl=SALES_TTL)
 
     out = {"today": today.isoformat(), "fy": fy_label(today), "fq": fq_label(today),
            "month": today.strftime("%B"), "fy_start": fy0.isoformat(),
@@ -224,6 +252,7 @@ def summary(today: date, margin: bool) -> dict:
             "qtd": _block(d, q0, today, q_t, margin),
             "ytd": _block(d, fy0, today, y_t, margin),
             "today": round(d.get(today, [0])[0]),
+            "intercompany_mtd": ic.get(r, 0),
             "cum": {"this": cum(m0, today.day), "last_month": cum(lm0, lm_days),
                     "last_year": cum(ly0, ly_days), "month_days": month_days,
                     "month_target": round(month_t) if month_t else None},

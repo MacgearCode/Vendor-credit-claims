@@ -154,7 +154,9 @@
       '<div class="r-meta" style="margin:0">' + '<span class="r-chip ' + (M.growth >= 0 ? "pos" : "neg") + '">' + growth(M.growth).replace(/<\/?span[^>]*>/g, "") + " vs LY</span>" +
       (MARGIN && M.gp_pct != null ? '<span class="r-chip">GP <b>&nbsp;' + M.gp_pct.toFixed(1) + "%</b></span>" : "") + "</div></div>" +
       '<div class="big">' + RPT.money(M.value, cur, true) + "<small>LY " + RPT.money(M.ly, cur) + "</small></div>" +
-      '<div class="r-meta" style="margin:0 0 10px">' + paceTxt + '<span class="r-chip">Today <b>&nbsp;' + RPT.money(R.today, cur) + "</b></span></div>" +
+      '<div class="r-meta" style="margin:0 0 10px">' + paceTxt + '<span class="r-chip">Today <b>&nbsp;' + RPT.money(R.today, cur) + "</b></span>" +
+        (R.intercompany_mtd ? '<span class="r-chip" title="Sales to MacGear NZ on the sales account — not counted as revenue here. Add it to match a NetSuite search that includes intercompany.">Excl. ' +
+          RPT.money(R.intercompany_mtd, cur) + " intercompany to NZ</span>" : "") + "</div>" +
       target(M, cur) +
       '<div class="h-mini">' + mini(S.fq + " to date", R.qtd, cur) + mini(S.fy + " to date", R.ytd, cur) +
         (MARGIN ? '<div><div class="l">' + S.fy + ' est. GP</div><div class="v">' + RPT.money(R.ytd.gp, cur) + '</div><div class="s r-muted">' +
