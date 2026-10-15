@@ -38,17 +38,78 @@
       {% endfor %}
     </select>
   </label>
+  <label id="companyrow">Vendor company
+    <input name="company" type="text" value="{{ u.company if u else '' }}" placeholder="e.g. Anker">
+  </label>
+
+  <fieldset class="split-group wide" id="areabox">
+    <legend>Reports this person can open</legend>
+    {% for k in report_keys %}
+    <label class="chk">
+      <input type="checkbox" name="tools" value="{{ k }}" {{ 'checked' if k in selected }}>
+      {{ area_labels[k] }}
+    </label>
+    {% endfor %}
+  </fieldset>
 
   <fieldset class="split-group wide" id="toolbox">
     <legend>Tools this person can use</legend>
     {% for k in tool_keys %}
     <label class="chk">
-      <input type="checkbox" name="tools" value="{{ k }}" {{ 'checked' if k in selected }}>
-      {{ tool_labels[k] }}
+      <input type="checkbox" name="tools" value="{{ k }}" data-internal {{ 'checked' if k in selected }}>
+      {{ area_labels[k] }}
     </label>
     {% endfor %}
-    <p class="hint" id="adminnote" hidden>Admins reach every tool regardless of these ticks.</p>
+    <p class="hint" id="vendortoolnote" hidden>Tools are internal — a vendor can never be given one.</p>
   </fieldset>
+
+  <fieldset class="split-group wide" id="capbox">
+    <legend>Extra data in reports</legend>
+    {% for k in cap_keys %}
+    <label class="chk">
+      <input type="checkbox" name="tools" value="{{ k }}" {{ 'checked' if k in sel_caps }}
+             {{ 'data-staffonly' if k not in vendor_caps }}>
+      {{ cap_labels[k] }}
+    </label>
+    {% endfor %}
+    <p class="hint" id="caphint">Without these, reports show retailer sell-through and stock only.
+       Sell-in $ needs sell-in units; margin needs sell-in $. Vendors can only ever have quantities.</p>
+  </fieldset>
+
+  <fieldset class="split-group wide" id="brandbox">
+    <legend>Brands this person can see</legend>
+    <p class="hint" id="brandhint-staff">Leave every brand unticked to see <strong>all brands</strong>.
+       Tick some to limit a staff member to just those.</p>
+    <p class="hint" id="brandhint-vendor" hidden><strong>A vendor sees only the brands ticked here</strong> —
+       with none ticked they see nothing. Tick every brand their company owns (e.g. Anker + Eufy).</p>
+    {% if brand_warn %}<p class="banner warn">{{ brand_warn }}</p>{% endif %}
+    <div class="brandtools">
+      <input type="search" id="brandfilter" placeholder="Filter brands…" aria-label="Filter brands">
+      <span class="hint" id="brandcount"></span>
+    </div>
+    <div class="brandgrid" id="brandgrid">
+      {% for b in brand_choices %}
+      <label class="chk" data-name="{{ b|lower }}">
+        <input type="checkbox" name="brands" value="{{ b }}" {{ 'checked' if b in sel_brands }}>
+        {{ b }}
+      </label>
+      {% endfor %}
+    </div>
+  </fieldset>
+
+  <fieldset class="split-group wide" id="regionbox">
+    <legend>Regions</legend>
+    {% for r in regions %}
+    <label class="chk">
+      <input type="checkbox" name="regions" value="{{ r }}" {{ 'checked' if r in sel_regions }}>
+      {{ r }}
+    </label>
+    {% endfor %}
+    <p class="hint">Unticking both is the same as ticking both.</p>
+  </fieldset>
+
+  <p class="hint" id="adminnote" hidden>Admins reach every report and tool, and see every brand and region,
+     regardless of these ticks.</p>
 
   <label class="chk">
     <input type="checkbox" name="active" {{ 'checked' if (u.active if u else True) }}>
@@ -81,22 +142,51 @@
 
 {% block scripts %}
 <script>
-// Admins always have every tool, so the tickboxes are noise on an admin account.
+// The form changes shape by role: admins see everything (ticks are noise),
+// vendors can't hold tools and must have brands ticked. The server enforces
+// both rules regardless — this is only so the form doesn't mislead.
 (function(){
   var role = document.getElementById('role');
-  var box = document.getElementById('toolbox');
-  var note = document.getElementById('adminnote');
-  if(!role || !box) return;
+  if(!role) return;
+  function show(id, on){ var el=document.getElementById(id); if(el) el.hidden=!on; }
+  function boxes(id){ return document.getElementById(id).querySelectorAll('input[type=checkbox]'); }
   function apply(){
-    var admin = role.value === 'admin';
-    box.querySelectorAll('input[type=checkbox]').forEach(function(cb){
-      cb.disabled = admin;
-      if(admin) cb.checked = true;
+    var admin = role.value === 'admin', vendor = role.value === 'vendor';
+    ['areabox','brandbox','regionbox'].forEach(function(id){
+      boxes(id).forEach(function(cb){ cb.disabled = admin; });
     });
-    note.hidden = !admin;
+    boxes('toolbox').forEach(function(cb){
+      cb.disabled = admin || vendor;
+      if(vendor) cb.checked = false;
+    });
+    boxes('capbox').forEach(function(cb){
+      var staffOnly = cb.hasAttribute('data-staffonly');
+      cb.disabled = admin || (vendor && staffOnly);
+      if(vendor && staffOnly) cb.checked = false;
+    });
+    show('adminnote', admin);
+    show('companyrow', vendor);
+    show('vendortoolnote', vendor);
+    show('brandhint-staff', !vendor);
+    show('brandhint-vendor', vendor);
   }
   role.addEventListener('change', apply);
   apply();
+
+  var filter = document.getElementById('brandfilter'), grid = document.getElementById('brandgrid');
+  var count = document.getElementById('brandcount');
+  function recount(){
+    var n = grid.querySelectorAll('input:checked').length;
+    count.textContent = n ? n + ' ticked' : 'none ticked';
+  }
+  filter.addEventListener('input', function(){
+    var q = filter.value.trim().toLowerCase();
+    grid.querySelectorAll('label').forEach(function(l){
+      l.hidden = q && l.getAttribute('data-name').indexOf(q) < 0;
+    });
+  });
+  grid.addEventListener('change', recount);
+  recount();
 })();
 </script>
 {% endblock %}

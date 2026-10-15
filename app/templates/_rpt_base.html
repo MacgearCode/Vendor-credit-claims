@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+{# Shell for the stats-style report pages (Item Explorer, Sell-Through Table).
+   Dark unless the viewer chose light in the side menu; styles in
+   static/report.css, helpers in static/rpt.js (window.RPT). #}
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Macgear Reporting{% endblock %}</title>
+  <script>
+    (function(){var t=null;try{t=localStorage.getItem('theme');}catch(e){}
+      if(t!=='light')document.documentElement.setAttribute('data-theme','dark');})();
+  </script>
+  <link rel="stylesheet" href="/static/sidenav.css?v={{ asset_ver }}">
+  <link rel="stylesheet" href="/static/report.css?v={{ asset_ver }}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <header class="r-top">
+    <div class="r-top-in">
+      <button type="button" class="sn-open" aria-label="Open menu" aria-controls="snDrawer">&#9776;</button>
+      <a class="r-brand" href="{% block home_href %}/{% endblock %}">
+        <img src="/static/macgear-logo.png?v={{ asset_ver }}" alt="Macgear">
+        <span>{% block pagename %}Reporting{% endblock %}</span>
+      </a>
+      {% block topsearch %}{% endblock %}
+    </div>
+  </header>
+  {% include "_sidenav.html" %}
+  <main class="r-wrap">
+    {% block content %}{% endblock %}
+  </main>
+  <script src="/static/rpt.js?v={{ asset_ver }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

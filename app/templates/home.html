@@ -1,14 +1,230 @@
-{% extends "base.html" %}
-{% block title %}Macgear Internal Tools and Apps{% endblock %}
-{% block content %}
-<h1 class="home-title">Internal Tools and Apps</h1>
+{% extends "_rpt_base.html" %}
+{% block title %}Macgear Reporting{% endblock %}
+{% block pagename %}Reporting{% endblock %}
+{% block head %}
+<style>
+  .h-greet{display:flex;justify-content:space-between;align-items:flex-end;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+  .h-greet h1{margin:0;font-size:clamp(26px,3.6vw,38px);font-weight:800;letter-spacing:-.03em}
+  .h-regions{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .h-region .big{font-size:clamp(34px,4.4vw,52px);font-weight:800;letter-spacing:-.035em;line-height:1;margin:6px 0 10px}
+  .h-region .big small{font-size:.32em;font-weight:700;color:var(--r-muted);letter-spacing:0;margin-left:6px}
+  .h-mini{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:14px 0}
+  .h-mini > div{background:var(--r-card-2);border:1px solid var(--r-line);border-radius:12px;padding:10px 12px;min-width:0}
+  .h-mini .l{font-size:11.5px;font-weight:600;color:var(--r-muted)}
+  .h-mini .v{font-size:19px;font-weight:800;letter-spacing:-.02em;margin-top:3px;white-space:nowrap}
+  .h-mini .s{font-size:11.5px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .h-bar{height:8px;border-radius:6px;background:var(--r-card-2);overflow:hidden;border:1px solid var(--r-line)}
+  .h-bar i{display:block;height:100%;border-radius:6px;background:var(--r-accent)}
+  .h-bar i.ok{background:var(--r-pos)} .h-bar i.behind{background:var(--r-warn)}
+  .h-tgt{display:flex;justify-content:space-between;font-size:12.5px;color:var(--r-muted);margin:6px 0 2px}
+  .h-region .r-chart{height:190px}
+  .h-lead{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .h-row{display:grid;grid-template-columns:22px 1fr auto;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--r-line);text-decoration:none}
+  .h-row:last-child{border-bottom:0}
+  .h-row .n{font-size:12px;color:var(--r-faint);font-weight:700}
+  .h-row .nm{font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .h-row .val{text-align:right;font-weight:800;font-size:14px;white-space:nowrap}
+  .h-row .val small{display:block;font-weight:600;font-size:11px;color:var(--r-muted)}
+  .h-row .r-sharebar{grid-column:2 / 4;height:4px;margin-top:-4px}
+  a.h-row:hover .nm{color:var(--r-accent)}
+  .h-st{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+  .h-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+  .h-card{display:flex;gap:14px;align-items:flex-start;text-decoration:none;background:var(--r-card);border:1px solid var(--r-line);
+    border-radius:16px;padding:18px;box-shadow:var(--r-shadow);transition:transform .12s ease,border-color .12s ease}
+  .h-card:hover{transform:translateY(-2px);border-color:var(--r-line-2)}
+  .h-card .ic{flex:none;width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;
+    background:var(--r-accent-soft);color:var(--r-accent)}
+  .h-card.tool .ic{background:var(--r-card-2);color:var(--r-muted)}
+  .h-card b{display:block;font-size:15.5px;margin-bottom:3px}
+  .h-card span{font-size:13px;color:var(--r-muted);line-height:1.4}
+  .h-sec-h{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin:26px 0 12px;flex-wrap:wrap}
+  .h-sec-h h2{margin:0;font-size:19px;font-weight:800;letter-spacing:-.01em}
+  @media (max-width:900px){.h-regions,.h-lead{grid-template-columns:1fr}}
+  @media (max-width:640px){.h-mini .v{font-size:16px}}
+</style>
+{% endblock %}
 
-<div class="toolgrid">
-  {% for t in tools %}
-  <a class="toolcard" href="{{ t.href }}">
-    <span class="toolcard-title">{{ t.title }}</span>
-    <span class="toolcard-blurb">{{ t.blurb }}</span>
-  </a>
+{% block content %}
+{% include "_st_status.html" %}
+<div class="h-greet">
+  <div>
+    <p class="r-eyebrow" id="today"></p>
+    <h1 id="greeting">Welcome{% if first_name %}, {{ first_name }}{% endif %}</h1>
+  </div>
+  {% if sales %}<span class="r-chip">NetSuite sales · latest change <b>&nbsp;{{ sales_fresh }}</b></span>{% endif %}
+</div>
+
+{% if sales_error %}<p class="r-banner">{{ sales_error }}</p>{% endif %}
+
+{% if sales %}
+{# ---- internal sales: AU and NZ side by side, never added together ---- #}
+<div class="h-regions" id="regions"></div>
+{% if not sales.has_targets %}
+<p class="r-note" style="margin-top:10px">No sales targets loaded yet — once a <span class="r-mono">reporting.sales_target</span>
+  table exists (country, month, amount) every tile shows progress against it automatically.</p>
+{% endif %}
+
+<div class="h-sec-h">
+  <h2>Who's driving {{ sales.month }}</h2>
+  <div class="r-filters">
+    <div class="r-tabs" id="leadTabs">
+      <button class="r-tab" data-l="customers" aria-pressed="true">Customers</button>
+      <button class="r-tab" data-l="brands">Brands</button>
+      <button class="r-tab" data-l="reps">Reps</button>
+      <button class="r-tab" data-l="items">Items</button>
+    </div>
+  </div>
+</div>
+<div class="h-lead" id="leaders"></div>
+{% endif %}
+
+{% if st %}
+<div class="h-sec-h">
+  <h2>Sell-through last week</h2>
+  <span class="r-muted" style="font-size:13px">Retailer-reported units · week ending {{ st_week }}{% if scoped %} · your brands{% endif %}</span>
+</div>
+<div class="h-st" id="stSnap"></div>
+{% endif %}
+
+<div class="h-sec-h"><h2>Reports</h2></div>
+{% if reports %}
+<div class="h-cards">
+  {% for t in reports %}
+  <a class="h-card" href="{{ t.href }}"><span class="ic">{{ t.icon }}</span><span><b>{{ t.title }}</b><span>{{ t.blurb }}</span></span></a>
   {% endfor %}
 </div>
+{% else %}
+<p class="r-muted">No reports have been opened to your account yet. Ask your Macgear contact to set up access.</p>
+{% endif %}
+
+{% if tools %}
+<div class="h-sec-h"><h2>Tools</h2></div>
+<div class="h-cards">
+  {% for t in tools %}
+  <a class="h-card tool" href="{{ t.href }}"><span class="ic">{{ t.icon }}</span><span><b>{{ t.title }}</b><span>{{ t.blurb }}</span></span></a>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if sales %}
+<p class="r-note">Sales = Macgear's NetSuite revenue (sales account, ex-GST, net of credits; AU → NZ intercompany excluded), each country in its own currency.
+  Periods follow the financial year (April–March): {{ sales.fq }} began {{ sales.fq_start|datefmt }}, {{ sales.fy }} on {{ sales.fy_start|datefmt }}.
+  "vs LY" compares the same dates a year earlier. Pace = month-to-date ÷ weekdays so far ({{ sales.weekdays.done }}) × weekdays in the month ({{ sales.weekdays.all }}) — a run-rate, not a forecast.
+  {% if margin %}GP uses NetSuite's estimated cost, not posted COGS.{% endif %}</p>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  "use strict";
+  var now = new Date(), h = now.getHours();
+  document.getElementById("today").textContent = now.toLocaleDateString("en-AU", {weekday: "long", day: "numeric", month: "long", year: "numeric"}) +
+    {% if sales %}{{ (' · ' ~ sales.fy ~ ' ' ~ sales.fq)|tojson }}{% else %}""{% endif %};
+  var g = document.getElementById("greeting");
+  g.textContent = g.textContent.replace(/^Welcome/, h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening");
+
+  {% if sales %}
+  var S = {{ sales|tojson }}, MARGIN = {{ margin|tojson }};
+  var NAMES = {AU: "Australia", NZ: "New Zealand"};
+  var col = {acc: RPT.css("--r-accent"), muted: RPT.css("--r-muted"), amb: RPT.css("--r-amber"), pos: RPT.css("--r-pos")};
+
+  function growth(g) {
+    var d = RPT.delta(g);
+    return '<span class="' + d.cls + '">' + d.arrow + " " + d.txt + "</span>";
+  }
+  function target(b, cur) {
+    if (!b.target) return '<div class="h-tgt"><span>No target loaded</span><span></span></div>';
+    var p = b.to_target;
+    return '<div class="h-tgt"><span>' + p.toFixed(0) + "% of " + RPT.money(b.target, cur) + " target</span><span>" + RPT.money(b.target - b.value, cur) + " to go</span></div>" +
+      '<div class="h-bar"><i class="' + (p >= 100 ? "ok" : "") + '" style="width:' + Math.min(100, p).toFixed(1) + '%"></i></div>';
+  }
+  function mini(label, b, cur) {
+    return '<div><div class="l">' + label + '</div><div class="v">' + RPT.money(b.value, cur) + '</div><div class="s">' + growth(b.growth) + " vs LY" +
+      (b.to_target != null ? " · " + b.to_target.toFixed(0) + "% tgt" : "") + "</div></div>";
+  }
+
+  var regionsEl = document.getElementById("regions");
+  regionsEl.innerHTML = ["AU", "NZ"].map(function (r) {
+    var R = S.regions[r], M = R.mtd, cur = R.currency;
+    var paceTxt = M.pace == null ? "" : '<span class="r-chip">On pace for <b>&nbsp;' + RPT.money(M.pace, cur) + "</b>" +
+      (M.pace_to_target != null ? "&nbsp;· " + M.pace_to_target.toFixed(0) + "% of target" : "") + "</span>";
+    return '<section class="r-card h-region">' +
+      '<div class="r-card-h" style="margin-bottom:0"><div><p class="r-eyebrow">' + NAMES[r] + " · " + cur + "</p><h2>" + S.month + " to date</h2></div>" +
+      '<div class="r-meta" style="margin:0">' + '<span class="r-chip ' + (M.growth >= 0 ? "pos" : "neg") + '">' + growth(M.growth).replace(/<\/?span[^>]*>/g, "") + " vs LY</span>" +
+      (MARGIN && M.gp_pct != null ? '<span class="r-chip">GP <b>&nbsp;' + M.gp_pct.toFixed(1) + "%</b></span>" : "") + "</div></div>" +
+      '<div class="big">' + RPT.money(M.value, cur, true) + "<small>LY " + RPT.money(M.ly, cur) + "</small></div>" +
+      '<div class="r-meta" style="margin:0 0 10px">' + paceTxt + '<span class="r-chip">Today <b>&nbsp;' + RPT.money(R.today, cur) + "</b></span></div>" +
+      target(M, cur) +
+      '<div class="h-mini">' + mini(S.fq + " to date", R.qtd, cur) + mini(S.fy + " to date", R.ytd, cur) +
+        (MARGIN ? '<div><div class="l">' + S.fy + ' est. GP</div><div class="v">' + RPT.money(R.ytd.gp, cur) + '</div><div class="s r-muted">' +
+          (R.ytd.gp_pct == null ? "—" : R.ytd.gp_pct.toFixed(1) + "% margin") + "</div></div>"
+        : '<div><div class="l">Units ' + S.fy + '</div><div class="v">' + RPT.compact(R.ytd.units) + '</div><div class="s r-muted">' + RPT.compact(M.units) + " this month</div></div>") +
+      "</div>" +
+      '<div class="r-chart" id="cum' + r + '"></div><div class="r-legend" id="leg' + r + '"></div></section>';
+  }).join("");
+
+  ["AU", "NZ"].forEach(function (r) {
+    var R = S.regions[r], C = R.cum, n = C.month_days, cur = R.currency;
+    var t0 = S.today.slice(0, 8), labels = [];
+    for (var i = 1; i <= n; i++) labels.push(t0 + (i < 10 ? "0" : "") + i);
+    function fit(a) { var o = []; for (var i = 0; i < n; i++) o.push(i < a.length ? a[i] : null); return o; }
+    var series = [
+      {name: S.month + " " + S.today.slice(0, 4), values: fit(C["this"]), color: col.acc, type: "area"},
+      {name: "Last month", values: fit(C.last_month), color: col.muted, type: "line", dash: true},
+      {name: "Same month LY", values: fit(C.last_year), color: col.amb, type: "line", dash: true}
+    ];
+    if (C.month_target) {
+      var tl = []; for (var j = 1; j <= n; j++) tl.push(Math.round(C.month_target * j / n));
+      series.push({name: "Target (straight line)", values: tl, color: col.pos, type: "line", dash: true});
+    }
+    RPT.chart(document.getElementById("cum" + r), {labels: labels, series: series,
+      fmt: function (v) { return RPT.money(v, cur, true); }, axis: function (v) { return RPT.money(v, cur); },
+      tipLabel: function (l, i) { return "Day " + (i + 1) + " · cumulative"; }});
+    document.getElementById("leg" + r).innerHTML = series.map(function (s) {
+      return '<span><i style="background:' + s.color + '"></i>' + RPT.esc(s.name) + "</span>";
+    }).join("");
+  });
+
+  // ---- leaders ----
+  var lead = "customers";
+  function leaders() {
+    document.getElementById("leaders").innerHTML = ["AU", "NZ"].map(function (r) {
+      var R = S.regions[r], list = (R.top[lead] || []), cur = R.currency, max = list.length ? list[0].value : 1;
+      var rows = list.map(function (x, i) {
+        var inner = '<span class="n">' + (i + 1) + '</span><span class="nm">' + RPT.esc(x.name) + '</span><span class="val">' + RPT.money(x.value, cur) +
+          (MARGIN && x.gp != null && x.value ? "<small>" + (x.gp / x.value * 100).toFixed(1) + "% GP</small>" : "") + "</span>" +
+          '<span class="r-sharebar"><i style="width:' + Math.max(2, x.value / max * 100).toFixed(1) + '%"></i></span>';
+        return x.code ? '<a class="h-row" href="' + RPT.itemUrl(x.code, r) + '">' + inner + "</a>" : '<div class="h-row">' + inner + "</div>";
+      }).join("");
+      return '<section class="r-card"><p class="r-eyebrow">' + NAMES[r] + " · " + S.month + " to date</p>" +
+        (rows || '<p class="r-muted">No sales yet this month.</p>') + "</section>";
+    }).join("");
+  }
+  document.getElementById("leadTabs").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-l]"); if (!b) return;
+    lead = b.getAttribute("data-l");
+    this.querySelectorAll("[data-l]").forEach(function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+    leaders();
+  });
+  leaders();
+  {% endif %}
+
+  {% if st %}
+  // ---- sell-through snapshot ----
+  var ST = {{ st|tojson }};
+  document.getElementById("stSnap").innerHTML = Object.keys(ST).map(function (r) {
+    var x = ST[r], d = RPT.delta(RPT.pct(x.units, x.prev));
+    return '<section class="r-card"><p class="r-eyebrow">' + ({AU: "Australia", NZ: "New Zealand"})[r] + '</p>' +
+      '<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:10px"><div><div style="font-size:34px;font-weight:800;letter-spacing:-.03em">' +
+      RPT.int(x.units) + '<small class="r-muted" style="font-size:14px;font-weight:700"> units</small></div><div class="' + d.cls + '" style="font-size:13px;font-weight:700">' +
+      d.arrow + " " + d.txt + ' vs prior week</div></div><div>' + RPT.spark(x.spark, 120, 40) + "</div></div>" +
+      '<div style="margin-top:10px">' + x.top.map(function (t, i) {
+        return '<a class="h-row" href="' + RPT.itemUrl(t.code, r) + '"><span class="n">' + (i + 1) + '</span><span class="nm">' + RPT.esc(t.name) +
+          '</span><span class="val">' + RPT.int(t.units) + "</span></a>";
+      }).join("") + "</div></section>";
+  }).join("");
+  {% endif %}
+})();
+</script>
 {% endblock %}

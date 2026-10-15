@@ -8,30 +8,40 @@
 
 {% block content %}
 <h1 class="home-title">Users</h1>
-<p class="hint">Tick which tools each person can reach. Admins always see everything,
-  including this page.</p>
+<p class="hint">Tick which reports and tools each person can reach, and which brands and
+  regions they see. Admins always see everything, including this page. Vendors only ever
+  see the reports and brands ticked on their account.</p>
 
 {% if rows %}
 <table class="grid">
   <thead>
     <tr>
-      <th>Email</th><th>Name</th><th>Role</th><th>Tools</th>
-      <th>Status</th><th>Last sign-in</th><th></th>
+      <th>Email</th><th>Name</th><th>Role</th><th>Reports &amp; tools</th>
+      <th>Brands</th><th>Regions</th><th>Status</th><th>Last sign-in</th><th></th>
     </tr>
   </thead>
   <tbody>
     {% for r in rows %}
     <tr>
       <td>{{ r.u.email }}</td>
-      <td>{{ r.u.name }}</td>
-      <td><span class="pill {{ 'pg-blue' if r.u.role == 'admin' else 'pg-grey' }}">{{ r.u.role }}</span></td>
+      <td>{{ r.u.name }}{% if r.u.company %}<div class="hint">{{ r.u.company }}</div>{% endif %}</td>
+      <td><span class="pill {{ 'pg-blue' if r.u.role == 'admin' else ('pg-amber' if r.u.role == 'vendor' else 'pg-grey') }}">{{ r.u.role }}</span></td>
       <td>
-        {% if r.tools %}
-          {% for t in r.tools %}<span class="chip">{{ t }}</span>{% endfor %}
+        {% if r.areas %}
+          {% for t in r.areas %}<span class="chip">{{ t }}</span>{% endfor %}
+          {% if 'sell_in' in r.caps %}<span class="chip">+ sell-in</span>{% endif %}
+          {% if 'sell_in_value' in r.caps %}<span class="chip">+ sell-in $</span>{% endif %}
+          {% if 'margin' in r.caps %}<span class="chip">+ margin</span>{% endif %}
         {% else %}
           <span class="hint">none</span>
         {% endif %}
       </td>
+      <td>
+        {% if r.brands is none %}<span class="hint">all</span>
+        {% elif r.brands %}{% for b in r.brands %}<span class="chip">{{ b }}</span>{% endfor %}
+        {% else %}<span class="pill pg-red">none</span>{% endif %}
+      </td>
+      <td>{{ r.regions|join(", ") }}</td>
       <td>
         {% if not r.u.active %}<span class="pill pg-red">disabled</span>
         {% elif r.pending %}<span class="pill pg-amber">no password yet</span>

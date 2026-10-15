@@ -1,0 +1,66 @@
+/* Left fly-out site menu (templates/_sidenav.html). Self-contained: used by
+   base.html pages AND the self-styled report pages, so it carries its own
+   palette rather than leaning on style.css variables. */
+:root{
+  --sn-bg:#ffffff; --sn-ink:#1f2733; --sn-muted:#6b7686; --sn-line:#e3e8ef;
+  --sn-hover:#f1f4f9; --sn-active:#e6eefb; --sn-active-ink:#2f5496; --sn-brand:#2f5496;
+}
+[data-theme="dark"]{
+  --sn-bg:#1a212b; --sn-ink:#e4e8ee; --sn-muted:#9aa4b2; --sn-line:#2a333f;
+  --sn-hover:#222b37; --sn-active:#1d2942; --sn-active-ink:#9cc0ff;
+}
+
+/* the ☰ button each page puts at the left of its top bar */
+.sn-open{display:inline-flex;align-items:center;justify-content:center;flex:none;
+  width:40px;height:40px;border:0;border-radius:9px;cursor:pointer;
+  background:rgba(255,255,255,.15);color:#fff;font-size:1.35rem;line-height:1;padding:0}
+.sn-open:hover{background:rgba(255,255,255,.28)}
+.sn-open.on-light{background:rgba(22,32,43,.06);color:#16202b}
+.sn-open.on-light:hover{background:rgba(22,32,43,.12)}
+
+.sn-overlay{position:fixed;inset:0;z-index:90;background:rgba(10,16,24,.45);
+  opacity:0;transition:opacity .2s ease}
+.sn-is-open .sn-overlay{opacity:1}
+
+.sn-drawer{position:fixed;top:0;bottom:0;left:0;z-index:100;
+  width:min(300px,86vw);display:flex;flex-direction:column;
+  background:var(--sn-bg);color:var(--sn-ink);border-right:1px solid var(--sn-line);
+  visibility:hidden;transform:translateX(-100%);
+  transition:transform .2s ease,visibility 0s linear .2s;
+  font:15px/1.45 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+.sn-is-open .sn-drawer{transform:none;visibility:visible;transition:transform .2s ease;
+  box-shadow:6px 0 28px rgba(0,0,0,.18)}
+.sn-is-open{overflow:hidden}          /* no background scroll behind the menu */
+
+.sn-head{display:flex;align-items:center;justify-content:space-between;
+  padding:14px 14px 12px 18px;border-bottom:1px solid var(--sn-line)}
+.sn-logo img{height:28px;width:auto;display:block}
+[data-theme="dark"] .sn-logo img{background:#fff;padding:4px 8px;border-radius:6px}
+.sn-close{border:0;background:transparent;color:var(--sn-muted);font-size:1.7rem;line-height:1;
+  width:40px;height:40px;border-radius:8px;cursor:pointer}
+.sn-close:hover{background:var(--sn-hover);color:var(--sn-ink)}
+
+.sn-body{flex:1;overflow-y:auto;padding:8px 0 12px}
+.sn-section{padding:10px 10px 4px}
+.sn-title{margin:0 0 4px;padding:0 10px;font-size:.72rem;font-weight:700;
+  letter-spacing:.09em;text-transform:uppercase;color:var(--sn-muted)}
+.sn-drawer .sn-body a{display:block;padding:11px 10px;border-radius:8px;min-height:44px;
+  color:var(--sn-ink);text-decoration:none;font-weight:500;
+  /* tool nav links arrive with their own classes (e.g. .btn) — neutralise them */
+  background:none;border:0;box-shadow:none;font-size:15px;line-height:22px}
+.sn-drawer .sn-body a:hover{background:var(--sn-hover);text-decoration:none}
+.sn-drawer .sn-body a.sn-active{background:var(--sn-active);color:var(--sn-active-ink);font-weight:600}
+.sn-toolnav{border-bottom:1px solid var(--sn-line);padding-bottom:10px}
+
+.sn-foot{border-top:1px solid var(--sn-line);padding:14px 18px 18px}
+.sn-who{display:flex;flex-direction:column;margin-bottom:10px;font-size:.9rem;overflow-wrap:anywhere}
+.sn-who span{color:var(--sn-muted);font-size:.82rem}
+.sn-actions{display:flex;gap:8px}
+.sn-actions > *{flex:1;display:inline-flex;align-items:center;justify-content:center;
+  min-height:40px;border:1px solid var(--sn-line);border-radius:8px;background:transparent;
+  color:var(--sn-ink);font:inherit;font-size:.88rem;cursor:pointer;text-decoration:none}
+.sn-actions > *:hover{background:var(--sn-hover);text-decoration:none}
+
+@media (prefers-reduced-motion: reduce){
+  .sn-drawer,.sn-overlay{transition:none}
+}

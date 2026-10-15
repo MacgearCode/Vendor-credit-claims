@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Tools · Macgear Reporting{% endblock %}
+{% block content %}
+<h1 class="home-title">Tools</h1>
+
+{% if tools %}
+<div class="toolgrid">
+  {% for t in tools %}
+  <a class="toolcard" href="{{ t.href }}">
+    <span class="toolcard-title">{{ t.title }}</span>
+    <span class="toolcard-blurb">{{ t.blurb }}</span>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<p class="hint">No tools are ticked on your account.</p>
+{% endif %}
+{% endblock %}

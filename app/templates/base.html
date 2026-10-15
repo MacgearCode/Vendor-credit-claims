@@ -3,31 +3,28 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Vendor Credit Claims{% endblock %}</title>
+  <title>{% block title %}Macgear Reporting{% endblock %}</title>
   <script>
     // apply saved theme before first paint to avoid a flash of the light theme
     (function(){try{if(localStorage.getItem('theme')==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();
   </script>
   <link rel="stylesheet" href="/static/style.css?v={{ asset_ver }}">
+  <link rel="stylesheet" href="/static/sidenav.css?v={{ asset_ver }}">
 </head>
 <body>
+  {# the current tool's own links: shown in the top bar on wide screens, and as
+     the first section of the fly-out menu (the only place on a phone) #}
+  {% set sn_tool_nav %}{% block nav %}{% endblock %}{% endset %}
+  {% set sn_tool_title %}{{ self.brandword() }}{% endset %}
   <header class="topbar">
+    <button type="button" class="sn-open" aria-label="Open menu" aria-controls="snDrawer">&#9776;</button>
     <a class="brand" href="/">
       <img class="brand-logo" src="/static/macgear-logo.png?v={{ asset_ver }}" alt="MacGear">
-      <span class="brand-word">{% block brandword %}Internal Tools and Apps{% endblock %}</span>
+      <span class="brand-word">{% block brandword %}Reporting{% endblock %}</span>
     </a>
-    <nav>
-      {# each tool fills this with its own links; the landing page leaves it empty #}
-      {% block nav %}{% endblock %}
-      {% set me = current_user(request) %}
-      {% if me and perms.is_admin(me) %}<a href="/admin/users">Users</a>{% endif %}
-      <button type="button" id="themeToggle" class="theme-toggle" aria-label="Toggle dark mode">🌙</button>
-      {% if me %}
-        <span class="whoami" title="{{ me.email }}">{{ me.name or me.email }}</span>
-        <a class="signout" href="/logout">Sign out</a>
-      {% endif %}
-    </nav>
+    {% if sn_tool_nav|trim %}<nav class="toolnav">{{ sn_tool_nav }}</nav>{% endif %}
   </header>
+  {% include "_sidenav.html" %}
   <main>
     {% block content %}{% endblock %}
   </main>
@@ -45,22 +42,6 @@
 
   {% block scripts %}{% endblock %}
   <script>
-    // dark-mode toggle: persists in localStorage, applied early in <head>
-    (function(){
-      var btn=document.getElementById('themeToggle');
-      if(!btn)return;
-      function isDark(){return document.documentElement.getAttribute('data-theme')==='dark';}
-      function paint(){btn.textContent=isDark()?'☀️':'🌙';btn.title=isDark()?'Switch to light mode':'Switch to dark mode';}
-      paint();
-      btn.addEventListener('click',function(){
-        var dark=!isDark();
-        if(dark)document.documentElement.setAttribute('data-theme','dark');
-        else document.documentElement.removeAttribute('data-theme');
-        try{localStorage.setItem('theme',dark?'dark':'light');}catch(e){}
-        paint();
-      });
-    })();
-
     // styled confirm modal: any <form data-confirm="message"> opens it instead of
     // the browser's confirm(). Confirming submits the form; cancelling does nothing.
     (function(){

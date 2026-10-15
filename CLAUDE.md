@@ -1,38 +1,77 @@
-# Vendor Credit Claims — Macgear internal tools site
+# Reporting Site — Macgear Reporting (reports + internal tools, one login)
 
-Despite the folder name, this app hosts **more than one tool**. `/` is a landing
-page of tiles; each tool owns a path below it.
+**Vision (user, 2026-10-15):** this site becomes Macgear's central reporting hub
+and **replaces Power BI** — revenue / sales reporting, sell-through for staff and
+vendors, and **KPI tracking** to come. Build new reporting here rather than in a
+.pbix.
 
-Live at **https://apps.macgeargroup.com**. It was `promos.macgeargroup.com` until
-2026-08-05, when the second tool made a promos-specific name wrong; that host now
-301s to the new one, path preserved, and the redirect should stay. The folder name
-and the GitHub repo (`MacgearCode/Vendor-credit-claims`) still say claims/promos —
-renaming those would break the droplet's clone path for no real gain.
+**Moved here from `Vendor Credit Claims/` on 2026-10-15** (user's decision): the
+apps.macgeargroup.com site is becoming **reporting.macgeargroup.com** — one site
+for staff AND vendors, reports first, the two original tools under a Tools menu.
+This supersedes the 2026-09-30 design of a *separate* reporting app with identity
+handed off from apps (`Sell Through/CLAUDE.md`, "Reporting site"); the rest of that
+design (vendor isolation, 2FA, server-side filtering, audit) still applies.
 
-| Path | Tool | Audience |
+The folder was copied with its git history; `Vendor Credit Claims/` is left in
+place until the user confirms it can go. The GitHub repo
+(`MacgearCode/Vendor-credit-claims`), docker service `claims` and droplet clone
+path are unchanged. **Not yet deployed** — the live site is still apps.macgeargroup.com
+running the pre-move code.
+
+| Path | What | Audience |
 |---|---|---|
-| `/` | Landing page — tile per tool the signed-in user may use | everyone |
+| `/` | Home — internal sales (sell-in $ tick only), sell-through snapshot, report + tool cards | everyone |
+| `/reports/items` | Item Explorer — search + leaderboards; `/reports/items/i/<code>` = one item | staff, vendors |
+| `/reports/table` | Sell-Through Table — the weekly workbook live; `/reports/table/export.xlsx` | staff, vendors |
+| `/reports/sell-through` | Sell-Through Dashboard (from `Sell Through/prototype/`) | staff, vendors |
+| `/tools` | Tools landing (tools are also listed in the side menu) | staff |
 | `/promos` | Vendor Promos — promotional credit claims | sales, finance |
 | `/vendor-bills` | PDF Bill Upload — Amazon Advertising → NetSuite CSV | accounts |
 | `/admin/users` | User management | admins |
 
-**Adding a tool** takes three edits: a tile in `TOOLS` (`app/main.py`), its key in
-`perms.TOOL_KEYS` / `TOOL_LABELS`, and its URL prefix in `_TOOL_PATHS`. Miss the
-third and the tool is reachable by anyone who types the URL.
+**Adding a report or tool** takes three edits: a tile in `REPORTS` or `TOOLS`
+(`app/main.py`), its key in `perms.REPORT_KEYS` / `TOOL_KEYS` + `AREA_LABELS`
+(and `VENDOR_AREAS` if vendors may have it), and its URL prefix in `_TOOL_PATHS`.
+Miss the last one and staff can reach it by typing the URL (vendors can't — see below).
 
 ## Access control
 
-Roles are `admin` and `user`. Admins reach every tool and manage accounts; plain
-users reach only what is ticked on their account. Resolution lives in
-`app/perms.py` — per-user override, else the role default — and is **default
-deny**, so a tool added later never appears for anyone until it is ticked.
+Roles: `admin` (everything + user management), `user` (staff — only the
+reports/tools ticked), `vendor` (only the reports ticked, only the brands ticked).
+Resolution lives in `app/perms.py` and is **default deny**: a report or tool added
+later appears for nobody until ticked.
+
+Two independent controls per user:
+- **Areas** (`allowed_tools` — the column name predates reports; it holds report
+  AND tool keys). NULL = role default. Vendors can only ever hold `VENDOR_AREAS`;
+  a tool key stored on a vendor grants nothing.
+- **Data scope** — `allowed_brands` (NetSuite class names, = `dim_item.brand`) and
+  `allowed_regions` (AU/NZ). Staff: NULL brands = all brands. **Vendor: NULL or
+  empty = NO brands** (fail closed). Regions: NULL = both, for everyone.
+  `company` is display-only.
 
 Enforcement is in the `require_login` middleware, matched on URL prefix, not on
-individual handlers. A tool has a dozen routes and decorating each one means
-eventually missing a POST. Hiding a tile is presentation only.
+handlers. **Vendors are allow-listed**: `/` plus the areas ticked; any path no
+area claims (`/tools`, `/api/...`, a tool missing from `_TOOL_PATHS`) is 403 for
+them. Reports apply the data scope **in SQL** (`sell_through._FACT_SQL` takes the
+brand/region lists), so other brands' rows never leave the warehouse; the report
+cache key includes the scope. Hiding a tile or menu item is presentation only.
+`tests/test_access.py` drives the real middleware for these rules.
+
+**Capabilities** widen what a report shows, not which pages open — ticked per
+user under "Extra data in reports", stored in the same `allowed_tools` list:
+`sell_in` (sell-in UNITS + Macgear warehouse stock quantities), `sell_in_value`
+(Macgear's sales $; needs `sell_in`) and `margin` (est. GP; needs
+`sell_in_value`). Default-deny for everyone but admins. **User decision
+2026-10-15: vendors may see sell-in quantity; Macgear's sales $ amounts stay
+hidden from them** — a vendor can hold `sell_in` only (`perms.VENDOR_CAPS`).
+Enforced in SQL: without `sell_in_value` the item query selects NULL for the $
+columns (`%(money)s`), so the amounts never leave the database; a test checks
+nothing $-shaped reaches the page. "Retail value" (units × public RRP) is not
+Macgear's sales $ and shows for everyone.
 
 `allowed_tools` stores NULL when the selection equals the role default, so
-defaults keep flowing as tools are added. Don't "helpfully" expand it.
+defaults keep flowing as areas are added. Don't "helpfully" expand it.
 
 Passwords: PBKDF2-SHA256 via `app/security.py` (copied from 3PL Portal so both
 apps behave the same). An admin never sets another person's password — creating
@@ -41,11 +80,183 @@ token's SHA-256 digest is stored.
 
 The app refuses to demote, disable or delete the last active admin.
 
+### Before the first real vendor account (from the 2026-09-30 design — NOT done)
+
+1. Retire the legacy `APP_PASSWORD` admin login, and make "no users + no
+   APP_PASSWORD" refuse to start instead of disabling auth.
+2. 2FA (TOTP) at login, recovery codes, admin can reset a user's 2FA (`segno` is
+   already in requirements for the QR).
+3. Audit log of vendor access (page views / exports).
+4. Postgres-side isolation: a `reporting_vendor` role with SELECT only on a
+   `vendor` schema of views + RLS on brand; today the app uses `reporting_read`
+   and filters in its SQL.
+5. Decide whether pre-Macgear Eufy history (`customer_department = 'EUFY
+   Historical'`) is shown to vendors — the report currently includes it, as the
+   prototype did.
+
+## Reports
+
+Data comes from the warehouse (`macgear_reporting` on the DO cluster) through
+`REPORTING_DB_URL` = the read-only `reporting_read` role (`app/warehouse.py`;
+connection per query, results cached 10 min per scope). Locally `.env` holds it
+(gitignored; copied from `Sell Through/.env` `REPORTING_READ_DB_URL`) and
+`run.ps1` loads it. Without it, reports show "warehouse could not be reached"
+and the tools still work. The droplet will need the variable (already wired in
+`deploy/docker-compose.basic.yml`) and to be a trusted source on the cluster.
+
+**Sell-Through** (`app/sell_through.py` + `templates/report_sell_through.html`):
+the prototype's builder and page, with the JSON built per request and scoped.
+Checked 2026-10-15 against `build_prototype.build(26, 10)` on live data: units,
+SOH, on order, SKU counts, retailer lists and product picks identical; retail
+value differs only where a sum lands on exactly $x.50 (exact Decimal + round
+half-up here vs pandas float rounding). Vendor scope ANKER+EUFY WE 2026-10-11 =
+AU 6,312 / NZ 878 units = direct SQL. The page is self-styled (not `base.html`)
+because its class names collide with `style.css`. Light + dark (2026-10-15): same
+rule as the other report pages — dark unless the viewer chose light in the side
+menu; colours are CSS variables (`[data-theme="dark"]` block), the SVG charts
+read them at draw time and redraw when the theme flips (MutationObserver).
+
+**Home page** (`app/sales.py`, `templates/home.html`, built 2026-10-15). For users
+with `sell_in_value` (never vendors — the route doesn't even build it): AU and NZ
+side by side, never summed — month-to-date revenue vs the same dates last year,
+"on pace for" (MTD ÷ weekdays so far × weekdays in month), today, FY quarter- and
+year-to-date vs LY, est. GP (margin tick), a cumulative-by-day chart (this month,
+last month, same month LY, target line when loaded), and top customers / brands /
+reps / items this month. Everyone with a sell-through report also gets a
+sell-through snapshot (last week's units, WoW, top 5) in their scope.
+- Revenue = `fact_sales_line.net_sales` by `date_key`. **Periods use Macgear's FY,
+  April–March (FY27 = Apr 2026–Mar 2027), Q1 = Apr–Jun.** "Today" is Sydney's
+  date (`sales_today()`).
+- **Two calendars, by subject (user, 2026-10-15; root CLAUDE.md "Which calendar
+  where"):** internal revenue → financial year (Apr–Mar); sell-through, and sell-in
+  shown next to sell-through (always for vendors) → calendar year. Today the
+  sell-through pages use rolling weeks (4/13/26/52), so no conflict yet — any
+  YTD / quarter added to Item Explorer, the table or the dashboard must be
+  CALENDAR; anything added to the revenue side must be FY. Label every period.
+- Checked 2026-10-15 vs independent SQL: AU MTD $8,485,109 (LY $1,944,926), FY27
+  YTD $63,432,141 (LY $27,713,755), GP MTD $2,583,861; NZ MTD $1,749,081, YTD
+  $14,643,586 — equal.
+- **Targets:** `sales.targets()` reads `reporting.sales_target` (country_code,
+  month_start, amount — finer rows summed) if the table exists; until then tiles
+  say "No target loaded". The Targets app (`Targets/targets.db`) holds FY27
+  targets by country × brand × customer × month — the natural source to export.
+- Daily series ~6 s to build; cached + warmed like every report.
+- **Revenue vs a NetSuite figure (2026-10-15).** `net_sales` already = invoices +
+  credit memos on the Sales account (all of them inventory items — "inventory
+  credits"); freight / rebate / misc credits post to other accounts and aren't
+  revenue. AU Oct-to-date at the 3:32pm (Brisbane) data: invoices $8,905,740 −
+  credits $304,207 = **$8,601,533**. The user's NetSuite figure $9,103,960 ≈ that
+  + **AU→NZ intercompany $506,110** ($9,107,643) — so their search includes
+  intercompany, which the warehouse rule (2026-10-14) excludes. Asked the user
+  which the site should show; don't change `net_sales` without that answer.
+- **How fresh:** NetSuite → Zone export (15 min) → S3 → Windmill load (every 15
+  min, :05/:20/:35/:50) → warehouse → site cache (sales TTL 5 min, refreshed in
+  the background) ⇒ typically 15–35 min from invoice to home page. The "latest
+  change" chip is the newest NetSuite Last Modified in the data, read as
+  **Brisbane** time (scheduled exports) and shown in Sydney time.
+
+**Receipt strip** (`app/receipts.py`, `templates/_st_status.html`, 2026-10-15) —
+"who have we received" for sell-through, a one-line collapsible bar at the top
+of home, Item Explorer (landing + item), the table and the dashboard: "w/e 11 Oct
+· 15 / 15 in · waiting on …", expanding to every feed with ✓ in (Sydney load
+time) / ◐ part in / ○ waiting (latest week received).
+- Expected week = the most recent Sunday BEFORE today (Sydney): on Monday it
+  shows last night's week with nothing in yet — that's the point.
+- Feed = retailer × country; expected feeds = those that sent in the previous 4
+  weeks. "Part in" = some of a feed's usual departments missing (Harvey Norman's
+  IT and Small Appliances are separate files). 'EUFY Historical' isn't a feed.
+- Vendors see only retailers that carried their brands in the last 8 weeks.
+- Cached 5 min (files land through the day). Testing: `REPORT_TODAY=2026-10-19`
+  pretends it's another day (e.g. a Monday with nothing in).
+- To add it to a new sell-through page: `{% include "_st_status.html" %}`; it
+  renders nothing for users without a sell-through report.
+
+**Item Explorer** (`app/items.py`, `templates/items.html` + `item.html`). Landing
+= a search box that **filters the tiles on the page** (user, 2026-10-15 — no jump
+to the item page): every word must match code / name / brand, a "Matches" tab
+appears (13-week units order), the other tabs and the summary cards work on the
+narrowed set, `?q=` stays in the address for Back, Enter opens the item when one
+tile is left. The server search (`/reports/items/search`, word-by-word + exact
+UPC, ranked by lifetime units so dummy packs sort last) adds barcode matches and
+items with no sell-through in the 13 weeks as plain tiles. The item page's top
+search still drops down and jumps straight to an item. Plus tabbed leaderboards (top
+sellers, value, risers, fallers, stock-out risk, new, a per-browser watchlist)
+from one cached 13-week leaderboard per scope × region. Item page = header (image
+slot, codes, RRP, status, rank in scope), KPI cards, a switchable chart (units,
+value, retailer stock, sell-in vs sell-through, sell-in $, GP, cumulative),
+retailer table, top stores (4 weeks), Macgear stock by location, and rule-based
+plain-English insights. Rules worth knowing:
+- **Pre-Macgear Eufy history** (`customer_department = 'EUFY Historical'`) counts
+  as sell-through, but is its own series (`st_hist`): grey in the chart, and left
+  out of the in-vs-out ratio and the trend insight. The ratio covers only weeks
+  since the first sell-in week in the window.
+- Sell-in = `fact_sales_line.net_sales*` (account 54, intercompany excluded),
+  grouped by `dim_date.week_ending_date`; the current part-week shows as a faded
+  bar. Retailer = `fact_sales_line.customer_key` (NOT `v_sell_in_vs_sell_through`,
+  7 s per item). Macgear stock = `fact_inventory_daily.is_latest`, Saleable only;
+  its cover = available ÷ 4-week average SELL-IN.
+- Leaderboard totals exclude lines not on the item list (brand NULL), so they sit
+  slightly under the dashboard: WE 2026-10-11 AU 20,953 + 254 unmatched = 21,207.
+- Out-of-scope items are 404, never 403. Vendor ranks are within their own scope.
+- Product images: `data/item_images/<code>.(jpg|png|webp)` (non-alphanumerics → `_`),
+  uploaded by admins on the item page. No image → initials.
+Checked 2026-10-15 vs independent SQL for E8173C22 AU 26 weeks: units 3,703
+(2,860 history), SOH 2,324, on order 46, sell-in 624 / $627,064 / GP $126,486,
+available 350 — all equal.
+
+**Sell-Through Table** (`app/st_table.py`, `templates/st_table.html`). Same measures
+and SQL shape as `Sell Through/db/export_matrix.py` (change both together).
+Grains: product × retailer (the "All AU" tab), product total, product × store (one
+retailer). Week columns come from the global loaded-week list via
+`warehouse.recent_weeks` (date_key index; the same question through the dimension
+joins took ~10 s). Checked 2026-10-15 against `export_matrix.fetch` for WE
+2026-10-11, 12 prior weeks: AU 2,025 rows and NZ every cell identical (a NZ row
+splits where a retailer sent two customer codes in one week — the workbook does
+the same). ~3 s uncached. The Excel download is built server-side
+(`st_table.to_xlsx`, workbook styling) from the same filters; the Find box filters
+the screen only.
+
+**Speed (2026-10-15).** Connecting costs ~70 ms and a round trip ~6 ms, so time
+is in the queries. Two layers:
+- *Queries are fact-first:* aggregate `fact_sell_through` on its own indexed keys
+  (`region_key`, `date_key` ints — `warehouse.region_key()`, `recent_weeks()`),
+  then join names. Table 2.5 → 1.4 s, filter options 3.3 → 0.4 s, leaderboard
+  1.3 → 0.3 s. Sell-in filters `fact_sales_line` on `ns_item_id` as well as
+  `item_key` (the view maps item_key, so only the NetSuite id hits the raw index;
+  2x). Each rewrite was re-checked: same rows / totals as before.
+- *Cache* (`warehouse.cached`): fresh → served; stale → served at once and rebuilt
+  in a background thread; cold → built once even under concurrent requests. TTL
+  30 min for sell-through results, 10 min for sell-in/stock. A refresher thread
+  (`start_refresher`, started by the app lifespan when `REPORTING_DB_URL` is set)
+  warms the all-brands views at startup (`_warm_reports`) and rebuilds anything
+  used in the last 2 h just before it goes stale — vendor scopes included.
+  Measured over HTTP after warm-up: landing pages 36–141 ms; a never-seen item
+  ~0.7 s then 5 ms; an unusual table filter ~2.8 s the first time, then ~40 ms.
+- Front end: GZip on responses; item links prefetch on hover/touch and the top
+  search hit is prefetched as results appear; a thin progress bar shows while a
+  page loads.
+Tests: `tests/test_cache.py`.
+- **Auto-reload on Windows can hang** ("Reloading..." then nothing; the old
+  process keeps serving old code). Reproduced 2026-10-15 even with a 5-line
+  FastAPI app, so it's uvicorn's Ctrl+C-based restart, not this app. If a change
+  doesn't show, stop `run.ps1` (Ctrl+C) and start it again. The cache lives in the process — two uvicorn
+workers would each warm their own (fine at this size).
+
+**Report look** (`_rpt_base.html`, `static/report.css`, `static/rpt.js`): dark
+by default (light if the viewer chose it in the side menu), `r-` prefixed
+classes, a no-build SVG chart (`RPT.chart`, bars can `stack`), sparklines, the
+search box. `asset_ver` is the newest mtime of any static file.
+
 ## Run it
 
 ```powershell
-.\run.ps1          # http://127.0.0.1:8030
+.\run.ps1          # http://127.0.0.1:8030 — loads .env (REPORTING_DB_URL)
 ```
+
+Local `data/app.db` has no user accounts, so auth is off locally (everything
+visible). `APP_DB_PATH` points the app at another SQLite file — tests use it
+(`tests/conftest.py`), and it's how to try a vendor login without adding test
+accounts to the real `app.db`.
 
 Port 8030 locally; the container still serves 8000 internally and the docker
 service is still named `claims` — **do not change the Docker/Caddy/n8n
@@ -72,8 +283,14 @@ Shared shell:
 
 | File | |
 |---|---|
-| `app/main.py` | All routes, auth middleware, template filters, the `TOOLS` tile list |
-| `app/perms.py` | Roles, tool keys, access resolution — the unit-tested part |
+| `app/main.py` | All routes, auth middleware, template filters, the `REPORTS` / `TOOLS` tile lists |
+| `app/perms.py` | Roles, area keys, access + brand/region scope resolution — the unit-tested part |
+| `app/warehouse.py` | Read-only warehouse connection + the scoped report cache |
+| `app/sell_through.py` | Sell-Through report data (scoped SQL → page JSON) |
+| `app/items.py` | Item Explorer data: search, leaderboard, one item (scoped, capability-gated) |
+| `app/st_table.py` | Sell-Through Table data + Excel export |
+| `app/receipts.py` | Which retailers' sell-through is in for the latest week (the strip) |
+| `app/sales.py` | Home page internal sales (FY periods, pace, targets hook) |
 | `app/security.py` | PBKDF2 hashing, cookie signing, set-password tokens |
 | `app/db.py` | Engine, session, additive column migrations |
 | `app/models.py` | SQLAlchemy models for both tools, plus `User` |
@@ -87,13 +304,23 @@ Vendor Promos: `calc.py`, `service.py`, `export.py`, `workflow.py`,
 Vendor Bill Importer: `bill_calc.py`, `bill_pdf.py`, `bill_export.py`,
 `bill_service.py`, template `bills.html`.
 
+Landing pages: `home.html` (reports), `tools.html`. Reports: `report_sell_through.html`.
+
+**Navigation is a left fly-out menu** (`_sidenav.html` + `static/sidenav.css`,
+2026-10-15, built for phones first): a ☰ button in each page's top bar opens a
+drawer listing the current tool's own links, Reports, Tools, Admin, then the
+user, dark mode and sign-out. `base.html` includes it and also shows the
+current tool's `{% block nav %}` links in the top bar on screens wider than
+760px; the self-styled report pages include the same partial. The drawer lists
+only what `nav_reports` / `nav_tools` allow — presentation only.
+
 Auth and admin templates: `login.html`, `set_password.html`, `denied.html`,
 `admin_users.html`, `admin_user_form.html`. The first two are standalone pages
 (no `base.html`) because they render before there is a session to build a nav from.
 
 Promo pages extend `promo_base.html` (which supplies the promo nav), not
 `base.html` directly. Everything else extends `base.html` and fills
-`{% block nav %}` — don't add a "Users" link there, `base.html` already does it
+`{% block nav %}` — don't add a "Users" link there, the side menu already has it
 for admins.
 
 ## Vendor Bill Importer — the parts worth knowing

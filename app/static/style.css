@@ -344,3 +344,46 @@ table.grid tfoot .totrow td{border-top:2px solid var(--line);font-weight:600;
 .copyrow input{flex:1;font-family:ui-monospace,Consolas,monospace;font-size:.82rem}
 .denied{max-width:520px;padding:1.6rem;margin:2rem auto;text-align:center}
 .denied h1{margin-bottom:.6rem}
+
+/* site nav: Tools dropdown + separator before a tool's own links */
+.navmenu{position:relative}
+.navmenu summary{list-style:none;cursor:pointer;color:#dfe7f5}
+.navmenu summary::-webkit-details-marker{display:none}
+.navmenu summary::after{content:" \25BE";font-size:.8em}
+.navmenu summary:hover{color:#fff}
+.navmenu-list{position:absolute;top:calc(100% + .6rem);left:0;z-index:30;min-width:200px;
+  background:var(--card);border:1px solid var(--line);border-radius:8px;
+  box-shadow:0 8px 24px rgba(0,0,0,.15);padding:.35rem 0;display:flex;flex-direction:column}
+.topbar nav .navmenu-list a{color:var(--ink);padding:.45rem .9rem}
+.topbar nav .navmenu-list a:hover{background:var(--bg);text-decoration:none}
+.navsep{width:1px;height:20px;background:rgba(255,255,255,.3)}
+.home-section{margin-top:1.6rem}
+.home-section h2{color:var(--muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.08em;font-weight:600}
+/* user form: brand picker */
+.brandgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.15rem .8rem;
+  max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:.5rem .7rem;margin-top:.4rem}
+.brandgrid .chk{font-size:.88rem}
+.brandtools{display:flex;gap:.8rem;align-items:center;flex-wrap:wrap}
+.brandtools input[type=search]{max-width:240px}
+
+/* [hidden] must beat the display rules on .chk / .formcard labels */
+.formcard [hidden]{display:none!important}
+#brandbox{display:block}
+#brandbox .brandtools{margin-top:.4rem}
+
+/* top bar since the fly-out menu (2026-10-15): ☰ + brand on the left, the
+   current tool's own links on the right on wide screens only */
+.topbar{justify-content:flex-start;gap:.8rem}
+.topbar .toolnav{margin-left:auto;display:flex;gap:1.2rem;align-items:center}
+.topbar .toolnav a{color:#dfe7f5}
+.topbar .toolnav a:hover{color:#fff}
+@media (max-width:760px){
+  .topbar{padding:.55rem .8rem}
+  .topbar .toolnav{display:none}
+  .brand-logo{height:28px}
+  main{padding:0 .8rem;margin-top:1rem}
+  .toolgrid{grid-template-columns:1fr}
+  table.grid{display:block;overflow-x:auto}
+}
+.topbar .toolnav .btn{background:rgba(255,255,255,.16);color:#fff;padding:.35rem .8rem}
+.topbar .toolnav .btn:hover{background:rgba(255,255,255,.28)}

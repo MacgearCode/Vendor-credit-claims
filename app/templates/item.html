@@ -1,0 +1,273 @@
+{% extends "_rpt_base.html" %}
+{% block title %}{{ h.name }} · Item Explorer{% endblock %}
+{% block pagename %}Item Explorer{% endblock %}
+{% block home_href %}/reports/items?region={{ region }}{% endblock %}
+{% block topsearch %}
+<div class="r-top-search r-search" data-search="/reports/items/search" data-region="{{ region }}">
+  <input type="search" placeholder="Search another item…" aria-label="Search items" autocomplete="off">
+</div>
+{% endblock %}
+
+{% block content %}
+{% include "_st_status.html" %}
+{# ---- header ---- #}
+<section class="r-card">
+  <div class="r-hero">
+    <div class="r-thumb lg" id="heroImg">
+      {% if has_image %}<img src="/reports/items/img/{{ h.code|urlencode }}?v={{ image_ver }}" alt="{{ h.name }}">
+      {% else %}{{ initials }}{% endif %}
+    </div>
+    <div class="r-hero-main">
+      <p class="r-eyebrow">{{ h.brand }}{% if h.category %} · {{ h.category }}{% endif %}</p>
+      <h1>{{ h.name }}</h1>
+      <div class="r-meta">
+        <span class="r-chip"><span class="r-muted">Code</span> <b class="r-mono">{{ h.code }}</b></span>
+        {% if h.upc %}<span class="r-chip"><span class="r-muted">UPC</span> <b class="r-mono">{{ h.upc }}</b></span>{% endif %}
+        {% if h.rrp[region] %}<span class="r-chip"><span class="r-muted">RRP</span> <b>{{ '%s%0.2f'|format('NZ$' if region == 'NZ' else '$', h.rrp[region]) }}</b></span>{% endif %}
+        {% if h.status[region] %}<span class="r-chip {{ 'pos' if h.status[region] == 'Active' else 'warn' }}">{{ region }} · {{ h.status[region] }}</span>{% endif %}
+        {% if h.inactive %}<span class="r-chip neg">Inactive in NetSuite</span>{% endif %}
+        {% if rank.overall %}<span class="r-chip acc">#{{ rank.overall }} of {{ rank.of }} in {{ region }} last week</span>{% endif %}
+        {% if rank.brand %}<span class="r-chip acc">#{{ rank.brand }} of {{ rank.brand_of }} {{ h.brand }}</span>{% endif %}
+      </div>
+    </div>
+    <div class="r-hero-side">
+      <button class="r-star" id="starBtn" type="button">☆ Watch</button>
+      {% if regions|length > 1 %}
+      <div class="r-seg" role="group" aria-label="Region">
+        {% for r in regions %}<a href="?region={{ r }}&weeks={{ weeks }}" class="{{ 'on' if r == region }}">{{ r }}</a>{% endfor %}
+      </div>
+      {% endif %}
+      <div class="r-seg" role="group" aria-label="Period">
+        {% for w in (4, 13, 26, 52) %}<a href="?region={{ region }}&weeks={{ w }}" class="{{ 'on' if w == weeks }}">{{ w }}W</a>{% endfor %}
+      </div>
+    </div>
+  </div>
+  {% if can_upload %}
+  <form class="r-meta" method="post" action="/reports/items/img/{{ h.code|urlencode }}" enctype="multipart/form-data" style="margin-top:14px">
+    <span class="r-muted" style="font-size:12.5px">Product image (admins):</span>
+    <input type="file" name="image" accept="image/png,image/jpeg,image/webp" required class="r-input" style="padding:5px">
+    <button class="r-btn ghost" type="submit">Upload</button>
+  </form>
+  {% endif %}
+</section>
+
+<div class="r-stats" id="kpis"></div>
+
+{# ---- main chart ---- #}
+<section class="r-card r-sec">
+  <div class="r-card-h">
+    <div><p class="r-eyebrow">Trend · weekly · {{ region }}</p><h2 id="chartTitle">Sell-through units</h2></div>
+    <div class="r-tabs" id="metricTabs"></div>
+  </div>
+  <div class="r-chart" id="chart"></div>
+  <div class="r-legend" id="legend"></div>
+</section>
+
+<div class="r-grid r-cols-2 r-sec">
+  <section class="r-card">
+    <div class="r-card-h"><div><p class="r-eyebrow">By retailer · {{ weeks }} weeks</p><h2>Where it sells</h2></div></div>
+    <div class="r-tablewrap" style="max-height:none;border:0">
+      <table class="r-table" id="retTable"></table>
+    </div>
+  </section>
+  <section class="r-card">
+    <div class="r-card-h"><div><p class="r-eyebrow">Read-out</p><h2>Insights</h2></div></div>
+    <div class="r-insights" id="insights"></div>
+  </section>
+</div>
+
+<div class="r-grid r-cols-2 r-sec">
+  <section class="r-card">
+    <div class="r-card-h"><div><p class="r-eyebrow">Last 4 weeks</p><h2>Top stores</h2></div></div>
+    <div id="stores"></div>
+  </section>
+  {% if 'sell_in' in caps %}
+  <section class="r-card">
+    <div class="r-card-h"><div><p class="r-eyebrow" id="invAsAt">Macgear warehouse</p><h2>Macgear stock</h2></div></div>
+    <div id="inventory"></div>
+  </section>
+  {% endif %}
+</div>
+
+<p class="r-note">
+  Sell-through = what retailers report selling to shoppers each week (week ending Sunday); retailer stock and on-order are as reported for that week.
+  Retail value = units × RRP in {{ cur }}.
+  {% if 'sell_in' in caps %}Sell-in = Macgear's NetSuite sales to retailers (units{% if 'sell_in_value' in caps %}, and $ ex-GST{% endif %}; net of credits, intercompany excluded), grouped into the same Sunday weeks; the faded last bar is the week so far.
+  Macgear stock = latest snapshot of saleable warehouse locations; its cover uses the average weekly sell-in of the last 4 weeks.{% endif %}
+  {% if 'margin' in caps %}GP = NetSuite's estimated cost, not posted COGS.{% endif %}
+  Cover = stock ÷ average weekly units over the last 4 weeks. AU and NZ are never added together.
+</p>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  "use strict";
+  var D = {{ d|tojson }}, H = {{ h|tojson }}, CAPS = {{ caps|list|tojson }};
+  var CUR = {{ cur|tojson }}, REGION = {{ region|tojson }}, N = D.weeks.length;
+  var S = D.series, K = D.kpis, has = function (c) { return CAPS.indexOf(c) >= 0; };
+  var col = {acc: RPT.css("--r-accent"), acc2: RPT.css("--r-accent-2"), amb: RPT.css("--r-amber"),
+             pos: RPT.css("--r-pos"), neg: RPT.css("--r-neg"), muted: RPT.css("--r-muted")};
+  var money = function (v) { return RPT.money(v, CUR); };
+  var HIST = K.hist_units > 0;                       // previous distributor's sell-out in the window
+  var stMg = S.st_units.map(function (u, i) { return u - S.st_hist[i]; });
+  col.hist = RPT.css("--r-faint");
+  var moneyFull = function (v) { return RPT.money(v, CUR, true); };
+
+  // ---- watch star ----
+  var star = document.getElementById("starBtn");
+  function paintStar(on) { star.classList.toggle("on", on); star.textContent = on ? "★ Watching" : "☆ Watch"; }
+  paintStar(RPT.watchList().indexOf(H.code) >= 0);
+  star.addEventListener("click", function () { paintStar(RPT.watchToggle(H.code)); });
+
+  // ---- KPI cards ----
+  var wow = RPT.delta(RPT.pct(K.last_week, K.prev_week));
+  var cards = [
+    {l: "Sell-through units", v: RPT.int(K.st_units), s: HIST ? "incl. " + RPT.int(K.hist_units) + " before Macgear" :
+      '<span class="' + wow.cls + '">' + wow.arrow + " " + wow.txt + "</span> last week (" + RPT.int(K.last_week) + ")", sp: S.st_units},
+    {l: "Retail value", v: money(K.st_value), s: CUR + " · units × RRP", sp: S.st_value},
+    {l: "Retailer stock", v: RPT.int(K.soh), s: K.cover == null ? "no stock reported" : K.cover.toFixed(1) + " weeks of cover", sp: S.soh},
+    {l: "Retailer on order", v: RPT.int(K.on_order), s: K.accounts + " accounts selling · " + RPT.int(K.stores) + " stores"}
+  ];
+  if (has("sell_in")) {
+    cards.push({l: "Sell-in units", v: RPT.int(K.si_units), s: K.sell_ratio == null ? "no sell-in in period" :
+      "out ÷ in " + K.sell_ratio.toFixed(2) + "× since " + RPT.wk(K.ratio_from), sp: S.si_units});
+    if (has("sell_in_value")) cards.push({l: "Sell-in value", v: money(K.si_value), s: CUR + " ex-GST, net", sp: S.si_value});
+    if (has("margin")) cards.push({l: "Est. gross profit", v: money(K.gp), s: K.gp_pct == null ? "—" : K.gp_pct.toFixed(1) + "% margin", sp: S.si_gp});
+    if (D.inventory) cards.push({l: "Macgear available", v: RPT.int(D.inventory.available), s: D.inventory.weeks_cover == null ? RPT.int(D.inventory.on_hand) + " on hand" : D.inventory.weeks_cover.toFixed(1) + " weeks of sell-in"});
+  }
+  document.getElementById("kpis").innerHTML = cards.map(function (c) {
+    return '<div class="r-stat"><div class="lbl">' + c.l + '</div><div class="val">' + c.v + '</div><div class="sub">' + c.s + "</div>" +
+      (c.sp ? '<span class="spark">' + RPT.spark(c.sp.slice(-13), 86, 30) + "</span>" : "") + "</div>";
+  }).join("");
+
+  // ---- chart ----
+  var labels = D.weeks.slice(), wtd = D.sell_in_wtd;
+  function withWtd(arr, v) { return wtd ? arr.concat([v]) : arr; }
+  var metrics = [
+    {k: "st_units", t: "Sell-through units", f: RPT.int, series: function () {
+      var out = [{name: HIST ? "Sell-through (Macgear)" : "Sell-through units", values: stMg, color: col.acc, type: "bar", stack: "st"}];
+      if (HIST) out.push({name: "Previous distributor", values: S.st_hist, color: col.hist, type: "bar", stack: "st"});
+      return out; }},
+    {k: "st_value", t: "Retail value", f: moneyFull, series: function () { return [{name: "Retail value", values: S.st_value, color: col.amb, type: "bar"}]; }},
+    {k: "stock", t: "Retailer stock", f: RPT.int, series: function () { return [
+      {name: "Retailer stock", values: S.soh, color: col.acc2, type: "area"},
+      {name: "On order", values: S.on_order, color: col.muted, type: "line", dash: true}]; }}
+  ];
+  if (has("sell_in")) {
+    metrics.push({k: "vs", t: "Sell-in vs sell-through", f: RPT.int, wtd: true, series: function () { return [
+      {name: "Sell-in units", values: withWtd(S.si_units, Math.round(wtd ? wtd.u : 0)), color: col.amb, type: "bar"},
+      {name: HIST ? "Sell-through (Macgear)" : "Sell-through units", values: withWtd(stMg, null), color: col.acc, type: "line"}]; }});
+    if (has("sell_in_value")) metrics.push({k: "si_value", t: "Sell-in value", f: moneyFull, wtd: true, series: function () { return [
+      {name: "Sell-in value", values: withWtd(S.si_value, wtd ? Math.round(wtd.v) : 0), color: col.amb, type: "bar"}]; }});
+    if (has("margin")) metrics.push({k: "gp", t: "Est. gross profit", f: moneyFull, wtd: true, series: function () { return [
+      {name: "Est. GP", values: withWtd(S.si_gp, wtd ? Math.round(wtd.gp) : 0), color: col.pos, type: "bar"}]; }});
+  }
+  metrics.push({k: "cum", t: "Cumulative", f: RPT.int, series: function () {
+    var c = 0, out = [{name: "Sell-through (cumulative)", values: S.st_units.map(function (v) { return c += v; }), color: col.acc, type: "area"}];
+    if (has("sell_in")) { var c2 = 0; out.push({name: "Sell-in (cumulative)", values: S.si_units.map(function (v) { return c2 += v; }), color: col.amb, type: "line"}); }
+    return out; }});
+
+  var tabs = document.getElementById("metricTabs"), chartEl = document.getElementById("chart"), cur = metrics[0];
+  tabs.innerHTML = metrics.map(function (m, i) {
+    return '<button class="r-tab" data-m="' + m.k + '" aria-pressed="' + (i === 0) + '">' + m.t + "</button>";
+  }).join("");
+  function show(m) {
+    cur = m;
+    document.getElementById("chartTitle").textContent = m.t;
+    var series = m.series(), lab = m.wtd && wtd ? labels.concat([wtd.week]) : labels;
+    RPT.chart(chartEl, {labels: lab, series: series, fmt: function (v) { return m.f(v); },
+      axis: m.f === moneyFull ? function (v) { return RPT.money(v, CUR); } : null, partialLast: !!(m.wtd && wtd)});
+    document.getElementById("legend").innerHTML = series.map(function (s) {
+      return '<span><i style="background:' + s.color + '"></i>' + RPT.esc(s.name) + "</span>";
+    }).join("");
+  }
+  tabs.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-m]"); if (!b) return;
+    tabs.querySelectorAll("[data-m]").forEach(function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+    show(metrics.filter(function (m) { return m.k === b.getAttribute("data-m"); })[0]);
+  });
+  show(cur);
+
+  // ---- retailer table ----
+  var R = D.retailers, totU = R.reduce(function (t, r) { return t + r.units; }, 0) || 1;
+  var head = '<thead><tr><th class="l">Retailer</th><th class="l">Share</th><th>Units</th><th>Last wk</th><th class="l">Trend</th><th>SOH</th><th>Cover</th>' +
+    (has("sell_in") ? "<th>Sell-in</th>" : "") + "</tr></thead>";
+  function wos(c) {
+    if (c == null) return '<span class="r-faint">—</span>';
+    return '<span class="r-wos ' + (c < 3 ? "low" : c > 12 ? "high" : "ok") + '">' + (c >= 99 ? "99+" : c.toFixed(1)) + "</span>";
+  }
+  document.getElementById("retTable").innerHTML = head + "<tbody>" + (R.length ? R.map(function (r) {
+    var d = RPT.delta(RPT.pct(r.last, r.prev));
+    return '<tr><td class="l"><div class="pn">' + RPT.esc(r.name) + '</div><div class="pc">' + (r.stores ? RPT.int(r.stores) + " stores" : "national") + "</div></td>" +
+      '<td class="l"><div class="r-sharebar"><i style="width:' + (r.units / totU * 100).toFixed(1) + '%"></i></div><div class="pc">' + (r.units / totU * 100).toFixed(0) + "%</div></td>" +
+      "<td><b>" + RPT.int(r.units) + "</b></td>" +
+      "<td>" + RPT.int(r.last) + ' <span class="' + d.cls + '" style="font-size:11px">' + d.arrow + "</span></td>" +
+      '<td class="l">' + RPT.spark(r.spark, 90, 26, r.last >= r.prev ? col.pos : col.neg) + "</td>" +
+      "<td>" + RPT.int(r.soh) + "</td><td>" + wos(r.cover) + "</td>" +
+      (has("sell_in") ? "<td>" + RPT.int(r.si_units) + "</td>" : "") + "</tr>";
+  }).join("") : '<tr><td colspan="8" class="l r-muted">No retailer activity in this period.</td></tr>') + "</tbody>";
+
+  // ---- stores ----
+  var st = D.stores;
+  document.getElementById("stores").innerHTML = st.length ? '<table class="r-table"><thead><tr><th class="l">Store</th><th>Units</th><th>SOH</th></tr></thead><tbody>' +
+    st.map(function (s) {
+      return '<tr><td class="l"><div class="pn">' + RPT.esc(s.store) + '</div><div class="pc">' + RPT.esc(s.retailer) + "</div></td><td><b>" + RPT.int(s.units) + "</b></td><td>" + RPT.int(s.soh) + "</td></tr>";
+    }).join("") + "</tbody></table>" : '<p class="r-muted">No store-level sales in the last 4 weeks (some retailers only report national totals).</p>';
+
+  // ---- Macgear stock ----
+  var invEl = document.getElementById("inventory");
+  if (invEl && D.inventory) {
+    var I = D.inventory;
+    document.getElementById("invAsAt").textContent = "Macgear warehouse" + (I.as_at ? " · as at " + RPT.wk(I.as_at, true) : "");
+    invEl.innerHTML = I.rows.length ? '<div class="r-stats" style="margin:0 0 14px;grid-template-columns:repeat(3,1fr)">' +
+      [["On hand", I.on_hand], ["Available", I.available], ["On order", I.on_order]].map(function (c) {
+        return '<div class="r-stat" style="box-shadow:none"><div class="lbl">' + c[0] + '</div><div class="val" style="font-size:24px">' + RPT.int(c[1]) + "</div></div>";
+      }).join("") + "</div>" +
+      '<table class="r-table"><thead><tr><th class="l">Location</th><th>On hand</th><th>Available</th><th>Committed</th><th>In transit</th></tr></thead><tbody>' +
+      I.rows.map(function (r) {
+        return '<tr><td class="l">' + RPT.esc(r.location) + "</td><td>" + RPT.int(r.on_hand) + "</td><td><b>" + RPT.int(r.available) + "</b></td><td>" + RPT.int(r.committed) + "</td><td>" + RPT.int(r.in_transit) + "</td></tr>";
+      }).join("") + "</tbody></table>" : '<p class="r-muted">No saleable Macgear stock in ' + REGION + ".</p>";
+  }
+
+  // ---- insights: plain-English read-out of what the numbers say ----
+  var ins = [];
+  function add(kind, icon, html) { ins.push('<div class="r-ins"><span class="ic ' + kind + '">' + icon + "</span><p>" + html + "</p></div>"); }
+  if (K.prev_week || K.last_week) {
+    var p = RPT.pct(K.last_week, K.prev_week);
+    if (p != null && Math.abs(p) >= 15 && Math.max(K.last_week, K.prev_week) >= 10)
+      add(p > 0 ? "pos" : "neg", p > 0 ? "▲" : "▼", "Sell-through " + (p > 0 ? "jumped" : "fell") + " <b>" + Math.abs(p).toFixed(0) + "%</b> last week (" + RPT.int(K.prev_week) + " → " + RPT.int(K.last_week) + " units).");
+  }
+  var half = Math.floor(N / 2);
+  if (HIST) {
+    var lastH = -1; S.st_hist.forEach(function (v, i) { if (v) lastH = i; });
+    add("acc", "i", "Includes <b>" + RPT.int(K.hist_units) + "</b> units sold under the previous distributor" + (lastH >= 0 ? " (to w/e " + RPT.wk(D.weeks[lastH], true) + ")" : "") +
+      " — shown in grey, and left out of the sell-in comparison.");
+  } else if (N >= 8) {
+    var a = S.st_units.slice(0, half).reduce(function (t, v) { return t + v; }, 0), b = S.st_units.slice(half).reduce(function (t, v) { return t + v; }, 0);
+    var tp = RPT.pct(b, a);
+    if (tp != null && Math.abs(tp) >= 10) add(tp > 0 ? "pos" : "warn", tp > 0 ? "↗" : "↘", "The second half of this " + N + "-week window sold <b>" + Math.abs(tp).toFixed(0) + "% " + (tp > 0 ? "more" : "less") + "</b> than the first.");
+  }
+  if (R.length && R[0].units > 0) add("acc", "◎", "<b>" + RPT.esc(R[0].name) + "</b> drives " + (R[0].units / totU * 100).toFixed(0) + "% of units" + (R.length > 1 ? ", then " + RPT.esc(R[1].name) + " (" + (R[1].units / totU * 100).toFixed(0) + "%)." : "."));
+  if (K.cover != null) {
+    if (K.cover < 3) add("neg", "!", "Retailers hold only <b>" + K.cover.toFixed(1) + " weeks</b> of stock at the current rate — risk of going out of stock.");
+    else if (K.cover > 16) add("warn", "≈", "Retailers hold <b>" + K.cover.toFixed(1) + " weeks</b> of stock — more than enough; expect slower reorders.");
+    else add("pos", "✓", "Retailer stock looks healthy at <b>" + K.cover.toFixed(1) + " weeks</b> of cover.");
+  }
+  R.filter(function (r) { return r.cover != null && r.cover < 2 && r.last >= 3; }).slice(0, 2).forEach(function (r) {
+    add("neg", "!", "<b>" + RPT.esc(r.name) + "</b> is down to " + r.cover.toFixed(1) + " weeks of cover (" + RPT.int(r.soh) + " units).");
+  });
+  if (has("sell_in") && K.sell_ratio != null) {
+    var since = " since w/e " + RPT.wk(K.ratio_from, true);
+    if (K.sell_ratio < 0.8) add("warn", "⇡", "Sell-in ran ahead of sell-through" + since + " (" + RPT.int(K.si_units) + " in vs " + RPT.int(K.st_since) + " out) — retailers are <b>building stock</b>.");
+    else if (K.sell_ratio > 1.2) add("pos", "⇣", "Sell-through outpaced sell-in" + since + " (" + RPT.int(K.st_since) + " out vs " + RPT.int(K.si_units) + " in) — retailers are <b>drawing stock down</b>" +
+      (K.cover != null && K.cover > 12 ? ", but still hold " + K.cover.toFixed(1) + " weeks, so reorders may lag." : "; reorders likely."));
+    else add("acc", "=", "Sell-in and sell-through are in balance" + since + " (" + RPT.int(K.si_units) + " in, " + RPT.int(K.st_since) + " out).");
+  }
+  if (D.inventory && D.inventory.weeks_cover != null && D.inventory.weeks_cover < 4)
+    add("neg", "!", "Macgear's available stock covers only <b>" + D.inventory.weeks_cover.toFixed(1) + " weeks</b> of recent sell-in.");
+  if (has("margin") && K.gp_pct != null) add("acc", "%", "Estimated margin over the period: <b>" + K.gp_pct.toFixed(1) + "%</b> (" + money(K.gp) + ").");
+  document.getElementById("insights").innerHTML = ins.length ? ins.join("") : '<p class="r-muted">Not enough activity in this period to say much.</p>';
+})();
+</script>
+{% endblock %}

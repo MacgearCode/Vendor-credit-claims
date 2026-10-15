@@ -6,3 +6,5 @@ openpyxl
 python-multipart
 pdfplumber
 tzdata
+segno
+psycopg[binary]

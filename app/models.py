@@ -155,9 +155,14 @@ class User(Base):
     email: Mapped[str] = mapped_column(String, unique=True, index=True)
     name: Mapped[str] = mapped_column(String, default="")
     password_hash: Mapped[str] = mapped_column(String, default="")
-    role: Mapped[str] = mapped_column(String, default="user")          # admin|user
-    # JSON list of tool keys; NULL means "use the role default" — see perms.py
+    role: Mapped[str] = mapped_column(String, default="user")          # admin|user|vendor
+    # JSON list of area keys (reports + tools); NULL means "use the role default" — see perms.py
     allowed_tools: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Data scope — JSON lists; see perms.effective_brands / effective_regions.
+    # NULL brands = every brand for staff, but NO brand for a vendor.
+    allowed_brands: Mapped[str | None] = mapped_column(Text, nullable=True)
+    allowed_regions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    company: Mapped[str] = mapped_column(String, default="")           # vendor's company, display only
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     last_login: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

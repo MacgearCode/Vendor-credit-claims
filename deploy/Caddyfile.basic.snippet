@@ -9,13 +9,18 @@
 # `claims` below is the docker service name in docker-compose.basic.yml, not a hostname.
 # Leave it as is — n8n posts to http://claims:8000 for the nightly pricing sync.
 
-apps.macgeargroup.com {
+reporting.macgeargroup.com {
     reverse_proxy claims:8000
 }
 
-# Was promos.macgeargroup.com until 2026-08-05, when the app grew a second tool and a
-# promos-specific name stopped fitting. Keep this block: sales and finance have the old
-# URL bookmarked. {uri} preserves the path, so an old /promo/12 link still resolves.
+# Old names, kept as redirects — people have them bookmarked. {uri} preserves the
+# path, so an old /promo/12 or /vendor-bills link still lands in the right place.
+#   apps.macgeargroup.com    the site's name 2026-08-05 -> 2026-10 (became reporting)
+#   promos.macgeargroup.com  the original name, until 2026-08-05
+apps.macgeargroup.com {
+    redir https://reporting.macgeargroup.com{uri} permanent
+}
+
 promos.macgeargroup.com {
-    redir https://apps.macgeargroup.com{uri} permanent
+    redir https://reporting.macgeargroup.com{uri} permanent
 }

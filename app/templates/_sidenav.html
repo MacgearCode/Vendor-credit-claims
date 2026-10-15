@@ -1,0 +1,112 @@
+{# Left fly-out site menu, shared by base.html and the self-styled report pages.
+   The page supplies the ☰ button (class "sn-open") in its own top bar; this
+   partial is the drawer, its overlay and the script. Styles: static/sidenav.css.
+
+   Expects in context: request, and optionally `sn_tool_title` / `sn_tool_nav`
+   (the current tool's own links, captured from its {% block nav %}).
+   Lists only what the signed-in user may open — presentation only; the
+   middleware is the control. #}
+{% set me = current_user(request) %}
+{% set here = request.url.path %}
+{% set my_reports = nav_reports(request) %}
+{% set my_tools = nav_tools(request) %}
+<div class="sn-overlay" id="snOverlay" hidden></div>
+<aside class="sn-drawer" id="snDrawer" aria-label="Site menu" aria-hidden="true" inert>
+  <div class="sn-head">
+    <a href="/" class="sn-logo"><img src="/static/macgear-logo.png?v={{ asset_ver }}" alt="Macgear"></a>
+    <button type="button" class="sn-close" id="snClose" aria-label="Close menu">&times;</button>
+  </div>
+
+  <nav class="sn-body">
+    <div class="sn-section">
+      <a href="/" class="{{ 'sn-active' if here == '/' }}">Home</a>
+    </div>
+
+    {% if sn_tool_nav and sn_tool_nav|trim %}
+    <div class="sn-section sn-toolnav">
+      <p class="sn-title">{{ sn_tool_title or "This page" }}</p>
+      {{ sn_tool_nav }}
+    </div>
+    {% endif %}
+
+    <div class="sn-section">
+      <p class="sn-title">Reports</p>
+      {% for r in my_reports %}
+      <a href="{{ r.href }}" class="{{ 'sn-active' if here.startswith(r.href) }}">{{ r.title }}</a>
+      {% endfor %}
+    </div>
+
+    {% if my_tools %}
+    <div class="sn-section">
+      <p class="sn-title">Tools</p>
+      {% for t in my_tools %}
+      <a href="{{ t.href }}" class="{{ 'sn-active' if here.startswith(t.href) }}">{{ t.title }}</a>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if me and perms.is_admin(me) %}
+    <div class="sn-section">
+      <p class="sn-title">Admin</p>
+      <a href="/admin/users" class="{{ 'sn-active' if here.startswith('/admin/users') }}">Users</a>
+    </div>
+    {% endif %}
+  </nav>
+
+  <div class="sn-foot">
+    {% if me %}
+    <div class="sn-who" title="{{ me.email }}">
+      <strong>{{ me.name or me.email }}</strong>
+      {% if me.company %}<span>{{ me.company }}</span>{% endif %}
+    </div>
+    {% endif %}
+    <div class="sn-actions">
+      {% if not sn_no_theme %}<button type="button" class="sn-theme" id="snTheme">Dark mode</button>{% endif %}
+      {% if me %}<a href="/logout" class="sn-signout">Sign out</a>{% endif %}
+    </div>
+  </div>
+</aside>
+<script>
+(function(){
+  var drawer=document.getElementById('snDrawer'), overlay=document.getElementById('snOverlay');
+  if(!drawer) return;
+  var opener=null;
+  function open(btn){
+    opener=btn||null;
+    overlay.hidden=false;
+    drawer.removeAttribute('inert'); drawer.setAttribute('aria-hidden','false');
+    requestAnimationFrame(function(){
+      document.body.classList.add('sn-is-open');
+      // focus once the drawer is visible — a hidden element can't take focus
+      var first=drawer.querySelector('.sn-body a'); if(first) first.focus({preventScroll:true});
+    });
+  }
+  function close(){
+    document.body.classList.remove('sn-is-open');
+    drawer.setAttribute('inert',''); drawer.setAttribute('aria-hidden','true');
+    setTimeout(function(){ overlay.hidden=true; }, 200);
+    if(opener) opener.focus();
+  }
+  document.querySelectorAll('.sn-open').forEach(function(b){
+    b.addEventListener('click', function(){ open(b); });
+  });
+  document.getElementById('snClose').addEventListener('click', close);
+  overlay.addEventListener('click', close);
+  document.addEventListener('keydown', function(e){
+    if(e.key==='Escape' && document.body.classList.contains('sn-is-open')) close();
+  });
+
+  // dark mode lives in the menu now; same localStorage key the shell reads in <head>
+  var t=document.getElementById('snTheme'); if(!t) return;
+  function isDark(){ return document.documentElement.getAttribute('data-theme')==='dark'; }
+  function paint(){ t.textContent=isDark()?'Light mode':'Dark mode'; }
+  paint();
+  t.addEventListener('click', function(){
+    var dark=!isDark();
+    if(dark) document.documentElement.setAttribute('data-theme','dark');
+    else document.documentElement.removeAttribute('data-theme');
+    try{ localStorage.setItem('theme', dark?'dark':'light'); }catch(e){}
+    paint();
+  });
+})();
+</script>

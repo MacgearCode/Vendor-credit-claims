@@ -1,0 +1,254 @@
+{% extends "_rpt_base.html" %}
+{% block title %}Item Explorer · Macgear Reporting{% endblock %}
+{% block pagename %}Item Explorer{% endblock %}
+{% block home_href %}/reports/items{% endblock %}
+
+{% block content %}
+{% include "_st_status.html" %}
+<section class="r-card" style="padding:28px 24px">
+  <p class="r-eyebrow">Item Explorer</p>
+  <h1 style="margin:0 0 6px;font-size:clamp(26px,4vw,40px);font-weight:800;letter-spacing:-.03em">Every product, every retailer, one search.</h1>
+  <p class="r-muted" style="margin:0 0 18px">Type to narrow the products below by name, Macgear code, brand or barcode, then open one.
+    Press <span class="r-chip">/</span> to jump to search.</p>
+  {# Filters the tiles on this page (no dropdown) — the item page's top search still jumps straight to an item. #}
+  <div class="r-search big">
+    <input type="search" id="q" placeholder="Search products, codes, brands or barcodes…" aria-label="Filter products" autocomplete="off" autofocus>
+  </div>
+</section>
+
+{% if error %}
+<p class="r-banner r-sec">{{ error }}</p>
+{% else %}
+<div class="r-sec r-filters" style="justify-content:space-between">
+  <div class="r-filters">
+    {% if regions|length > 1 %}
+    <div class="r-seg" role="group" aria-label="Region">
+      {% for r in regions %}<a href="?region={{ r }}" class="{{ 'on' if r == region }}">{{ r }}</a>{% endfor %}
+    </div>
+    {% endif %}
+    <select class="r-select" id="brandSel" aria-label="Brand"><option value="">All brands</option></select>
+  </div>
+  <span class="r-muted" style="font-size:13px">Week ending <b id="weLabel"></b> · {{ region }} · {{ 'NZD' if region == 'NZ' else 'AUD' }}</span>
+</div>
+
+<div class="r-stats" id="scopeStats"></div>
+
+<section class="r-sec">
+  <div class="r-tabs" id="tabs" role="tablist">
+    <button class="r-tab" data-tab="matches" hidden>Matches</button>
+    <button class="r-tab" data-tab="top" aria-pressed="true">Top sellers</button>
+    <button class="r-tab" data-tab="value">Top retail value</button>
+    <button class="r-tab" data-tab="risers">Biggest risers</button>
+    <button class="r-tab" data-tab="fallers">Biggest fallers</button>
+    <button class="r-tab" data-tab="risk">Stock-out risk</button>
+    <button class="r-tab" data-tab="new">New this month</button>
+    <button class="r-tab" data-tab="watch">★ Watchlist</button>
+  </div>
+  <p class="r-muted" id="tabNote" style="font-size:13px;margin:12px 0"></p>
+  <div class="r-items" id="list"></div>
+</section>
+
+<p class="r-note">Units and stock are what retailers report each week (week ending Sunday). Retail value = units × RRP.
+  Cover = retailer stock ÷ average weekly units over the last 4 weeks. Risers and fallers need at least 10 units in one of the two weeks.
+  Stock-out risk = selling 5+ a week with under 3 weeks of cover. Retailer lines that are not on the Macgear item list
+  can't be shown as items, so totals here can sit slightly below the Sell-Through Dashboard. AU and NZ are never added together.</p>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if not error %}
+<script>
+(function () {
+  "use strict";
+  var BOARD = {{ board|tojson }};
+  var IMAGES = new Set({{ images|tojson }});
+  var REGION = {{ region|tojson }}, CUR = REGION === "NZ" ? "NZD" : "AUD";
+  var W = BOARD.weeks, N = W.length;
+  // extras = server matches with no recent sell-through (quiet tiles);
+  // found = every code the server matched (barcodes too), so they count as matches here
+  var state = {tab: "top", brand: "", query: "", extras: [], found: new Set()};
+  var NOTES = {
+    top: "Most units sold through last week.", value: "Highest retail value last week (units × RRP).",
+    risers: "Largest unit increase on the week before.", fallers: "Largest unit drop on the week before.",
+    risk: "Selling at least 5 a week with under 3 weeks of retailer stock — talk to the account before it runs out.",
+    "new": "First sales within the last 4 weeks.", watch: "Items you starred on their page (kept in this browser).",
+    matches: "Every product matching your search, most units over the last 13 weeks first."
+  };
+  document.getElementById("weLabel").textContent = N ? RPT.wk(W[N - 1], true) : "—";
+
+  var brands = {};
+  BOARD.items.forEach(function (i) { brands[i.brand] = (brands[i.brand] || 0) + i.period_units; });
+  var bsel = document.getElementById("brandSel");
+  Object.keys(brands).sort(function (a, b) { return brands[b] - brands[a]; }).forEach(function (b) {
+    var o = document.createElement("option"); o.value = b; o.textContent = b; bsel.appendChild(o);
+  });
+  if (Object.keys(brands).length === 1) { bsel.value = Object.keys(brands)[0]; bsel.hidden = true; state.brand = bsel.value; }
+  bsel.addEventListener("change", function () { state.brand = bsel.value; render(); if (state.query) fetchExtras(); });
+
+  // Every word must appear in the code, name or brand ("eufy cam" finds "EUFYCam E42").
+  function words() { return state.query.toLowerCase().split(/\s+/).filter(Boolean); }
+  function matches(i, ws) {
+    var hay = (i.code + " " + i.name + " " + (i.brand || "")).toLowerCase();
+    return ws.every(function (w) { return hay.indexOf(w) >= 0; });
+  }
+  function pool() {
+    var ws = words();
+    return BOARD.items.filter(function (i) {
+      return (!state.brand || i.brand === state.brand) &&
+        (!ws.length || matches(i, ws) || state.found.has(i.code));
+    });
+  }
+
+  function lists(items) {
+    var sel = items.filter(function (i) { return i.units > 0; });
+    function by(a, f) { return a.slice().sort(f).slice(0, 24); }
+    var watch = RPT.watchList();
+    return {
+      top: by(sel, function (a, b) { return b.units - a.units || (a.code < b.code ? -1 : 1); }),
+      value: by(sel, function (a, b) { return b.value - a.value; }),
+      risers: by(items.filter(function (i) { return i.change > 0 && Math.max(i.units, i.prev) >= 10; }), function (a, b) { return b.change - a.change; }),
+      fallers: by(items.filter(function (i) { return i.change < 0 && Math.max(i.units, i.prev) >= 10; }), function (a, b) { return a.change - b.change; }),
+      risk: by(items.filter(function (i) { return i.cover != null && i.cover < 3 && i.units >= 5; }), function (a, b) { return a.cover - b.cover; }),
+      "new": by(items.filter(function (i) { return i["new"]; }), function (a, b) { return b.spark.slice(-4).reduce(sum) - a.spark.slice(-4).reduce(sum); }),
+      watch: watch.map(function (c) { return items.filter(function (i) { return i.code === c; })[0]; }).filter(Boolean),
+      matches: items.slice().sort(function (a, b) { return b.period_units - a.period_units || b.units - a.units || (a.code < b.code ? -1 : 1); }).slice(0, 60)
+    };
+  }
+  function sum(a, b) { return a + b; }
+
+  function card(i, k) {
+    var d = RPT.delta(RPT.pct(i.units, i.prev));
+    var big = state.tab === "value" ? RPT.money(i.value, CUR) : RPT.int(i.units);
+    var sub = state.tab === "risk" ? '<span class="down">' + i.cover.toFixed(1) + " wks cover</span>"
+      : state.tab === "risers" || state.tab === "fallers" ? '<span class="' + (i.change > 0 ? "up" : "down") + '">' + (i.change > 0 ? "+" : "") + RPT.int(i.change) + " units</span>"
+      : '<span class="' + d.cls + '">' + d.arrow + " " + d.txt + "</span>";
+    var color = i.change < 0 ? RPT.css("--r-neg") : RPT.css("--r-pos");
+    return '<a class="r-item" href="' + RPT.itemUrl(i.code, REGION) + '">' +
+      '<span class="rk"><span class="n">' + (k + 1) + '</span><span class="r-thumb"' + (IMAGES.has(i.code) ? ' data-img="' + RPT.esc(i.code) + '"' : "") + ">" + RPT.esc(RPT.initials(i.name)) + "</span></span>" +
+      '<span class="nm">' + RPT.esc(i.name) + "</span>" +
+      '<span class="num"><b>' + big + "</b>" + sub + "</span>" +
+      '<span class="cd">' + RPT.esc(i.code) + " · " + RPT.esc(i.brand) + (i.soh != null ? " · SOH " + RPT.int(i.soh) : "") + "</span>" +
+      '<span class="sp">' + RPT.spark(i.spark, 300, 34, color).replace('width="300"', 'width="100%" preserveAspectRatio="none"') + "</span></a>";
+  }
+
+  // A match from the server with no sell-through in the weeks the tiles cover.
+  function quietCard(i) {
+    return '<a class="r-item" href="' + RPT.itemUrl(i.code, REGION) + '">' +
+      '<span class="rk"><span class="n"></span><span class="r-thumb">' + RPT.esc(RPT.initials(i.name)) + "</span></span>" +
+      '<span class="nm">' + RPT.esc(i.name) + "</span>" +
+      '<span class="num"><span class="r-muted">—</span></span>' +
+      '<span class="cd">' + RPT.esc(i.code) + " · " + RPT.esc(i.brand || "") + (i.inactive ? " · inactive" : "") + "</span>" +
+      '<span class="sp r-muted" style="font-size:12px">No sell-through in the last ' + N + " weeks</span></a>";
+  }
+
+  function stats(items) {
+    var u = 0, p = 0, v = 0, s = 0, hasS = false, skus = 0, a4 = 0;
+    items.forEach(function (i) {
+      u += i.units; p += i.prev; v += i.value; if (i.units > 0) skus++;
+      if (i.soh != null) { s += i.soh; hasS = true; a4 += i.spark.slice(-4).reduce(sum) / 4; }
+    });
+    var d = RPT.delta(RPT.pct(u, p));
+    var series = []; for (var w = 0; w < N; w++) series.push(items.reduce(function (t, i) { return t + i.spark[w]; }, 0));
+    var cells = [
+      ["Units sold through", RPT.int(u), '<span class="' + d.cls + '">' + d.arrow + " " + d.txt + "</span> vs prior week", RPT.spark(series, 120, 34)],
+      ["Retail value", RPT.money(v, CUR), CUR + " · units × RRP", ""],
+      ["Products selling", RPT.int(skus), "of " + RPT.int(items.length) + " with sales in " + N + " weeks", ""],
+      ["Retailer stock", hasS ? RPT.int(s) : "—", hasS && a4 > 0 ? (s / a4).toFixed(1) + " weeks of cover" : "from retailers that report stock", ""]
+    ];
+    document.getElementById("scopeStats").innerHTML = cells.map(function (c) {
+      return '<div class="r-stat"><div class="lbl">' + c[0] + '</div><div class="val">' + c[1] + '</div><div class="sub">' + c[2] + "</div>" +
+        (c[3] ? '<span class="spark">' + c[3] + "</span>" : "") + "</div>";
+    }).join("");
+  }
+
+  function render() {
+    var items = pool();
+    stats(items);
+    var L = lists(items)[state.tab];
+    var note = NOTES[state.tab];
+    if (state.query) {
+      note = RPT.int(items.length) + (items.length === 1 ? " product sold" : " products sold") + " matching \u201c" + state.query +
+        "\u201d in the last " + N + " weeks" +
+        (state.tab === "matches" && items.length > L.length ? " \u2014 showing the top " + L.length + "." : ".") +
+        (state.tab !== "matches" ? " " + NOTES[state.tab] : "");
+    }
+    document.getElementById("tabNote").textContent = note;
+    var extra = state.query && state.tab === "matches" ? state.extras : [];
+    var html = L.map(card).join("") + extra.map(quietCard).join("");
+    document.getElementById("list").innerHTML = html ||
+      '<div class="r-empty">' + (state.query ? "No products match \u201c" + RPT.esc(state.query) + "\u201d." :
+        state.tab === "watch" ? "Nothing starred yet \u2014 open an item and press \u2605 Watch." : "Nothing here this week.") + "</div>";
+    loadImages();
+  }
+
+  // ---- search: narrows the tiles; also asks the server for matches that haven't sold lately ----
+  var qEl = document.getElementById("q"), tabsEl = document.getElementById("tabs");
+  var mTab = tabsEl.querySelector('[data-tab="matches"]'), qTimer = null, sTimer = null, seq = 0;
+  function setTab(name) {
+    state.tab = name;
+    tabsEl.querySelectorAll("[data-tab]").forEach(function (x) {
+      x.setAttribute("aria-pressed", x.getAttribute("data-tab") === name ? "true" : "false");
+    });
+  }
+  function fetchExtras() {
+    var q = state.query, my = ++seq;
+    if (q.length < 2) { state.extras = []; return; }
+    fetch("/reports/items/search?limit=30&q=" + encodeURIComponent(q), {credentials: "same-origin"})
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (found) {
+        if (my !== seq) return;
+        var have = new Set(BOARD.items.map(function (i) { return i.code; }));
+        state.found = new Set(found.map(function (i) { return i.code; }));
+        state.extras = found.filter(function (i) { return !have.has(i.code) && (!state.brand || i.brand === state.brand); });
+        render();
+      }).catch(function () {});
+  }
+  function applyQuery(q) {
+    var had = !!state.query;
+    state.query = q.trim();
+    mTab.hidden = !state.query;
+    if (state.query && !had) setTab("matches");
+    if (!state.query && state.tab === "matches") setTab("top");
+    state.extras = []; state.found = new Set();
+    render();
+    clearTimeout(sTimer); sTimer = setTimeout(fetchExtras, 250);
+    try {                                   // keep it in the address so Back returns to these results
+      var u = new URL(location.href);
+      if (state.query) u.searchParams.set("q", state.query); else u.searchParams.delete("q");
+      history.replaceState(null, "", u);
+    } catch (e) {}
+  }
+  qEl.addEventListener("input", function () {
+    clearTimeout(qTimer); var v = qEl.value; qTimer = setTimeout(function () { applyQuery(v); }, 120);
+  });
+  qEl.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { qEl.value = ""; applyQuery(""); }
+    if (e.key === "Enter") {                 // Enter opens the item when exactly one matches
+      var only = document.querySelectorAll("#list a.r-item");
+      if (only.length === 1) location.href = only[0].href;
+    }
+  });
+  document.addEventListener("keydown", function (e) {
+    var t = document.activeElement.tagName;
+    if (e.key === "/" && t !== "INPUT" && t !== "SELECT") { e.preventDefault(); qEl.focus(); }
+  });
+  // Product images: try the image route; keep the initials when there isn't one.
+  function loadImages() {
+    document.querySelectorAll("#list [data-img]").forEach(function (el) {
+      var img = new Image();
+      img.onload = function () { el.innerHTML = ""; el.appendChild(img); };
+      img.src = "/reports/items/img/" + encodeURIComponent(el.getAttribute("data-img"));
+      img.alt = "";
+    });
+  }
+  document.getElementById("tabs").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-tab]"); if (!b) return;
+    setTab(b.getAttribute("data-tab"));
+    render();
+  });
+  var startQ = new URLSearchParams(location.search).get("q") || "";
+  if (startQ) { qEl.value = startQ; applyQuery(startQ); } else render();
+})();
+</script>
+{% endif %}
+{% endblock %}

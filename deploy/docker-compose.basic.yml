@@ -29,6 +29,9 @@ services:
       # the request's own base URL can resolve to http://claims:8000, which would
       # produce links nobody outside the docker network can open. Set it explicitly.
       - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-}
+      # Read-only warehouse role (reporting_read) for the reports. Unset = reports
+      # say the warehouse can't be reached; the tools still work.
+      - REPORTING_DB_URL=${REPORTING_DB_URL:-}
     networks: [caddy]
     # no published ports — Caddy reaches it as http://claims:8000 on the shared network
 

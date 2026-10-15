@@ -6,7 +6,9 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(ROOT, "data")
-DB_PATH = os.path.join(DATA_DIR, "app.db")
+# APP_DB_PATH lets tests and throwaway local runs point at a scratch file
+# instead of the live data/app.db.
+DB_PATH = os.environ.get("APP_DB_PATH") or os.path.join(DATA_DIR, "app.db")
 UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
 
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -33,6 +35,9 @@ _ADDED_COLUMNS = {
                    "cogs_supplier_pct_default": "FLOAT",
                    "cogs_mg_pct_default": "FLOAT",
                    "country": "VARCHAR DEFAULT 'AU'"},
+    "users": {"allowed_brands": "TEXT",
+              "allowed_regions": "TEXT",
+              "company": "VARCHAR DEFAULT ''"},
 }
 
 # Reference tables that are fully re-seeded each startup. If they exist WITHOUT the

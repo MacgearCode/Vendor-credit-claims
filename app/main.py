@@ -1,4 +1,4 @@
-"""FastAPI app: vendor credit claims manager."""
+"""FastAPI app: Macgear Reporting — reports over the warehouse, plus internal tools."""
 import hashlib
 import hmac
 import json
@@ -7,6 +7,7 @@ import shutil
 import time
 import urllib.request
 import uuid
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -14,6 +15,7 @@ from fastapi import Depends, FastAPI, File, Request, Response, UploadFile
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
                                RedirectResponse, StreamingResponse)
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -28,7 +30,8 @@ from .service import build_promo_view
 from .pricing_sync import sync_pricing
 from .security import (hash_password, hash_token, make_reset_token, sign,
                        unsign, verify_password)
-from . import bill_export, bill_service, perms, workflow
+from . import (bill_export, bill_service, items, perms, receipts, sales, sell_through,
+               st_table, warehouse, workflow)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 rebuild_reference_tables()   # drop legacy products/retailers so they rebuild country-scoped
@@ -36,7 +39,10 @@ Base.metadata.create_all(engine)
 ensure_schema()
 migrate_statuses()
 
-app = FastAPI(title="Vendor Credit Claims")
+app = FastAPI(title="Macgear Reporting", lifespan=lambda a: _lifespan(a))
+# Report pages embed their data as JSON (the table can be several hundred KB);
+# gzip cuts that ~8x over the wire once deployed.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.mount("/static", StaticFiles(directory=os.path.join(HERE, "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(HERE, "templates"))
 
@@ -66,10 +72,11 @@ templates.env.filters["sydney"] = sydney
 # slug for pill css classes, and the workflow taxonomy, available in all templates
 templates.env.filters["slug"] = lambda s: (s or "").lower().replace(" ", "")
 templates.env.globals.update(workflow.context())
-# cache-busting version for static assets (changes whenever style.css is updated)
+# cache-busting version for static assets (changes whenever any static file is updated)
 try:
-    asset_ver = str(int(os.path.getmtime(os.path.join(HERE, "static", "style.css"))))
-except OSError:
+    _static = os.path.join(HERE, "static")
+    asset_ver = str(int(max(os.path.getmtime(os.path.join(_static, f)) for f in os.listdir(_static))))
+except (OSError, ValueError):
     asset_ver = "1"
 templates.env.globals["asset_ver"] = asset_ver
 
@@ -107,6 +114,9 @@ class LegacyAdmin:
     name = "Shared login"
     role = "admin"
     allowed_tools = None
+    allowed_brands = None
+    allowed_regions = None
+    company = ""
     active = True
     is_legacy = True
 
@@ -140,6 +150,9 @@ def _user_from_cookie(request: Request):
 # each handler: a tool has a dozen routes and forgetting one is a silent hole.
 # Longest prefix wins, so a new tool nested under an existing one still works.
 _TOOL_PATHS = [
+    ("/reports/sell-through", "sell_through"),
+    ("/reports/items", "items"),
+    ("/reports/table", "st_table"),
     ("/vendor-bills", "vendor_bills"),
     ("/promos", "promos"),
     ("/promo", "promos"),          # /promo/new, /promo/{id}, /promo/{id}/...
@@ -187,10 +200,17 @@ async def require_login(request: Request, call_next):
                                           {"tool": "User management"}, status_code=403)
 
     tool = _tool_for_path(path)
+    # Vendors are allow-listed, not deny-listed: the landing page plus the
+    # reports ticked on their account, and nothing else. A path no area claims
+    # (a new tool someone forgot to add to _TOOL_PATHS, /api/..., /tools) is
+    # refused rather than let through.
+    if perms.is_vendor(user) and path != "/" and tool is None:
+        return templates.TemplateResponse(request, "denied.html",
+                                          {"tool": "this page"}, status_code=403)
     if tool and not perms.can_access(user, tool):
         return templates.TemplateResponse(
             request, "denied.html",
-            {"tool": perms.TOOL_LABELS.get(tool, tool)}, status_code=403)
+            {"tool": perms.AREA_LABELS.get(tool, tool)}, status_code=403)
 
     return await call_next(request)
 
@@ -368,24 +388,391 @@ def _parse_date(v):
     return datetime.strptime(v, "%Y-%m-%d").date() if v else None
 
 
-# ---- landing page ------------------------------------------------------------
-# The app hosts more than promotions now, so "/" is a tool picker and each tool
-# owns a path below it. Add a tile here when a tool is added, and its key to
-# perms.TOOL_KEYS / TOOL_LABELS.
+# ---- landing pages -----------------------------------------------------------
+# "/" lists the reports a user may open; "/tools" lists the internal tools.
+# Add a tile here when a report or tool is added, its key to perms.REPORT_KEYS /
+# TOOL_KEYS and AREA_LABELS, and its URL prefix to _TOOL_PATHS.
+REPORTS = [
+    {"key": "items", "href": "/reports/items", "title": "Item Explorer", "icon": "◎",
+     "blurb": "Search any product: sell-through, stock and cover by retailer, with trends and insights."},
+    {"key": "st_table", "href": "/reports/table", "title": "Sell-Through Table", "icon": "▦",
+     "blurb": "The weekly workbook as a live table — filter, sort, and download to Excel."},
+    {"key": "sell_through", "href": "/reports/sell-through", "title": "Sell-Through Dashboard", "icon": "◔",
+     "blurb": "Weekly units, retail value, stock and cover by retailer and product."},
+]
 TOOLS = [
-    {"key": "promos", "href": "/promos", "title": "Vendor Promos",
+    {"key": "promos", "href": "/promos", "title": "Vendor Promos", "icon": "%",
      "blurb": "Promotional credit claims — customer claims in, vendor credits out."},
-    {"key": "vendor_bills", "href": "/vendor-bills", "title": "PDF Bill Upload",
+    {"key": "vendor_bills", "href": "/vendor-bills", "title": "PDF Bill Upload", "icon": "⇪",
      "blurb": "Amazon Advertising invoices → NetSuite vendor bill import CSV."},
 ]
 
 
+def _allowed(request: Request) -> list[str]:
+    user = current_user(request)
+    return perms.effective_access(user) if user else perms.AREA_KEYS   # auth off = local dev
+
+
+def nav_tools(request: Request) -> list[dict]:
+    return [t for t in TOOLS if t["key"] in _allowed(request)]
+
+
+def nav_reports(request: Request) -> list[dict]:
+    return [r for r in REPORTS if r["key"] in _allowed(request)]
+
+
+templates.env.globals["nav_tools"] = nav_tools
+templates.env.globals["nav_reports"] = nav_reports
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
+    """Home: internal sales (sell_in_value capability only — Macgear's sales $
+    never reach a vendor), a sell-through snapshot for anyone with a sell-through
+    report, then the report and tool cards."""
     user = current_user(request)
-    allowed = perms.effective_tools(user) if user else perms.TOOL_KEYS
-    tiles = [t for t in TOOLS if t["key"] in allowed]
-    return templates.TemplateResponse(request, "home.html", {"tools": tiles})
+    caps = _caps(request)
+    brands, regions = _scope(request)
+    ctx = {"reports": nav_reports(request), "tools": nav_tools(request),
+           "first_name": ((user.name or "").split() or [""])[0] if user is not None else "",
+           "sales": None, "sales_error": "", "sales_fresh": "", "margin": "margin" in caps,
+           "st": None, "st_week": "", "scoped": brands is not None}
+    try:
+        if "sell_in_value" in caps:
+            ctx["sales"] = sales.summary(sales_today(), "margin" in caps)
+            fresh = warehouse.cached(("sales_fresh",), ttl=sales.SALES_TTL, build=lambda: warehouse.query(
+                "select max(last_modified) from reporting.fact_sales_line where date_key >= %s",
+                (int((date.today() - timedelta(days=7)).strftime("%Y%m%d")),))[0][0])
+            ctx["sales_fresh"] = _short_time(_brisbane_to_sydney(fresh))
+        allowed = _allowed(request)
+        if "items" in allowed or "sell_through" in allowed or "st_table" in allowed:
+            st = {}
+            for r in regions:
+                board = items.leaderboard_for(brands, r)
+                its = board["items"]
+                if not its:
+                    continue
+                n = len(board["weeks"])
+                spark = [sum(i["spark"][k] for i in its) for k in range(n)]
+                top = sorted([i for i in its if i["units"] > 0], key=lambda i: (-i["units"], i["code"]))[:5]
+                st[r] = {"units": spark[-1], "prev": spark[-2] if n > 1 else 0, "spark": spark,
+                         "top": [{"code": i["code"], "name": i["name"], "units": i["units"]} for i in top]}
+                ctx["st_week"] = _weekfmt(board["weeks"][-1])
+            ctx["st"] = st or None
+    except warehouse.WarehouseUnavailable as e:
+        ctx["sales_error"] = _warehouse_error(e)
+    return templates.TemplateResponse(request, "home.html", ctx)
+
+
+def _brisbane_to_sydney(dt):
+    """NetSuite's Last Modified carries no zone. The 15-minute Zone exports stamp
+    it in Brisbane time (no daylight saving), an hour behind Sydney in summer —
+    read as Sydney it looked an hour stale. Manual exports stamp Sydney time, but
+    the newest change is always from a scheduled run."""
+    if not dt:
+        return dt
+    return dt.replace(tzinfo=ZoneInfo("Australia/Brisbane")).astimezone(ZoneInfo("Australia/Sydney"))
+
+
+def _short_time(dt) -> str:
+    """'15 Oct 3:01pm'. NetSuite's Last Modified is the exporting user's local
+    time (Sydney or Brisbane), shown as-is."""
+    if not dt:
+        return "—"
+    return f"{dt.day} {dt:%b} {dt.hour % 12 or 12}:{dt:%M}{'am' if dt.hour < 12 else 'pm'}"
+
+
+def sales_today() -> date:
+    """'Today' in Sydney — the server runs UTC, which is yesterday until 10–11am.
+    REPORT_TODAY=YYYY-MM-DD pretends it's another day (local testing only, e.g.
+    to see Monday's receipt strip before the files arrive)."""
+    fake = os.environ.get("REPORT_TODAY", "")
+    if fake:
+        return date.fromisoformat(fake)
+    return datetime.now(ZoneInfo("Australia/Sydney")).date()
+
+
+@app.get("/tools", response_class=HTMLResponse)
+def tools_home(request: Request):
+    return templates.TemplateResponse(request, "tools.html", {"tools": nav_tools(request)})
+
+
+# ---- reports -----------------------------------------------------------------
+def _scope(request: Request):
+    """The rows this user may see: (brands, or None for all; regions)."""
+    user = current_user(request)
+    if user is None:                     # auth off = local dev
+        return None, list(perms.REGIONS)
+    return perms.effective_brands(user), perms.effective_regions(user)
+
+
+@app.get("/reports/sell-through", response_class=HTMLResponse)
+def report_sell_through(request: Request):
+    brands, regions = _scope(request)
+    error = ""
+    data = None
+    try:
+        data = sell_through.for_user(brands, regions)
+    except warehouse.WarehouseUnavailable as e:
+        error = f"The reporting warehouse could not be reached ({e})."
+    return templates.TemplateResponse(request, "report_sell_through.html", {
+        "data": data, "error": error, "scoped": brands is not None})
+
+
+def _caps(request: Request) -> set:
+    user = current_user(request)
+    return set(perms.CAP_KEYS) if user is None else perms.effective_caps(user)
+
+
+def _region(request: Request, wanted: str) -> tuple[str, list[str]]:
+    """The requested region if the user may see it, else their first one."""
+    _, regions = _scope(request)
+    return (wanted if wanted in regions else regions[0]), regions
+
+
+def _warehouse_error(e) -> str:
+    return f"The reporting warehouse could not be reached ({e})."
+
+
+def _weekfmt(iso: str) -> str:
+    d = date.fromisoformat(iso)
+    return f"{d.day} {d:%b %Y} (wk {d.isocalendar().week})"
+
+
+templates.env.filters["weekfmt"] = _weekfmt
+
+
+_ST_AREAS = ("sell_through", "items", "st_table")
+
+
+def st_status(request: Request):
+    """Receipt strip data (templates/_st_status.html) for this user's scope, or
+    None when they have no sell-through report or the warehouse is down."""
+    if not any(a in _allowed(request) for a in _ST_AREAS):
+        return None
+    brands, regions = _scope(request)
+    try:
+        return receipts.status(brands, regions, sales_today())
+    except warehouse.WarehouseUnavailable:
+        return None
+
+
+templates.env.globals["st_status"] = st_status
+templates.env.filters["datefmt"] = lambda iso: f"{date.fromisoformat(iso).day} {date.fromisoformat(iso):%b %Y}"
+
+
+# ---- cache warm-up --------------------------------------------------------------
+def _warm_reports():
+    """Build the views most people open first, for the all-brands scope, so the
+    first visit of the day is instant. Vendor and brand-limited scopes stay warm
+    once used (warehouse.refresh_due)."""
+    items._units_by_item()
+    sales.summary(sales_today(), True)
+    receipts.status(None, list(perms.REGIONS), sales_today())
+    sell_through.for_user(None, list(perms.REGIONS))
+    for region in perms.REGIONS:
+        items.leaderboard_for(None, region)
+        opts = st_table.options(None, region)
+        if opts["weeks"]:
+            st_table.build_for(None, region, "retailer", date.fromisoformat(opts["weeks"][0]),
+                               12, "", "")
+
+
+def deployment_problems(public_base_url: str, secret: str, shared_password: str,
+                        has_users: bool) -> list[str]:
+    """Reasons a DEPLOYED instance must not start. PUBLIC_BASE_URL is the marker
+    of a deployment (it's required there for set-password links); local dev never
+    sets it, so local runs are unaffected."""
+    if not public_base_url:
+        return []
+    problems = []
+    if not secret:
+        problems.append("APP_SECRET is not set — sign-in cookies would be signed with the "
+                        "built-in development secret and could be forged.")
+    if not shared_password and not has_users:
+        problems.append("APP_PASSWORD is blank and there are no user accounts — sign-in "
+                        "would be switched off entirely.")
+    return problems
+
+
+def _check_deployment():
+    db = SessionLocal()
+    try:
+        has_users = _any_users(db)
+    finally:
+        db.close()
+    problems = deployment_problems(os.environ.get("PUBLIC_BASE_URL", ""),
+                                   os.environ.get("APP_SECRET", ""), APP_PASSWORD, has_users)
+    if problems:
+        raise RuntimeError("Refusing to start: " + " ".join(problems))
+
+
+@asynccontextmanager
+async def _lifespan(app):
+    _check_deployment()
+    # Tests and machines without a warehouse URL skip the warm-up entirely.
+    if os.environ.get("REPORTING_DB_URL"):
+        warehouse.start_refresher(lambda: _warm_reports())
+    yield
+
+
+# ---- Item Explorer -------------------------------------------------------------
+# Product images live on disk, one file per item code. Images aren't confidential
+# (they're on the retailers' sites) but the route still checks the item is in
+# the user's scope, like everything else here.
+ITEM_IMG_DIR = os.path.join(os.path.dirname(HERE), "data", "item_images")
+_IMG_TYPES = {".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+
+
+def _img_name(code: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in code)
+
+
+def _img_path(code: str) -> str | None:
+    base = os.path.join(ITEM_IMG_DIR, _img_name(code))
+    for ext in _IMG_TYPES:
+        if os.path.exists(base + ext):
+            return base + ext
+    return None
+
+
+@app.get("/reports/items", response_class=HTMLResponse)
+def report_items(request: Request, region: str = ""):
+    brands, _ = _scope(request)
+    region, regions = _region(request, region)
+    board, error = {"weeks": [], "items": []}, ""
+    try:
+        board = items.leaderboard_for(brands, region)
+    except warehouse.WarehouseUnavailable as e:
+        error = _warehouse_error(e)
+    have = set(os.listdir(ITEM_IMG_DIR)) if os.path.isdir(ITEM_IMG_DIR) else set()
+    stems = {os.path.splitext(n)[0] for n in have}
+    images = [i["code"] for i in board["items"] if _img_name(i["code"]) in stems]
+    return templates.TemplateResponse(request, "items.html", {
+        "board": board, "region": region, "regions": regions, "error": error, "images": images})
+
+
+@app.get("/reports/items/search")
+def report_items_search(request: Request, q: str = "", limit: int = 12):
+    brands, _ = _scope(request)
+    try:
+        return JSONResponse(items.search(q, brands, limit=max(1, min(limit, 50))))
+    except warehouse.WarehouseUnavailable:
+        return JSONResponse([], status_code=503)
+
+
+@app.get("/reports/items/i/{code:path}", response_class=HTMLResponse)
+def report_item(request: Request, code: str, region: str = "", weeks: int = 26):
+    brands, _ = _scope(request)
+    region, regions = _region(request, region)
+    weeks = weeks if weeks in (4, 13, 26, 52) else 26
+    caps = _caps(request)
+    try:
+        h, d = items.item_for(code, brands, region, weeks, caps)
+        board = items.leaderboard_for(brands, region) if h else None
+    except warehouse.WarehouseUnavailable as e:
+        return templates.TemplateResponse(request, "denied.html",
+                                          {"message": _warehouse_error(e)}, status_code=503)
+    if h is None:                      # not found and out-of-scope look the same
+        return templates.TemplateResponse(request, "denied.html",
+                                          {"message": f"No item {code} in your reports."}, status_code=404)
+    img = _img_path(h["code"])
+    return templates.TemplateResponse(request, "item.html", {
+        "h": {k: v for k, v in h.items() if k not in ("item_key", "ns_item_id")}, "d": d,
+        "region": region, "regions": regions, "weeks": weeks, "caps": sorted(caps),
+        "cur": "NZD" if region == "NZ" else "AUD", "rank": items.ranks(h["code"], h["brand"], board),
+        "initials": "".join(w[0] for w in (h["name"] or "?").split()[:2]).upper(),
+        "has_image": img is not None, "image_ver": int(os.path.getmtime(img)) if img else 0,
+        "can_upload": perms.is_admin(current_user(request)) or current_user(request) is None})
+
+
+@app.get("/reports/items/img/{code:path}")
+def report_item_image(request: Request, code: str):
+    brands, _ = _scope(request)
+    path = _img_path(code)
+    if path is None:
+        return Response(status_code=404)
+    try:
+        if items.item_for(code, brands, perms.REGIONS[0], 4, set())[0] is None:
+            return Response(status_code=404)
+    except warehouse.WarehouseUnavailable:
+        return Response(status_code=503)
+    return FileResponse(path, media_type=_IMG_TYPES[os.path.splitext(path)[1]],
+                        headers={"Cache-Control": "private, max-age=3600"})
+
+
+@app.post("/reports/items/img/{code:path}")
+async def report_item_image_upload(request: Request, code: str, image: UploadFile = File(...)):
+    user = current_user(request)
+    if user is not None and not perms.is_admin(user):
+        return templates.TemplateResponse(request, "denied.html",
+                                          {"tool": "image upload"}, status_code=403)
+    ext = os.path.splitext(image.filename or "")[1].lower().replace(".jpeg", ".jpg")
+    data = await image.read()
+    if ext not in _IMG_TYPES or not data or len(data) > 5 * 1024 * 1024:
+        return Response("Upload a JPG, PNG or WebP under 5 MB.", status_code=400)
+    os.makedirs(ITEM_IMG_DIR, exist_ok=True)
+    old = _img_path(code)
+    if old:
+        os.remove(old)
+    with open(os.path.join(ITEM_IMG_DIR, _img_name(code) + ext), "wb") as fh:
+        fh.write(data)
+    return RedirectResponse(str(request.url_for("report_item", code=code)), status_code=303)
+
+
+# ---- Sell-Through Table --------------------------------------------------------
+def _table_args(request: Request, region, grain, week, prior, brand, retailer):
+    brands, _ = _scope(request)
+    region, regions = _region(request, region)
+    opts = st_table.options(brands, region)
+    week = week if week in opts["weeks"] else (opts["weeks"][0] if opts["weeks"] else "")
+    prior = prior if prior in (4, 8, 12, 26, 52) else 12
+    brand = brand if brand in opts["brands"] else ""
+    if len(opts["brands"]) == 1:
+        brand = opts["brands"][0]
+    retailer = retailer if retailer in opts["retailers"] else ""
+    grain = grain if grain in st_table.GRAINS else "retailer"
+    f = {"region": region, "grain": grain, "week": week, "prior": prior,
+         "brand": brand, "retailer": retailer}
+    return brands, regions, opts, f
+
+
+@app.get("/reports/table", response_class=HTMLResponse)
+def report_table(request: Request, region: str = "", grain: str = "retailer", week: str = "",
+                 prior: int = 12, brand: str = "", retailer: str = ""):
+    try:
+        brands, regions, opts, f = _table_args(request, region, grain, week, prior, brand, retailer)
+        t = st_table.build_for(brands, f["region"], f["grain"],
+                               date.fromisoformat(f["week"]) if f["week"] else None,
+                               f["prior"], f["brand"], f["retailer"])
+    except warehouse.WarehouseUnavailable as e:
+        return templates.TemplateResponse(request, "denied.html",
+                                          {"message": _warehouse_error(e)}, status_code=503)
+    return templates.TemplateResponse(request, "st_table.html", {
+        "t": t, "f": f, "opts": opts, "regions": regions,
+        "wos_low": st_table.WOS_LOW, "wos_high": st_table.WOS_HIGH,
+        "can_items": "items" in _allowed(request)})
+
+
+@app.get("/reports/table/export.xlsx")
+def report_table_xlsx(request: Request, region: str = "", grain: str = "retailer", week: str = "",
+                      prior: int = 12, brand: str = "", retailer: str = ""):
+    try:
+        brands, _, _, f = _table_args(request, region, grain, week, prior, brand, retailer)
+        t = st_table.build_for(brands, f["region"], f["grain"],
+                               date.fromisoformat(f["week"]) if f["week"] else None,
+                               f["prior"], f["brand"], f["retailer"])
+    except warehouse.WarehouseUnavailable as e:
+        return Response(_warehouse_error(e), status_code=503)
+    desc = " · ".join(x for x in [f["region"], {"retailer": "Product x retailer", "product": "Product total",
+                                               "store": "Product x store"}[f["grain"]],
+                                  f["brand"] or ("All brands" if brands is None else ", ".join(brands)),
+                                  f["retailer"] or "All retailers",
+                                  f"week ending {f['week']}"] if x)
+    body = st_table.to_xlsx(t, "Macgear Sell-Through", desc)
+    name = f"Macgear_Sell_Through_{f['region']}_{f['grain']}_WE{f['week'].replace('-', '')}.xlsx"
+    return Response(body, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 # ---- dashboard ---------------------------------------------------------------
@@ -940,17 +1327,39 @@ def vendor_bill_mark_imported(invoice_number: str, db: Session = Depends(get_db)
 def admin_users(request: Request, db: Session = Depends(get_db)):
     users = db.scalars(select(User).order_by(User.role, User.email)).all()
     rows = [{"u": u,
-             "tools": [perms.TOOL_LABELS[t] for t in perms.effective_tools(u)],
+             "areas": [perms.AREA_LABELS[t] for t in perms.effective_access(u)],
+             "caps": sorted(perms.effective_caps(u)),
+             "brands": perms.effective_brands(u),
+             "regions": perms.effective_regions(u),
              "pending": not u.password_hash} for u in users]
     return templates.TemplateResponse(request, "admin_users.html", {"rows": rows})
 
 
+def _brand_choices(u: User | None) -> tuple[list[str], str]:
+    """Every NetSuite brand from the warehouse, plus any already ticked on the
+    account (so a brand renamed in NetSuite can still be unticked)."""
+    stored = (perms._json_list(u.allowed_brands) if u else None) or []
+    try:
+        names, warn = warehouse.brand_names(), ""
+    except warehouse.WarehouseUnavailable as e:
+        names, warn = [], f"Brand list unavailable — the warehouse could not be reached ({e})."
+    return sorted(set(names) | set(stored)), warn
+
+
 def _user_form_ctx(u: User | None, notice: str = "", link: str = "",
                    error: str = "") -> dict:
+    brand_choices, brand_warn = _brand_choices(u)
     return {"u": u,
             "roles": perms.ROLES, "role_labels": perms.ROLE_LABELS,
-            "tool_keys": perms.TOOL_KEYS, "tool_labels": perms.TOOL_LABELS,
-            "selected": perms.effective_tools(u) if u else [],
+            "report_keys": perms.REPORT_KEYS, "tool_keys": perms.TOOL_KEYS,
+            "area_labels": perms.AREA_LABELS, "vendor_areas": perms.VENDOR_AREAS,
+            "cap_keys": perms.CAP_KEYS, "cap_labels": perms.CAP_LABELS, "vendor_caps": perms.VENDOR_CAPS,
+            "sel_caps": sorted(perms.effective_caps(u)) if u else [],
+            "selected": perms.effective_access(u) if u else [],
+            "brand_choices": brand_choices, "brand_warn": brand_warn,
+            "sel_brands": (perms._json_list(u.allowed_brands) if u else None) or [],
+            "regions": perms.REGIONS,
+            "sel_regions": perms.effective_regions(u) if u else list(perms.REGIONS),
             "notice": notice, "set_link": link, "error": error}
 
 
@@ -980,6 +1389,9 @@ async def admin_user_save(request: Request, user_id: int | None = None,
     if role not in perms.ROLES:
         role = "user"
     allowed = perms.normalize_allowed(role, form.getlist("tools"))
+    brands = perms.normalize_brands(form.getlist("brands"))
+    regions = perms.normalize_regions(form.getlist("regions"))
+    company = (form.get("company", "") or "").strip()
     active = form.get("active") == "on"
 
     u = db.get(User, user_id) if user_id else None
@@ -1026,6 +1438,9 @@ async def admin_user_save(request: Request, user_id: int | None = None,
     u.name = name
     u.role = role
     u.allowed_tools = allowed
+    u.allowed_brands = brands
+    u.allowed_regions = regions
+    u.company = company if role == "vendor" else ""
     u.active = active
     db.commit()
 

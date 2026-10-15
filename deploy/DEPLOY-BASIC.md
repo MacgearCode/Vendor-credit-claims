@@ -1,4 +1,7 @@
-# Deploying the Macgear internal tools site (no SSO)
+# Deploying the Macgear reporting site (no SSO)
+
+> **Current name: reporting.macgeargroup.com** — see "Going live as reporting.macgeargroup.com" below.
+> The original walkthrough below still says `apps`; the steps are the same.
 
 End state: `https://apps.macgeargroup.com` → Caddy (HTTPS) → the app, which shows its own
 styled **/login** page. n8n keeps running untouched. Data (SQLite DB + uploaded files)
@@ -266,6 +269,87 @@ should only happen if the row is removed outside the app.
 Links expire after 24 hours and are single use. Generating a new one for someone
 kills their previous link. Passwords are stored as PBKDF2-SHA256 hashes; an admin
 never sees or sets another person's password.
+
+---
+
+## Going live as reporting.macgeargroup.com (apps → reporting, 2026-10)
+
+The site became the reporting hub: reports over the warehouse, the tools under a
+Tools menu, vendor accounts. Same repo, same container (`claims`), same `data/` —
+only the public name changes, and the app now also reads the reporting warehouse.
+n8n's pricing sync (`http://claims:8000`) is unaffected.
+
+**0. Back up first** (on the droplet):
+```bash
+cd /opt/vendor-credit-claims
+tar czf ~/claims-backup-$(date +%F-%H%M).tar.gz data
+```
+
+**1. DNS:** add an **A record** `reporting` → `170.64.200.224`. Keep the `apps` and
+`promos` records — they answer the redirects.
+```bash
+dig +short reporting.macgeargroup.com     # must return 170.64.200.224 before step 5
+```
+
+**2. Let the droplet reach the warehouse:** DigitalOcean → Databases → the reporting
+cluster → Settings → **Trusted sources** → add this droplet (the n8n droplet,
+170.64.200.224). Without it every report says "the warehouse could not be reached"
+(the tools still work).
+
+**3. Pull the code and set the new env** (on the droplet):
+```bash
+cd /opt/vendor-credit-claims && git pull
+cd deploy && nano .env
+```
+In `.env`:
+- `REPORTING_DB_URL=` — the **read-only** `reporting_read` URL (same value as
+  `REPORTING_READ_DB_URL` in `Sell Through/.env`). Paste it on the droplet only;
+  never commit it or send it in chat.
+- `PUBLIC_BASE_URL=https://reporting.macgeargroup.com`
+- `APP_SECRET=` must be a long random value (`openssl rand -hex 32` if it is blank).
+  **The app now refuses to start** when `PUBLIC_BASE_URL` is set but `APP_SECRET`
+  isn't, or when there is neither a shared password nor any user account.
+```bash
+grep -c '^APP_SECRET=..' .env        # 1 = set, 0 = blank
+```
+
+**4. Rebuild and start:**
+```bash
+docker compose -f docker-compose.basic.yml up -d --build
+docker compose -f docker-compose.basic.yml logs --tail 40
+```
+Look for `Application startup complete`. `Refusing to start: …` means step 3 isn't
+done. The first report views after a restart may take a few seconds while the cache
+warms; after that they're near-instant.
+
+**5. Caddy:** replace the `apps.macgeargroup.com { reverse_proxy claims:8000 }` block
+and the old `promos` redirect with the three blocks in `Caddyfile.basic.snippet`
+(reporting = the site; apps and promos = permanent redirects to it), then:
+```bash
+CADDY=$(docker ps --filter ancestor=caddy -q | head -1)
+docker exec $CADDY caddy reload --config /etc/caddy/Caddyfile
+```
+
+**6. Verify:**
+```bash
+curl -sI https://reporting.macgeargroup.com/login | head -1        # 200
+curl -sI https://apps.macgeargroup.com/promos | grep -i location     # -> https://reporting.../promos
+curl -sI https://promos.macgeargroup.com/ | grep -i location         # -> https://reporting.../
+```
+Then sign in: Home shows AU/NZ sales (admins), the receipt strip, and the reports.
+
+**7. Give people their reports:** existing staff accounts were created when the site
+only had tools, so they see **no reports until ticked** (default-deny). In
+`/admin/users` tick each person's reports, and "Sell-in $" / "Margin" only for those
+who should see them.
+
+**Do not create real vendor accounts yet** — first the database-level isolation (RLS
+role), two-factor sign-in, an access log, and blanking `APP_PASSWORD` (see the
+project `CLAUDE.md`, "Before the first real vendor account").
+
+**Roll back:** `git checkout <previous commit>` in `/opt/vendor-credit-claims`, rebuild
+(step 4), and put the old `apps` block back in Caddy. The database changes are
+additive (three new user columns), so the old code runs on the same `data/`.
 
 ---
 
