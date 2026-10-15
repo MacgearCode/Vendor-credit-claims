@@ -37,7 +37,8 @@ _ADDED_COLUMNS = {
                    "country": "VARCHAR DEFAULT 'AU'"},
     "users": {"allowed_brands": "TEXT",
               "allowed_regions": "TEXT",
-              "company": "VARCHAR DEFAULT ''"},
+              "company": "VARCHAR DEFAULT ''",
+              "reset_purpose": "VARCHAR"},
 }
 
 # Reference tables that are fully re-seeded each startup. If they exist WITHOUT the

@@ -10,16 +10,44 @@
 {% if error %}<p class="banner error">{{ error }}</p>{% endif %}
 {% if notice %}<p class="banner warn">{{ notice }}</p>{% endif %}
 
-{% if set_link %}
+{% if u %}
+{% set st = user_status(u) %}
+{% set inviting = not u.password_hash %}
 <div class="card setlink">
-  <p><strong>Single-use link for {{ u.email }}</strong> — valid for 24 hours.
-     Send it to them; they choose their own password.</p>
+  <p><strong>Sign-in</strong> &nbsp;<span class="pill {{ st[0] }}">{{ st[1] }}</span></p>
+  {% if set_link %}
+  <p class="hint">{% if emailed %}Emailed to <strong>{{ u.email }}</strong> — this is the same link,
+     in case it's slow to arrive.{% else %}Copy this to <strong>{{ u.email }}</strong> yourself.{% endif %}
+     It works once and lasts {{ invite_ttl if inviting else reset_ttl }}.</p>
   <div class="copyrow">
     <input id="setlink" type="text" readonly value="{{ set_link }}">
     <button type="button" class="btn" onclick="navigator.clipboard.writeText(document.getElementById('setlink').value);this.textContent='Copied'">Copy</button>
   </div>
-  <p class="hint">Generating another link kills this one. Don't post it in a
-     shared channel — anyone holding it can set the password.</p>
+  <p class="hint">Sending another link kills this one. Don't post it in a shared channel —
+     anyone holding it can set the password.</p>
+  {% endif %}
+  {% if u.active %}
+  <form method="post" action="/admin/users/{{ u.id }}/send-link">
+    <label class="hint" style="display:block;margin-top:.6rem">Personal note (optional — goes in the email)
+      <textarea name="note" rows="2" maxlength="1000" style="width:100%;margin-top:.3rem"
+                placeholder="e.g. Hi Sam, here's the sell-through access we discussed."></textarea>
+    </label>
+    <div class="formact" style="justify-content:flex-start;gap:.6rem;flex-wrap:wrap">
+      <button class="btn" type="submit" name="send" value="email">
+        {{ "Email invite" if inviting else "Email password reset" }}</button>
+      <button class="btn ghost" type="submit" name="send" value="link">Just give me the link</button>
+    </div>
+    <p class="hint">
+      {% if inviting %}They get an email from noreply@macgeargroup.com with a link to choose their
+        password (valid {{ invite_ttl }}).{% else %}They get a link to choose a new password
+        (valid {{ reset_ttl }}). Their current password keeps working until they do.{% endif %}
+      Replies go to you.
+      {% if not email_on %}<br><strong>Email isn't set up on this server</strong> — you'll get the link to send yourself.{% endif %}
+    </p>
+  </form>
+  {% else %}
+  <p class="hint">Disabled accounts can't be sent a link — tick "Active" below first.</p>
+  {% endif %}
 </div>
 {% endif %}
 
@@ -117,8 +145,8 @@
   </label>
 
   {% if not u %}
-  <p class="hint">No password is set here. Saving generates a single-use link for
-     them to choose their own.</p>
+  <p class="hint">No password is set here. After saving you can email them an invite to
+     choose their own.</p>
   {% endif %}
 
   <div class="formact">
@@ -128,9 +156,6 @@
 
 {% if u %}
 <div class="formact rowactions">
-  <form method="post" action="/admin/users/{{ u.id }}/set-password-link">
-    <button class="btn ghost" type="submit">Generate set-password link</button>
-  </form>
   <form method="post" action="/admin/users/{{ u.id }}/delete"
         data-confirm="Delete {{ u.email }}? This cannot be undone."
         data-confirm-ok="Delete user">

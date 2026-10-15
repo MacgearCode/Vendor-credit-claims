@@ -32,6 +32,11 @@ services:
       # Read-only warehouse role (reporting_read) for the reports. Unset = reports
       # say the warehouse can't be reached; the tools still work.
       - REPORTING_DB_URL=${REPORTING_DB_URL:-}
+      # Account emails (invites, password resets) go through the SAME n8n workflow as the
+      # 3PL Portal: http://n8n:5678/webhook/3pl-account-email on the shared docker network,
+      # with the same X-Sync-Token. Unset = no email; admins get a link to copy instead.
+      - N8N_RESET_WEBHOOK_URL=${N8N_RESET_WEBHOOK_URL:-}
+      - N8N_WEBHOOK_TOKEN=${N8N_WEBHOOK_TOKEN:-}
     networks: [caddy]
     # no published ports — Caddy reaches it as http://claims:8000 on the shared network
 

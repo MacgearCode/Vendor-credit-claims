@@ -272,6 +272,32 @@ never sees or sets another person's password.
 
 ---
 
+## Account emails — invites and "Forgot password?" (2026-10)
+
+The site sends invites and password resets through the **3PL Portal's n8n workflow**
+(`3PL Portal/n8n/3pl_account_email.json` → Graph app-only → `noreply@macgeargroup.com`).
+Nothing new in Microsoft 365 or n8n — only two lines in this app's `deploy/.env`:
+
+```bash
+# copy both lines from the 3PL Portal's env (it lives at /opt/threepl/3PL-Portal/.env);
+# values aren't printed — the last command shows only the names, each should appear once
+cd /opt/vendor-credit-claims/deploy
+grep -E '^(N8N_RESET_WEBHOOK_URL|N8N_WEBHOOK_TOKEN)=' /opt/threepl/3PL-Portal/.env >> .env
+grep -oE '^(N8N_RESET_WEBHOOK_URL|N8N_WEBHOOK_TOKEN)=' .env
+docker compose -f docker-compose.basic.yml up -d
+```
+(Done 2026-10-15.)
+
+Test: `/admin/users` → a user → **Email password reset** to yourself. The notice should say
+"emailed"; the email arrives from noreply@ within a few minutes (**check Junk** — a new sender
+reputation is normal, see 3PL `docs/email_delivery.md` "Triage"). In n8n → Executions the
+run shows `app: reporting`.
+
+Without the two lines the site still works: admins get "Email isn't set up on this server"
+and a link to copy, and "Forgot password?" shows the usual confirmation but sends nothing.
+
+---
+
 ## Going live as reporting.macgeargroup.com (apps → reporting, 2026-10)
 
 The site became the reporting hub: reports over the warehouse, the tools under a

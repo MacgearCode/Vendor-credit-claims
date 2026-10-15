@@ -15,8 +15,12 @@ design (vendor isolation, 2FA, server-side filtering, audit) still applies.
 The folder was copied with its git history; `Vendor Credit Claims/` is left in
 place until the user confirms it can go. The GitHub repo
 (`MacgearCode/Vendor-credit-claims`), docker service `claims` and droplet clone
-path are unchanged. **Not yet deployed** — the live site is still apps.macgeargroup.com
-running the pre-move code.
+path are unchanged. **LIVE at https://reporting.macgeargroup.com since 2026-10-15**
+(commit d5acda1); apps.macgeargroup.com and promos.macgeargroup.com 301 to it with the
+path kept. Runbook: `deploy/DEPLOY-BASIC.md` "Going live as reporting…". Go-live notes:
+the `reporting` DNS A record was added late, so Caddy's first certificate attempts hit
+NXDOMAIN and some resolvers cached "not found" for the SOA's 30 min; and a mistyped
+warehouse host in the droplet `.env` broke the warm-up — compare the host, not the whole URL.
 
 | Path | What | Audience |
 |---|---|---|
@@ -74,9 +78,22 @@ Macgear's sales $ and shows for everyone.
 defaults keep flowing as areas are added. Don't "helpfully" expand it.
 
 Passwords: PBKDF2-SHA256 via `app/security.py` (copied from 3PL Portal so both
-apps behave the same). An admin never sets another person's password — creating
-an account mints a single-use link and the user chooses their own. Only the
-token's SHA-256 digest is stored.
+apps behave the same). An admin never sets another person's password. Only the
+token's SHA-256 digest is stored, with its expiry and purpose.
+
+**Invites and resets (2026-10-15, same design as 3PL Portal).** Creating a user emails
+nothing; the user form's **Sign-in** box then sends an **invite** (no password yet, 7-day
+link) or a **password reset** (45 min), with an optional personal note, Reply-To = the
+admin — or "Just give me the link". The link is always shown too ("the webhook accepted
+it" ≠ "it arrived"). **Forgot password?** on `/login` → `/forgot`: identical response
+whether or not the address exists, and throttled (3 per address / 10 per IP per 15 min,
+in-process). Disabled accounts get no link and their old links die. Status per user:
+active / invited · link expires … / not invited yet / disabled. Email goes through the
+**3PL Portal's n8n workflow** (`app/notify.py`, payload `app: "reporting"`) →
+Graph app-only → noreply@ — env `N8N_RESET_WEBHOOK_URL`, `N8N_WEBHOOK_TOKEN` (same token
+as 3PL). Unset = nothing sent, the email is logged, admins copy the link. Everything
+about that mailbox (Junk on first sends, the client-secret expiry, IT-only Exchange
+steps) is in `3PL Portal/docs/email_delivery.md`. Tests: `tests/test_account_email.py`.
 
 The app refuses to demote, disable or delete the last active admin.
 
@@ -289,6 +306,7 @@ Shared shell:
 | `app/sell_through.py` | Sell-Through report data (scoped SQL → page JSON) |
 | `app/items.py` | Item Explorer data: search, leaderboard, one item (scoped, capability-gated) |
 | `app/st_table.py` | Sell-Through Table data + Excel export |
+| `app/notify.py` | Invite / password-reset email via the shared n8n webhook |
 | `app/receipts.py` | Which retailers' sell-through is in for the latest week (the strip) |
 | `app/sales.py` | Home page internal sales (FY periods, pace, targets hook) |
 | `app/security.py` | PBKDF2 hashing, cookie signing, set-password tokens |

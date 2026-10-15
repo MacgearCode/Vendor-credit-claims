@@ -30,8 +30,8 @@ from .service import build_promo_view
 from .pricing_sync import sync_pricing
 from .security import (hash_password, hash_token, make_reset_token, sign,
                        unsign, verify_password)
-from . import (bill_export, bill_service, items, perms, receipts, sales, sell_through,
-               st_table, warehouse, workflow)
+from . import (bill_export, bill_service, items, notify, perms, receipts, sales,
+               sell_through, st_table, warehouse, workflow)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 rebuild_reference_tables()   # drop legacy products/retailers so they rebuild country-scoped
@@ -99,10 +99,13 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 APP_SECRET = os.environ.get("APP_SECRET", "") or "dev-insecure-secret-change-me"
 COOKIE_NAME = "claims_session"
 COOKIE_MAX_AGE = 60 * 60 * 24 * 30          # 30 days
-RESET_TOKEN_TTL_MIN = 60 * 24               # set-password links last a day
+# A reset is asked for by the person who will use it, seconds later; an invite may sit in
+# an inbox until tomorrow. Same split as 3PL Portal.
+RESET_TOKEN_TTL_MIN = int(os.environ.get("RESET_TOKEN_TTL_MIN", "45"))
+INVITE_TOKEN_TTL_MIN = int(os.environ.get("INVITE_TOKEN_TTL_MIN", str(7 * 24 * 60)))
 # paths reachable without a login (static assets, the login and set-password
 # pages, and the token-authenticated pricing sync endpoint that n8n posts to)
-_AUTH_EXEMPT_PREFIXES = ("/static", "/login", "/logout", "/set-password",
+_AUTH_EXEMPT_PREFIXES = ("/static", "/login", "/logout", "/set-password", "/forgot",
                          "/admin/sync-pricing")
 
 
@@ -268,17 +271,28 @@ def logout():
     return resp
 
 
-# ---- set / reset password (public, single-use token) -------------------------
-def _issue_set_password_link(db: Session, user: User, request: Request) -> str:
-    """Mint a single-use token, persist only its SHA-256 digest, and return the
-    link for the admin to copy. There is no mailer in this app, so the link is
-    shown on screen and passed on by hand."""
+# ---- invites, resets and set-password (public, single-use token) -------------
+# Same design as 3PL Portal: only the token's SHA-256 digest, its expiry and its purpose are
+# stored; the email goes out through the shared n8n workflow (app/notify.py); the link is
+# also shown to the admin, because "the webhook accepted it" is not "it arrived".
+def _issue_link(db: Session, user: User, request: Request, *, purpose: str,
+                note: str = "", invited_by: str = "", send: bool = True) -> tuple[str, bool]:
+    """Mint a single-use link and (optionally) email it. Returns (link, emailed).
+    A disabled account gets no token. Minting kills any earlier link for the user."""
+    if not user.active:
+        return "", False
+    ttl = INVITE_TOKEN_TTL_MIN if purpose == notify.INVITE else RESET_TOKEN_TTL_MIN
     raw = make_reset_token()
     user.reset_token_hash = hash_token(raw)
-    user.reset_expires_at = datetime.utcnow() + timedelta(minutes=RESET_TOKEN_TTL_MIN)
+    user.reset_expires_at = datetime.utcnow() + timedelta(minutes=ttl)
+    user.reset_purpose = purpose
     db.commit()
-    base = os.environ.get("PUBLIC_BASE_URL", "") or str(request.base_url).rstrip("/")
-    return f"{base}/set-password?token={raw}"
+    base = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/") or str(request.base_url).rstrip("/")
+    link = f"{base}/set-password?token={raw}"
+    emailed = send and notify.send_account_link(
+        to=user.email, url=link, purpose=purpose, note=note, invited_by=invited_by,
+        expires_min=ttl, vendor=user.role == "vendor")
+    return link, emailed
 
 
 def _user_for_token(db: Session, raw: str):
@@ -287,7 +301,76 @@ def _user_for_token(db: Session, raw: str):
     user = db.scalar(select(User).where(User.reset_token_hash == hash_token(raw)))
     if not user or not user.reset_expires_at or user.reset_expires_at < datetime.utcnow():
         return None
+    if not user.active:            # a link minted before the account was disabled dies
+        return None
     return user
+
+
+def _purpose_for_token(db: Session, raw: str) -> str:
+    """Invite or reset, even for an expired link, so the page words it right. Safe without
+    a validity check: the token is 256 random bits, not a guessable address."""
+    if not raw:
+        return notify.RESET
+    user = db.scalar(select(User).where(User.reset_token_hash == hash_token(raw)))
+    return (user.reset_purpose if user and user.reset_purpose else notify.RESET)
+
+
+def user_status(u: User) -> tuple[str, str]:
+    """(pill class, label) — shared by the users list and the user form."""
+    if not u.active:
+        return "pg-red", "disabled"
+    if u.password_hash:
+        return "pg-green", "active"
+    if u.reset_expires_at and u.reset_expires_at > datetime.utcnow():
+        return "pg-amber", "invited · link expires " + _short_time(
+            u.reset_expires_at.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Australia/Sydney")))
+    return "pg-grey", "not invited yet"
+
+
+templates.env.globals["user_status"] = user_status
+
+
+# Mail-bomb guard for /forgot, by address and by client IP: in-process and forgotten on
+# restart — it stops someone holding down F5 on a person's inbox, it is not a security
+# control. Admin buttons aren't limited: an admin pressing send twice means it.
+_FORGOT_WINDOW_S = 15 * 60
+_FORGOT_MAX_EMAIL = 3
+_FORGOT_MAX_IP = 10
+_forgot_hits: dict = {}
+
+
+def _forgot_allowed(email: str, ip: str) -> bool:
+    now = time.monotonic()
+    if len(_forgot_hits) > 500:
+        _forgot_hits.clear()
+    ok = True
+    for key, cap in ((f"e:{email}", _FORGOT_MAX_EMAIL), (f"i:{ip}", _FORGOT_MAX_IP)):
+        hits = [t for t in _forgot_hits.get(key, []) if now - t < _FORGOT_WINDOW_S]
+        if len(hits) >= cap:
+            ok = False
+        hits.append(now)
+        _forgot_hits[key] = hits
+    return ok
+
+
+@app.get("/forgot", response_class=HTMLResponse)
+def forgot_form(request: Request):
+    return templates.TemplateResponse(request, "forgot_password.html",
+                                      {"sent": False, "ttl": notify.in_words(RESET_TOKEN_TTL_MIN)})
+
+
+@app.post("/forgot", response_class=HTMLResponse)
+async def forgot_submit(request: Request, db: Session = Depends(get_db)):
+    form = await request.form()
+    email = (form.get("email", "") or "").strip().lower()
+    user = db.scalar(select(User).where(User.email == email)) if email else None
+    ip = request.client.host if request.client else "?"
+    if user and user.active and _forgot_allowed(email, ip):
+        _issue_link(db, user, request, purpose=notify.RESET)
+    # The same page whether or not the address exists, and whether or not we throttled —
+    # anything else would tell a stranger who has an account here.
+    return templates.TemplateResponse(request, "forgot_password.html",
+                                      {"sent": True, "ttl": notify.in_words(RESET_TOKEN_TTL_MIN)})
 
 
 @app.get("/set-password", response_class=HTMLResponse)
@@ -295,7 +378,7 @@ def set_password_form(request: Request, token: str = "", db: Session = Depends(g
     user = _user_for_token(db, token)
     return templates.TemplateResponse(request, "set_password.html", {
         "token": token, "email": user.email if user else "",
-        "invalid": user is None, "error": ""})
+        "invalid": user is None, "error": "", "purpose": _purpose_for_token(db, token)})
 
 
 @app.post("/set-password", response_class=HTMLResponse)
@@ -306,7 +389,8 @@ async def set_password_submit(request: Request, db: Session = Depends(get_db)):
     confirm = form.get("confirm", "")
     user = _user_for_token(db, token)
 
-    ctx = {"token": token, "email": user.email if user else "", "invalid": user is None}
+    ctx = {"token": token, "email": user.email if user else "", "invalid": user is None,
+           "purpose": _purpose_for_token(db, token)}
     if user is None:
         return templates.TemplateResponse(request, "set_password.html",
                                           {**ctx, "error": ""}, status_code=400)
@@ -322,6 +406,7 @@ async def set_password_submit(request: Request, db: Session = Depends(get_db)):
     user.password_hash = hash_password(pw)
     user.reset_token_hash = None       # single use
     user.reset_expires_at = None
+    user.reset_purpose = None
     db.commit()
     return RedirectResponse("/login?msg=set", status_code=303)
 
@@ -1331,7 +1416,7 @@ def admin_users(request: Request, db: Session = Depends(get_db)):
              "caps": sorted(perms.effective_caps(u)),
              "brands": perms.effective_brands(u),
              "regions": perms.effective_regions(u),
-             "pending": not u.password_hash} for u in users]
+             "status": user_status(u)} for u in users]
     return templates.TemplateResponse(request, "admin_users.html", {"rows": rows})
 
 
@@ -1347,7 +1432,7 @@ def _brand_choices(u: User | None) -> tuple[list[str], str]:
 
 
 def _user_form_ctx(u: User | None, notice: str = "", link: str = "",
-                   error: str = "") -> dict:
+                   error: str = "", emailed: bool | None = None) -> dict:
     brand_choices, brand_warn = _brand_choices(u)
     return {"u": u,
             "roles": perms.ROLES, "role_labels": perms.ROLE_LABELS,
@@ -1360,7 +1445,10 @@ def _user_form_ctx(u: User | None, notice: str = "", link: str = "",
             "sel_brands": (perms._json_list(u.allowed_brands) if u else None) or [],
             "regions": perms.REGIONS,
             "sel_regions": perms.effective_regions(u) if u else list(perms.REGIONS),
-            "notice": notice, "set_link": link, "error": error}
+            "notice": notice, "set_link": link, "error": error, "emailed": emailed,
+            "email_on": bool(notify.WEBHOOK_URL),
+            "invite_ttl": notify.in_words(INVITE_TOKEN_TTL_MIN),
+            "reset_ttl": notify.in_words(RESET_TOKEN_TTL_MIN)}
 
 
 @app.get("/admin/users/new", response_class=HTMLResponse)
@@ -1445,22 +1533,43 @@ async def admin_user_save(request: Request, user_id: int | None = None,
     db.commit()
 
     if new_account:
-        link = _issue_set_password_link(db, u, request)
+        # Creating emails nothing: check the access you've just set, then send the
+        # invite from the "Sign-in" box (with a note, if you like). Same as 3PL Portal.
         return templates.TemplateResponse(request, "admin_user_form.html", _user_form_ctx(
-            u, notice="Account created. Send them the link below so they can set a password.",
-            link=link))
+            u, notice="Account created. Check their access, then send the invite below."))
     return RedirectResponse("/admin/users", status_code=303)
 
 
+@app.post("/admin/users/{user_id}/send-link", response_class=HTMLResponse)
 @app.post("/admin/users/{user_id}/set-password-link", response_class=HTMLResponse)
-def admin_user_reset(user_id: int, request: Request, db: Session = Depends(get_db)):
+async def admin_user_send_link(user_id: int, request: Request, db: Session = Depends(get_db)):
+    """Email an invite (no password yet) or a password reset, and show the link too."""
     u = db.get(User, user_id)
     if not u:
         return RedirectResponse("/admin/users", status_code=303)
-    link = _issue_set_password_link(db, u, request)
-    return templates.TemplateResponse(request, "admin_user_form.html", _user_form_ctx(
-        u, notice="New single-use link generated. Any earlier link is now dead.",
-        link=link))
+    if not u.active:
+        return templates.TemplateResponse(request, "admin_user_form.html", _user_form_ctx(
+            u, error="This account is disabled — enable it before sending a link."), status_code=400)
+    form = await request.form()
+    note = (form.get("note", "") or "").strip()[:1000]
+    send = form.get("send", "email") == "email"
+    me = current_user(request)
+    purpose = notify.RESET if u.password_hash else notify.INVITE
+    link, emailed = _issue_link(db, u, request, purpose=purpose, note=note, send=send,
+                                invited_by=(getattr(me, "email", "") if me is not None
+                                            and getattr(me, "id", None) else ""))
+    what = "invite" if purpose == notify.INVITE else "password reset"
+    if not send:
+        msg = f"New {what} link below — copy it to them yourself. Any earlier link is now dead."
+    elif emailed:
+        msg = (f"{what.capitalize()} emailed to {u.email}. The link is below too, in case it's slow "
+               "to arrive (first emails can take a few minutes, or land in Junk).")
+    elif notify.WEBHOOK_URL:
+        msg = f"The email couldn't be handed to the mail service — copy the {what} link below to them."
+    else:
+        msg = f"Email isn't set up on this server — copy the {what} link below to them."
+    return templates.TemplateResponse(request, "admin_user_form.html",
+                                      _user_form_ctx(u, notice=msg, link=link, emailed=emailed))
 
 
 @app.post("/admin/users/{user_id}/delete")

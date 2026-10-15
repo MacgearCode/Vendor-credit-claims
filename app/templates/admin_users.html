@@ -43,9 +43,7 @@
       </td>
       <td>{{ r.regions|join(", ") }}</td>
       <td>
-        {% if not r.u.active %}<span class="pill pg-red">disabled</span>
-        {% elif r.pending %}<span class="pill pg-amber">no password yet</span>
-        {% else %}<span class="pill pg-green">active</span>{% endif %}
+        <span class="pill {{ r.status[0] }}">{{ r.status[1] }}</span>
       </td>
       <td>{{ r.u.last_login|sydney if r.u.last_login else '—' }}</td>
       <td><a href="/admin/users/{{ r.u.id }}">Edit</a></td>

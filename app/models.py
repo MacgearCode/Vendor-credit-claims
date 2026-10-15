@@ -168,6 +168,9 @@ class User(Base):
     last_login: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     reset_token_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     reset_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # 'invite' | 'reset' — words the set-password page and decides the link's life.
+    # NULL reads as 'reset' (every link minted before the column existed).
+    reset_purpose: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class ProcessedInvoice(Base):
