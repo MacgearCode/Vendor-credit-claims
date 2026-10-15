@@ -7,6 +7,11 @@ intercompany excluded, ex-GST, subsidiary currency); periods on Macgear's FINANC
 year (April–March, FY27 = Apr 2026 – Mar 2027); "LY" = the same dates a year earlier;
 a period that hasn't finished compares to-date with to-date. AU and NZ never summed.
 
+ACCOUNT MANAGER = the CURRENT account rep on the customer record (NetSuite customer
+salesrep, dim_ns_customer.account_rep_id), applied to ALL history — so a manager's
+numbers are their whole portfolio, including sales made before they took an account
+over (user, 2026-10-15). It is NOT the rep on each invoice.
+
 Speed. Querying the warehouse per click took ~6 s, so each region's sales are held in
 memory as a compact summary and sliced in Python:
   - monthly: month x customer x brand x rep, all history   (AU ~190k rows)
@@ -51,10 +56,11 @@ def names() -> dict:
         cust, brand, rep = {}, {}, {}
         with warehouse.connect() as conn, conn.cursor() as cur:
             cur.execute("""select customer_id, customer_name,
-                                  coalesce(customer_group, parent_name, customer_name)
+                                  coalesce(customer_group, parent_name, customer_name),
+                                  account_rep_id
                            from reporting.dim_ns_customer""")
-            for cid, nm, grp in cur.fetchall():
-                cust[cid] = (nm or str(cid), grp or nm or str(cid))
+            for cid, nm, grp, am in cur.fetchall():
+                cust[cid] = (nm or str(cid), grp or nm or str(cid), am)
             cur.execute("select brand_id, brand from reporting.dim_brand")
             brand = {b: n for b, n in cur.fetchall()}
             cur.execute("select rep_id, rep_name from reporting.dim_salesrep")
@@ -84,12 +90,14 @@ class Cube:
 
 def _monthly(region: str) -> Cube:
     rk = warehouse.region_key(region)
+    # No rep column: the account manager is a property of the customer (see top), so
+    # it's looked up per customer at slice time. Dropping it also shrinks the summary.
     rows = warehouse.query("""
-        select s.date_key / 100, s.customer_id, s.brand_id, s.rep_id,
+        select s.date_key / 100, s.customer_id, s.brand_id, null::int,
                sum(s.net_sales), sum(s.net_sales_est_cost), sum(s.net_sales_qty)
         from reporting.fact_sales_line s
         where s.region_key = %(rk)s and s.net_sales is not null
-        group by 1, 2, 3, 4 order by 1""", {"rk": rk})
+        group by 1, 2, 3 order by 1""", {"rk": rk})
     return Cube(rows)
 
 
@@ -105,12 +113,12 @@ def _daily(region: str, today: date) -> Cube:
     rk = warehouse.region_key(region)
     lo, hi, ly_lo, ly_hi = daily_window(today)
     rows = warehouse.query("""
-        select s.date_key, s.customer_id, s.brand_id, s.rep_id,
+        select s.date_key, s.customer_id, s.brand_id, null::int,
                sum(s.net_sales), sum(s.net_sales_est_cost), sum(s.net_sales_qty)
         from reporting.fact_sales_line s
         where s.region_key = %(rk)s and s.net_sales is not null
           and (s.date_key between %(lo)s and %(hi)s or s.date_key between %(llo)s and %(lhi)s)
-        group by 1, 2, 3, 4 order by 1""",
+        group by 1, 2, 3 order by 1""",
         {"rk": rk, "lo": _key(lo), "hi": _key(hi), "llo": _key(ly_lo), "lhi": _key(ly_hi)})
     return Cube(rows)
 
@@ -195,10 +203,16 @@ def period(code: str, fy: int, today: date) -> dict:
 
 
 # ---- slicing ------------------------------------------------------------------------
+def _am(c: int, nm: dict):
+    """The customer's current account manager id (None if the record has none)."""
+    t = nm["cust"].get(c)
+    return t[2] if t else None
+
+
 def _filter_ok(f: dict, c: int, b: int, r: int, nm: dict) -> bool:
     if f.get("brand") is not None and b != f["brand"]:
         return False
-    if f.get("rep") is not None and r != f["rep"]:
+    if f.get("rep") is not None and _am(c, nm) != f["rep"]:
         return False
     if f.get("retailer"):
         if nm["cust"].get(c, ("", ""))[1] != f["retailer"]:
@@ -214,7 +228,7 @@ def _label(dim: str, c: int, b: int, r: int, k: int, nm: dict) -> str:
     if dim == "brand":
         return nm["brand"].get(b) or "(no brand)"
     if dim == "rep":
-        return nm["rep"].get(r) or "(no rep)"
+        return nm["rep"].get(_am(c, nm)) or "(no account manager)"
     if dim == "month":
         ym = k if k < 1000000 else k // 100
         return f"{ym // 100}-{ym % 100:02d}"
@@ -250,19 +264,19 @@ def _items_sql(region: str, p: dict, dims: list, f: dict, nm: dict) -> dict:
     # Rep and retailer filter in SQL (1-2 s). BRAND must not: filtering fact_sales_line on
     # brand_id sends the planner down a path that ran past 80 s (0.13 s without it), so
     # brand is grouped on and filtered here instead.
-    if f.get("rep") is not None:
-        where.append("s.rep_id = %(rep)s"); prm["rep"] = f["rep"]
-    if f.get("retailer"):
-        ids = [cid for cid, (_, grp) in nm["cust"].items() if grp == f["retailer"]]
+    if f.get("rep") is not None or f.get("retailer"):
+        ids = [cid for cid, t in nm["cust"].items()
+               if (f.get("rep") is None or t[2] == f["rep"])
+               and (not f.get("retailer") or t[1] == f["retailer"])]
         where.append("s.customer_id = any(%(cids)s)"); prm["cids"] = ids
     # Group by only what the rows (or the brand filter) need — every id took ~6 s.
-    need_c = any(x in dims for x in ("retailer", "account"))
+    need_c = any(x in dims for x in ("retailer", "account", "rep"))
     need_b = "brand" in dims or f.get("brand") is not None
     cols = ["s.item_key",
             "s.date_key / 100" if "month" in dims else "0",
             "s.customer_id" if need_c else "null::int",
             "s.brand_id" if need_b else "null::int",
-            "s.rep_id" if "rep" in dims else "null::int"]
+            "null::int"]
     rows = warehouse.query(f"""
         select {', '.join(cols)}, (s.date_key >= %(a)s),
                sum(s.net_sales), sum(s.net_sales_est_cost), sum(s.net_sales_qty)
@@ -414,7 +428,8 @@ def options(region: str, today: date) -> dict:
             if m.k[i] < since:
                 continue
             v = m.v[i]
-            b, r, c = m.b[i], m.r[i], m.c[i]
+            b, c = m.b[i], m.c[i]
+            r = _am(c, nm)
             if b in nm["brand"]:
                 brands[b] = brands.get(b, 0) + v
             if r in nm["rep"]:

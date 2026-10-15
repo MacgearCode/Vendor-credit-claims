@@ -122,7 +122,7 @@
 
 <p class="r-note">Revenue = Macgear's NetSuite sales (sales account, ex-GST, net of credits; AU → NZ intercompany excluded), each country in its own
   currency. Periods follow the financial year (April–March). "LY" = the same dates a year earlier; a period still running compares to-date with to-date.
-  Account manager = the sales rep on the invoice. {% if a.margin %}GP uses NetSuite's estimated cost, not posted COGS.{% endif %}
+  Account manager = the account manager on the customer record today, applied to all past sales — their whole portfolio, not the rep on each invoice. {% if a.margin %}GP uses NetSuite's estimated cost, not posted COGS.{% endif %}
   {% if not has_targets %}Targets aren't loaded yet — the Target columns appear once they are.{% endif %}</p>
 {% endblock %}
 

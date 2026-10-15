@@ -106,10 +106,12 @@ def tops(start: date, end: date) -> dict:
             left join reporting.dim_brand b on b.brand_id = s.brand_id
             where s.date_key between %(lo)s and %(hi)s and s.net_sales is not null
             group by 1, 2""",
-        "reps": """select s.region_key, coalesce(r.rep_name, 'No rep'),
+        # the customer's CURRENT account manager, not the rep on each invoice (user,
+        # 2026-10-15) — same rule as Sales Explorer
+        "reps": """select s.region_key, coalesce(nc.account_rep, 'No account manager'),
                    sum(s.net_sales), sum(s.net_sales_est_cost)
             from reporting.fact_sales_line s
-            left join reporting.dim_salesrep r on r.rep_id = s.rep_id
+            left join reporting.dim_ns_customer nc on nc.customer_id = s.customer_id
             where s.date_key between %(lo)s and %(hi)s and s.net_sales is not null
             group by 1, 2""",
         "items": """select s.region_key, i.macgear_code || ' — ' || coalesce(i.description, ''),

@@ -46,14 +46,15 @@ def test_ranges_use_whole_months_and_days_only_at_the_edges():
 
 # ---- slicing ---------------------------------------------------------------------
 def _cube_fixture(monkeypatch):
-    nm = {"cust": {1: ("JB Hi-Fi Chatswood", "JB HIFI"), 2: ("HN Auburn", "Harvey Norman")},
-          "brand": {10: "MOVA", 11: "EUFY"}, "rep": {7: "Chris"}}
+    # account manager comes from the CUSTOMER record (third field), not the invoice rep
+    nm = {"cust": {1: ("JB Hi-Fi Chatswood", "JB HIFI", 7), 2: ("HN Auburn", "Harvey Norman", 8)},
+          "brand": {10: "MOVA", 11: "EUFY"}, "rep": {7: "Chris", 8: "Jeremy", 9: "Invoice rep"}}
     monthly = sx.Cube(sorted([
-        (202604, 1, 10, 7, 100.0, 60.0, 1), (202605, 2, 11, 7, 50.0, 20.0, 2),
-        (202504, 1, 10, 7, 40.0, 30.0, 1), (202510, 1, 10, 7, 999.0, 0.0, 9)]))
+        (202604, 1, 10, 9, 100.0, 60.0, 1), (202605, 2, 11, 9, 50.0, 20.0, 2),
+        (202504, 1, 10, 9, 40.0, 30.0, 1), (202510, 1, 10, 9, 999.0, 0.0, 9)]))
     daily = sx.Cube(sorted([
-        (20261003, 1, 10, 7, 10.0, 5.0, 1), (20261020, 1, 10, 7, 5000.0, 0.0, 1),   # after "today": excluded
-        (20251002, 2, 11, 7, 4.0, 1.0, 1)]))
+        (20261003, 1, 10, 9, 10.0, 5.0, 1), (20261020, 1, 10, 9, 5000.0, 0.0, 1),   # after "today": excluded
+        (20251002, 2, 11, 9, 4.0, 1.0, 1)]))
     monkeypatch.setattr(sx, "names", lambda: nm)
     monkeypatch.setattr(sx, "cubes", lambda region, today: (monthly, daily))
 
@@ -129,3 +130,11 @@ def test_vendor_never_reaches_sales_even_if_ticked(client):
     for path in ("/reports/sales", "/reports/sales/data", "/reports/sales/export.xlsx"):
         assert client.get(path).status_code == 403, path
     assert client.calls == []
+
+
+def test_account_manager_is_the_customers_current_manager_not_the_invoice_rep(monkeypatch):
+    _cube_fixture(monkeypatch)
+    r = sx.explore("AU", "ytd", 2027, TODAY, ["rep"], {}, False)
+    assert {x["k"][0]: x["v"] for x in r["rows"]} == {"Chris": 110.0, "Jeremy": 50.0}
+    r = sx.explore("AU", "ytd", 2027, TODAY, ["retailer"], {"rep": 8}, False)
+    assert [x["k"] for x in r["rows"]] == [["Harvey Norman"]] and r["kpis"]["v"] == 50

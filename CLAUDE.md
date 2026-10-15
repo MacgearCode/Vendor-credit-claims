@@ -176,15 +176,21 @@ sell-through snapshot (last week's units, WoW, top 5) in their scope.
 **Sales Explorer** (`app/sales_explorer.py`, `templates/sales_explorer.html`, built
 2026-10-15 to carry the core of the Power BI sales report). Revenue = home-page
 definition; **financial-year periods** (Apr–Mar): quick (today / yesterday / this week /
-MTD / QTD / YTD), full year, Q1–Q4, months; FY selector FY23→; filters account manager
-(invoice rep), brand, retailer (customer group); every figure vs the **same dates LY**
+MTD / QTD / YTD), full year, Q1–Q4, months; FY selector FY23→; filters account manager,
+brand, retailer (customer group); every figure vs the **same dates LY**
 (to-date vs to-date while a period runs). Matrix: up to 3 row levels from Retailer,
 Account (store), Brand, Account manager, Item, Month — expandable tree, sortable,
 share bars, GP only with `margin`; Excel = the matrix flattened. Needs the `sales`
 area AND `sell_in_value` (route-checked; not listed in menus without it); never vendors.
+- **Account manager = the CURRENT account rep on the customer record**
+  (`dim_ns_customer.account_rep_id`), applied to all history — the manager's whole
+  portfolio (user, 2026-10-15). NOT the rep on each invoice (`fact_sales_line.rep_id`,
+  which matched ~94%). The summary therefore has no rep column; the manager is looked
+  up per customer. The home page "Account managers" list uses the same rule.
+  Checked: FY27 YTD per manager = SQL grouped by `dim_ns_customer.account_rep` exactly.
 - **Speed:** per-click warehouse queries took ~6 s, so each region's sales live in memory
-  as a sorted columnar summary — monthly (month × customer × brand × rep, all history,
-  AU ~190k rows) + daily (this & last month and the same span LY). A range is answered
+  as a sorted columnar summary — monthly (month × customer × brand, all history,
+  AU ~183k rows) + daily (this & last month and the same span LY). A range is answered
   from whole months plus days at the partial edges (`_parts`, bisect). Slices 0.02–0.06 s;
   build ~15–19 s, warmed at startup, monthly TTL 30 min, daily 5 min. **Item** isn't in
   the summary (~1M rows): Item matrices query the warehouse grouped by only the needed
