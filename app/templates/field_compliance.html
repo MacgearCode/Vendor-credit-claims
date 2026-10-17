@@ -60,9 +60,9 @@
     <div class="sub">grade not in the store's tier</div>
   </div>
   <div class="r-stat">
-    <div class="lbl">Left out — not HN core / no tier yet</div>
+    <div class="lbl">Left out — not HN core / store has no tier</div>
     <div class="val">{{ comp.excluded.hn_not_core }} <small>/ {{ comp.excluded.hn_no_tier }}</small></div>
-    <div class="sub">grade E–Z or none / category without a tier list</div>
+    <div class="sub">grade E–Z or none / store not on HN's tier list</div>
   </div>
   {% else %}
   <div class="r-stat">
@@ -142,7 +142,7 @@
   <ul class="f-def">
     <li><b>One count per store × product</b> for the period, using its <b>latest</b> answer. A store visited three times counts once.</li>
     <li><b>A blank answer counts as No</b> — skipping a question never helps.</li>
-    <li><b>Harvey Norman core range:</b> only products HN grades <b>A–D</b> (HN's weekly Mova file), and only at stores whose tier ranges that grade — an <b>AB</b> store is measured on A and B products. Other grades (new, clearing, special order, deleted) never count. Only Floorcare has a tier list so far; other categories show as "no tier yet".</li>
+    <li><b>Harvey Norman core range:</b> only products HN grades <b>A–D</b> (HN's weekly Mova file), and only at stores whose tier ranges that grade — an <b>AB</b> store is measured on A and B products. Other grades (new, clearing, special order, deleted) never count. A store's tier applies to all three categories (Floorcare, Outdoor Living, Personal Care). HN stores not on HN's tier list (outlets, commercial) aren't measured.</li>
     <li><b>JB / TGG merchandising</b> is measured separately: every product asked, except a No the rep marks "not ranged".</li>
     <li>"Is X <i>still</i> on display" questions (products being cleared) are not compliance.</li>
     <li>The rep credited is the rep who gave the latest answer.</li>

@@ -34,7 +34,9 @@ def row(store="HN 1", product="Z70 ULTRA", answer="Yes", day=D, hour=9, banner="
     ({"grade": "F"}, "hn_not_core"),                             # clearing: never counts
     ({"grade": "S"}, "hn_not_core"),
     ({"grade": None}, "hn_not_core"),                            # no HN grade for the product
-    ({"has_tier": False, "tier": None}, "hn_no_tier"),           # e.g. Outdoor - no tier list yet
+    ({"has_tier": False, "tier": None}, "hn_no_tier"),           # HN store not on HN's tier list
+    ({"category": "OUTDOOR LIVING", "grade": "B", "tier": "AB"}, "hn"),      # one tier, all categories
+    ({"category": "PERSONAL CARE", "grade": "C", "tier": "AB"}, "hn_not_ranged"),
     ({"banner": "JB", "grade": None}, "merch"),
     ({"banner": "TGG", "answer": "No", "reason": "N/A not ranged in store"}, "merch_not_ranged"),
     ({"banner": "TGG", "answer": "", "reason": "N/A  - Not ranged"}, "merch_not_ranged"),

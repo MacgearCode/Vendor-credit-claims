@@ -234,8 +234,9 @@ decision about what they may see). Pages under `/reports/field`: dashboard, `/co
   period using the LATEST answer; blank = No; rep credited = rep on that answer;
   **Harvey Norman is the measure**: only HN grades **A–D** (column E "Core Range" of HN's
   weekly Mova file → `field.hn_product_grade`) at stores whose tier ranges the grade
-  (`field.hn_store_tier`, from HN's "Store Site Group Tiering" PDF — **Floorcare only so
-  far**; other categories show as "no tier yet" and don't count). Other grades E/F/O/S/Z
+  (`field.hn_store_tier`, from HN's "Store Site Group Tiering" PDF — the PDF says
+  Floorcare but **the same tier applies to Outdoor Living and Personal Care too**, user
+  confirmed 2026-10-18; HN stores not on the list don't count). Other grades E/F/O/S/Z
   never count. **JB / TGG** = a separate "merchandising" measure (reps can't influence
   ranging there): everything asked except a No whose follow-up says "not ranged". "Still
   on display" questions (clearance) are never compliance. Target line 80% (placeholder).

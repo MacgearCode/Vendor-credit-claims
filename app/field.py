@@ -12,8 +12,10 @@ DISPLAY COMPLIANCE — the measure reps are judged on (user, 2026-10-17). Rules:
     (column E of HN's weekly Mova file), and only at stores whose tier for that
     category ranges the grade — an "AB" store is measured on A and B products only.
     Other HN grades (E/F/O/S/Z — new, clearing, special order, deleted) never count.
-    Categories without a tier list yet (only Floorcare has one) aren't in the HN
-    measure; they show as "no tier list".
+    One tier per store applies to all three categories — Floorcare, Outdoor Living,
+    Personal Care (user, 2026-10-18; loaded as one row per category). An HN store that
+    isn't on HN's tier list (outlets, commercial, some JM stores) isn't in the measure;
+    it shows as "no tier".
   * JB Hi-Fi and The Good Guys are measured too but separately ("merchandising"): reps
     can't influence ranging there. No grading exists, so a No whose follow-up says
     "not ranged" is left out; everything else counts.
@@ -126,7 +128,7 @@ def classify(r: dict) -> str:
        hn            counts in the HN core-range measure
        hn_not_ranged HN store whose tier doesn't range this grade (left out)
        hn_not_core   HN grade outside A–D, or no HN grade (left out)
-       hn_no_tier    HN store with no tier list for this category yet (left out, shown)
+       hn_no_tier    HN store not on HN's tier list for this category (left out, shown)
        merch         JB / TGG / other — counts in the merchandising measure
        merch_not_ranged  ... a No the rep says is "not ranged" (left out)"""
     if r["banner"] == "HN":
