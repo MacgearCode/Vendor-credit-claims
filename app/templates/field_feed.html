@@ -1,0 +1,71 @@
+{% extends "_rpt_base.html" %}
+{% import "_field_macros.html" as fm %}
+{% block title %}Activity feed · Macgear{% endblock %}
+{% block pagename %}Field Activity{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/field.css?v={{ asset_ver }}">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+{% endblock %}
+{% block content %}
+{% include "_field_head.html" %}
+<div class="f-head">
+  <div>
+    <p class="r-eyebrow">{{ visits|length }} visit{{ 's' if visits|length != 1 }} · {{ visits|map(attribute='rep_code')|unique|list|length }} reps</p>
+    <h1>{{ d|dmy }} {{ d.year }}</h1>
+  </div>
+  <form class="r-filters" method="get">
+    <a class="r-btn ghost" href="?day={{ prev }}&rep={{ rep }}">‹ {{ prev|dmy }}</a>
+    <label>Day <input class="r-input" type="date" name="day" value="{{ d }}" onchange="this.form.submit()"></label>
+    {% if next <= today %}<a class="r-btn ghost" href="?day={{ next }}&rep={{ rep }}">{{ next|dmy }} ›</a>{% endif %}
+    {{ fm.rep_select(rep_list, rep) }}
+  </form>
+</div>
+
+{% if not visits %}
+  <div class="r-card r-empty">No visits on this day.{% if last_active %} The last day with visits was <a href="?day={{ last_active }}&rep={{ rep }}">{{ last_active|dmy }}</a>.{% endif %}</div>
+{% else %}
+<div class="r-grid r-cols-2">
+  <div class="f-feed">
+    {% for v in visits %}
+    {% set dsp = disp.get(v.visit_id) %}
+    <div class="f-card">
+      <div class="t">
+        <div><b><a href="/reports/field/visits/{{ v.visit_id }}">{{ v.store_name or v.client_code }}</a></b>
+          <div class="s">{{ v.rep_name }} · {{ v.started_at|hm }}–{{ v.ended_at|hm }}{% if v.minutes is not none %} · {{ v.minutes|int }} min{% endif %}
+            {% if v.checkin_m is not none and v.checkin_m > 300 %} · <span class="down" title="Checked in this far from the store's Repsly location">{{ (v.checkin_m / 1000)|round(1) }} km from store</span>{% endif %}</div></div>
+        {% if dsp %}<div>{{ fm.bar(dsp.yes / dsp.n if dsp.n else none) }}</div>{% endif %}
+      </div>
+      {% if dsp and dsp.missing %}<div class="s" style="margin-top:6px">Not on display: {{ dsp.missing|join(', ') }}</div>{% endif %}
+      {% for n in notes.get(v.visit_id, []) %}<div class="f-note">{{ n.note }}</div>{% endfor %}
+      {% if photos.get(v.visit_id) %}<div class="f-thumbs">{% for p in photos[v.visit_id][:8] %}<a href="{{ p.url }}" data-lb data-cap="{{ v.store_name }} · {{ v.rep_name }} · {{ p.taken_at|hm }}{% if p.note %} · {{ p.note }}{% endif %}" data-visit="/reports/field/visits/{{ v.visit_id }}"><img src="{{ p.url }}" alt="Photo at {{ v.store_name }}" loading="lazy"></a>{% endfor %}</div>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  <div>
+    <div class="r-card" style="position:sticky;top:76px">
+      <div id="map" class="f-map"></div>
+      <p class="r-note">Store locations from Repsly. Map tiles © OpenStreetMap contributors.</p>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script src="/static/field.js?v={{ asset_ver }}"></script>
+{% if points %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(function () {
+  var pts = {{ points|tojson }};
+  var map = L.map("map", {scrollWheelZoom: false});
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 18, attribution: "© OpenStreetMap"}).addTo(map);
+  var b = [];
+  pts.forEach(function (p) {
+    L.circleMarker([p.lat, p.lng], {radius: 8, weight: 2}).addTo(map).bindPopup("<b>" + RPT.esc(p.name) + "</b><br>" + RPT.esc(p.rep || ""));
+    b.push([p.lat, p.lng]);
+  });
+  if (b.length === 1) map.setView(b[0], 12); else map.fitBounds(b, {padding: [24, 24]});
+})();
+</script>
+{% endif %}
+{% endblock %}

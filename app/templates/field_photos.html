@@ -1,0 +1,30 @@
+{% extends "_rpt_base.html" %}
+{% import "_field_macros.html" as fm %}
+{% block title %}Photos · Macgear{% endblock %}
+{% block pagename %}Field Activity{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/field.css?v={{ asset_ver }}">{% endblock %}
+{% block content %}
+{% include "_field_head.html" %}
+<div class="f-head">
+  <div><p class="r-eyebrow">{{ s|dmy }} – {{ e|dmy }}</p><h1>Photos <span class="r-muted" style="font-weight:600">{{ n }}</span></h1></div>
+</div>
+<form class="r-filters" method="get" style="margin-bottom:12px">
+  <label>From <input class="r-input" type="date" name="start" value="{{ s }}"></label>
+  <label>To <input class="r-input" type="date" name="end" value="{{ e }}"></label>
+  {{ fm.rep_select(rep_list, rep) }}
+  <label>Store <input class="r-input" name="q" value="{{ q }}" placeholder="name contains…"></label>
+  <button class="r-btn" type="submit">Show</button>
+</form>
+<div class="f-photos">
+  {% for p in photos %}
+  <a href="{{ p.url }}" data-lb data-cap="{{ p.store_name or p.client_code }} · {{ p.rep_name }} · {{ p.photo_date|dmy }} {{ p.taken_at|hm }}{% if p.note %} · {{ p.note }}{% endif %}"
+     {% if p.visit_id %}data-visit="/reports/field/visits/{{ p.visit_id }}"{% endif %}>
+    <img src="{{ p.url }}" alt="Photo at {{ p.store_name }}" loading="lazy">
+    <div class="c"><b>{{ p.store_name or p.client_code }}</b><br>{{ p.rep_name }} · {{ p.photo_date|dmy }}{% if p.note %}<br>{{ p.note }}{% endif %}</div>
+  </a>
+  {% else %}<div class="r-card r-empty" style="grid-column:1/-1">No photos in this period.</div>{% endfor %}
+</div>
+{% if n > photos|length %}<p class="r-note">Showing the latest {{ photos|length }} of {{ n }}.</p>{% endif %}
+<p class="r-note">Click a photo to see it large; arrows or swipe to step through. Photos are the separate Photos activity in Repsly; photos taken inside a form show on the visit page.</p>
+{% endblock %}
+{% block scripts %}<script src="/static/field.js?v={{ asset_ver }}"></script>{% endblock %}

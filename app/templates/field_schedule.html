@@ -1,0 +1,49 @@
+{% extends "_rpt_base.html" %}
+{% import "_field_macros.html" as fm %}
+{% block title %}Schedule · Macgear{% endblock %}
+{% block pagename %}Field Activity{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/field.css?v={{ asset_ver }}">{% endblock %}
+{% block content %}
+{% include "_field_head.html" %}
+<div class="f-head">
+  <div>
+    <p class="r-eyebrow">Planned in Repsly vs visits made</p>
+    <h1>Week of {{ wk|dmy }}</h1>
+  </div>
+  <form class="r-filters" method="get">
+    <a class="r-btn ghost" href="?week={{ prev }}&rep={{ rep }}">‹ Prev</a>
+    <a class="r-btn ghost" href="?rep={{ rep }}">This week</a>
+    <a class="r-btn ghost" href="?week={{ next }}&rep={{ rep }}">Next ›</a>
+    <input type="hidden" name="week" value="{{ wk }}">
+    {{ fm.rep_select(rep_list, rep) }}
+  </form>
+</div>
+<div class="r-legend" style="margin-bottom:10px">
+  <span><i style="background:var(--r-pos-soft)"></i>Scheduled, visited</span>
+  <span><i style="background:var(--r-neg-soft)"></i>Scheduled, not visited (past)</span>
+  <span><i style="background:var(--r-card-2)"></i>Scheduled, still ahead</span>
+  <span><i style="background:var(--r-accent-soft)"></i>Visited, not scheduled</span>
+</div>
+<div class="r-tablewrap"><table class="r-table f-sched">
+  <thead><tr><th class="l sticky">Rep</th>{% for d in days %}<th class="l {{ 'today' if d == t }}">{{ d|dmy }}</th>{% endfor %}</tr></thead>
+  <tbody>
+  {% for code, name in shown %}
+  <tr><td class="l sticky"><b>{{ name }}</b></td>
+    {% for d in days %}
+    {% set planned = grid.get((code, d), []) %}
+    {% set made = done.get((code, d), []) %}
+    {% set planned_codes = planned|map(attribute='client_code')|list %}
+    <td>
+      {% for s in planned %}
+        {%- set mv = made|selectattr('client_code', 'equalto', s.client_code)|first %}
+        {%- if mv %}<a class="st ok" href="/reports/field/visits/{{ mv.visit_id }}">{{ s.store_name or s.client_code }}</a>
+        {%- else %}<span class="st {{ 'miss' if d < t else '' }}">{{ s.store_name or s.client_code }}</span>{% endif %}
+      {%- endfor %}
+      {% for v in made if v.client_code not in planned_codes %}<a class="st extra" href="/reports/field/visits/{{ v.visit_id }}">{{ v.store_name or v.client_code }}</a>{% endfor %}
+    </td>
+    {% endfor %}
+  </tr>
+  {% else %}<tr><td colspan="8" class="l r-muted">Nothing scheduled or visited this week.</td></tr>{% endfor %}
+  </tbody>
+</table></div>
+{% endblock %}

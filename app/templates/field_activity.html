@@ -1,0 +1,26 @@
+{% extends "_rpt_base.html" %}
+{% import "_field_macros.html" as fm %}
+{% block title %}Reps · Macgear{% endblock %}
+{% block pagename %}Field Activity{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/field.css?v={{ asset_ver }}">{% endblock %}
+{% block content %}
+{% include "_field_head.html" %}
+<div class="f-head">
+  <div><p class="r-eyebrow">{{ s|dmy }} – {{ e|dmy }}</p><h1>Rep activity</h1></div>
+  <form class="r-filters" method="get">
+    <label>From <input class="r-input" type="date" name="start" value="{{ s }}"></label>
+    <label>To <input class="r-input" type="date" name="end" value="{{ e }}"></label>
+    <button class="r-btn" type="submit">Show</button>
+  </form>
+</div>
+<div class="r-tablewrap"><table class="r-table">
+  <thead><tr><th class="l">Rep</th><th>Visits</th><th>Stores</th><th>Avg minutes</th><th>Scheduled (to date)</th><th class="l" style="width:22%">Schedule kept</th><th>Check-ins &gt;300 m</th></tr></thead>
+  {% for r in rows %}
+  <tr><td class="l"><a href="/reports/field/visits?rep={{ r.rep_code }}&start={{ s }}&end={{ e }}">{{ r.name }}</a></td>
+    <td>{{ r.visits }}</td><td>{{ r.stores }}</td><td>{{ r.avg_minutes|round|int if r.avg_minutes is not none }}</td>
+    <td>{{ r.scheduled }}</td><td class="l">{{ fm.bar(r.sched_rate, 0.9) }}</td>
+    <td><span class="{{ 'down' if r.far }}">{{ r.far }}</span></td></tr>
+  {% else %}<tr><td colspan="7" class="l r-muted">No visits in this period.</td></tr>{% endfor %}
+</table></div>
+<p class="r-note">Schedule kept = scheduled visits up to today where the rep visited that store that day. Visits over 10 hours are left out of the average (check-outs never made).</p>
+{% endblock %}

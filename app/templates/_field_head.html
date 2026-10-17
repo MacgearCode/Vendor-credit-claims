@@ -1,0 +1,9 @@
+{# Tabs for every Field Activity page. Needs `page`. Macros are in _field_macros.html. #}
+<nav class="f-tabs" aria-label="Field pages">
+  {% for key, href, label in [("dash", "/reports/field", "Dashboard"), ("comp", "/reports/field/compliance", "Display compliance"),
+       ("feed", "/reports/field/feed", "Activity feed"), ("sched", "/reports/field/schedule", "Schedule"),
+       ("visits", "/reports/field/visits", "Visits"), ("act", "/reports/field/activity", "Reps"),
+       ("photos", "/reports/field/photos", "Photos")] %}
+    <a class="r-tab{% if page == key %} on{% endif %}" href="{{ href }}">{{ label }}</a>
+  {% endfor %}
+</nav>

@@ -1,0 +1,55 @@
+{% extends "_rpt_base.html" %}
+{% import "_field_macros.html" as fm %}
+{% block title %}Visit · {{ v.store_name }} · Macgear{% endblock %}
+{% block pagename %}Field Activity{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/field.css?v={{ asset_ver }}">{% endblock %}
+{% block content %}
+{% include "_field_head.html" %}
+<div class="f-head">
+  <div>
+    <p class="r-eyebrow">{{ banners.get(v.banner, v.banner) }} · {{ v.state or '' }}</p>
+    <h1>{{ v.store_name or v.client_code }}</h1>
+    <div class="r-meta">
+      <span class="r-chip">{{ v.visit_date|dmy }} {{ v.visit_date.year }}</span>
+      <span class="r-chip">{{ v.rep_name }}</span>
+      <span class="r-chip">{{ v.started_at|hm }}–{{ v.ended_at|hm }}{% if v.minutes is not none %} · {{ v.minutes|int }} min{% endif %}</span>
+      {% if v.checkin_m is not none %}<span class="r-chip {{ 'neg' if v.checkin_m > 300 else '' }}">Checked in {{ v.checkin_m|int }} m from store</span>{% endif %}
+      <a class="r-chip acc" href="/reports/field/feed?day={{ v.visit_date }}">Day's feed</a>
+    </div>
+  </div>
+</div>
+
+{% if display %}
+<div class="r-card">
+  <div class="r-card-h"><h2>Display check</h2>
+    <span class="r-muted">{{ display|selectattr('answer', 'equalto', 'Yes')|list|length }} of {{ display|length }} on display</span></div>
+  <div class="r-tablewrap"><table class="r-table">
+    <thead><tr><th class="l">Product</th><th class="l">On display</th><th class="l">HN grade</th><th class="l">Store tier</th><th class="l">Reason</th></tr></thead>
+    {% for r in display|sort(attribute='sort_order') %}
+    <tr><td class="l">{{ r.product_name }}</td><td class="l">{{ fm.answer(r.answer) }}</td>
+      <td class="l">{% if r.hn_grade and v.banner == 'HN' %}<span class="f-pill grade">{{ r.hn_grade }}</span>{% endif %}</td>
+      <td class="l">{{ r.store_grades or '' }}</td><td class="l" style="white-space:normal">{{ r.reason or '' }}</td></tr>
+    {% endfor %}
+  </table></div>
+</div>
+{% endif %}
+
+{% if notes %}<div class="r-card r-sec"><div class="r-card-h"><h2>Notes</h2></div>
+  {% for n in notes %}<div class="f-note">{{ n.note }}</div>{% endfor %}</div>{% endif %}
+
+{% if photos %}<div class="r-card r-sec"><div class="r-card-h"><h2>Photos</h2></div>
+  <div class="f-photos">{% for p in photos %}<a href="{{ p.url }}" data-lb data-cap="{{ v.store_name }} · {{ p.taken_at|hm }}{% if p.note %} · {{ p.note }}{% endif %}"><img src="{{ p.url }}" alt="Visit photo" loading="lazy">{% if p.note %}<div class="c">{{ p.note }}</div>{% endif %}</a>{% endfor %}</div></div>{% endif %}
+
+{% for (fid, fname), rows in forms.items() %}
+<div class="r-card r-sec">
+  <div class="r-card-h"><h2>{{ fname }}</h2><span class="r-muted">{{ rows[0].submitted_at|hm }}</span></div>
+  <div class="r-tablewrap"><table class="r-table">
+    {% for a in rows %}
+    <tr><td class="l" style="white-space:normal;width:55%">{{ a.question }}</td>
+      <td class="l" style="white-space:normal">{% if a.value and a.value.startswith('https://') %}<a href="{{ a.value }}" data-lb data-cap="{{ a.question }}"><img src="{{ a.value }}" alt="" style="max-height:90px;border-radius:8px"></a>{% elif a.value in ('Yes', 'No') %}{{ fm.answer(a.value) }}{% else %}{{ a.value or '' }}{% endif %}</td></tr>
+    {% endfor %}
+  </table></div>
+</div>
+{% endfor %}
+{% endblock %}
+{% block scripts %}<script src="/static/field.js?v={{ asset_ver }}"></script>{% endblock %}

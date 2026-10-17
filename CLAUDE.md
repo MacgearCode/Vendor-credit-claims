@@ -29,6 +29,7 @@ warehouse host in the droplet `.env` broke the warm-up — compare the host, not
 | `/reports/items` | Item Explorer — search + leaderboards; `/reports/items/i/<code>` = one item | staff, vendors |
 | `/reports/table` | Sell-Through Table — the weekly workbook live; `/reports/table/export.xlsx` | staff, vendors |
 | `/reports/sell-through` | Sell-Through Dashboard (from `Sell Through/prototype/`) | staff, vendors |
+| `/reports/field` | Field Activity — Mova reps from Repsly: dashboard, display compliance, feed, schedule, visits, reps, photos | staff only |
 | `/tools` | Tools landing (tools are also listed in the side menu) | staff |
 | `/promos` | Vendor Promos — promotional credit claims | sales, finance |
 | `/vendor-bills` | PDF Bill Upload — Amazon Advertising → NetSuite CSV | accounts |
@@ -217,6 +218,39 @@ area AND `sell_in_value` (route-checked; not listed in menus without it); never 
 - Targets: columns/cards say "not loaded" until `reporting.sales_target` exists (see
   home page note).
 
+**Field Activity** (`app/field.py`, `templates/field_*.html` + `_field_head.html` /
+`_field_macros.html`, `static/field.css`; built 2026-10-17). Mova field reps from
+**Repsly**, replacing the Repsly Power BI report and replicating the Field Reps
+prototype's manager pages over real data. Data = `reporting.field_*` views, loaded by
+`Sell Through/repsly_intake.py` (Windmill every 30 min once published — see
+`Sell Through/CLAUDE.md`, "Repsly layer"). Area key `field`, **staff only** (not in
+`VENDOR_AREAS`; rep GPS, notes and photos are internal — Mova vendor access is a later
+decision about what they may see). Pages under `/reports/field`: dashboard, `/compliance`,
+`/feed?day=` (Leaflet map from cdnjs, OSM tiles), `/schedule?week=`, `/visits` +
+`/visits/{id}`, `/activity` (reps), `/photos`. Everything is cached whole (≈5k visits,
+22k display answers) and expired by a warehouse watch on `field.data_version`.
+- **Display compliance is what reps are measured on — rules in `field.py`'s docstring,
+  tested in `tests/test_field.py`** (user, 2026-10-17): one count per store × product per
+  period using the LATEST answer; blank = No; rep credited = rep on that answer;
+  **Harvey Norman is the measure**: only HN grades **A–D** (column E "Core Range" of HN's
+  weekly Mova file → `field.hn_product_grade`) at stores whose tier ranges the grade
+  (`field.hn_store_tier`, from HN's "Store Site Group Tiering" PDF — **Floorcare only so
+  far**; other categories show as "no tier yet" and don't count). Other grades E/F/O/S/Z
+  never count. **JB / TGG** = a separate "merchandising" measure (reps can't influence
+  ranging there): everything asked except a No whose follow-up says "not ranged". "Still
+  on display" questions (clearance) are never compliance. Target line 80% (placeholder).
+- Checked 2026-10-17 on the full history: HN floorcare last 90 days 75.5% every-answer →
+  91.2% ranged-only; rep answers agree with HN's own Display SOH 83% (92% for V70 once
+  the "V70 Ultra Complete" questions were mapped to the V70 Ultra SKU — reps answer them
+  about the V70 Ultra).
+- **Repsly times are the rep's LOCAL wall-clock time** (the API labels them +0000), so
+  they're shown as they are (`hm` filter), never converted.
+- A new or reworded Repsly question shows on the dashboard / compliance page as "not in
+  the question map" until a row is added to `Sell Through/reference/field/question_map.csv`
+  and `repsly_intake.py --reference` is run.
+- Local check against the LOCAL warehouse copy: launch config `reporting-site-localdb`
+  (port 8031, throwaway SQLite in %TEMP% so auth is off; the real `data/app.db` untouched).
+
 **Receipt strip** (`app/receipts.py`, `templates/_st_status.html`, 2026-10-15) —
 "who have we received" for sell-through, a one-line collapsible bar at the top
 of home, Item Explorer (landing + item), the table and the dashboard: "w/e 11 Oct
@@ -355,6 +389,7 @@ Shared shell:
 | `app/sales_explorer.py` | Sales Explorer: in-memory revenue summary, FY periods, matrix, Excel |
 | `app/receipts.py` | Which retailers' sell-through is in for the latest week (the strip) |
 | `app/sales.py` | Home page internal sales (FY periods, pace, targets hook) |
+| `app/field.py` | Field Activity (Repsly): loads + the display-compliance rules |
 | `app/security.py` | PBKDF2 hashing, cookie signing, set-password tokens |
 | `app/db.py` | Engine, session, additive column migrations |
 | `app/models.py` | SQLAlchemy models for both tools, plus `User` |

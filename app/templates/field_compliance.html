@@ -1,0 +1,161 @@
+{% extends "_rpt_base.html" %}
+{% import "_field_macros.html" as fm %}
+{% block title %}Display compliance · Macgear{% endblock %}
+{% block pagename %}Field Activity{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/field.css?v={{ asset_ver }}">{% endblock %}
+{% block content %}
+{% include "_field_head.html" %}
+<div class="f-head">
+  <div>
+    <p class="r-eyebrow">{{ s|dmy }} – {{ e|dmy }} {{ e.year }}</p>
+    <h1>Display compliance</h1>
+  </div>
+  <div class="r-meta">{{ fm.synced(sync) }}</div>
+</div>
+
+<form class="r-filters" method="get">
+  <div class="r-seg" role="group" aria-label="Measure">
+    <a href="?measure=hn&month={{ month }}&rep={{ rep }}&category={{ category|urlencode }}" class="{{ 'on' if measure == 'hn' }}">Harvey Norman core range</a>
+    <a href="?measure=merch&month={{ month }}&rep={{ rep }}&category={{ category|urlencode }}" class="{{ 'on' if measure == 'merch' }}">JB / TGG merchandising</a>
+  </div>
+  <input type="hidden" name="measure" value="{{ measure }}">
+  <label>Month
+    <select class="r-select" name="month" onchange="this.form.submit()">
+      {% for mo in months %}<option value="{{ mo }}" {% if mo == month %}selected{% endif %}>{{ mo }}</option>{% endfor %}
+    </select>
+  </label>
+  {{ fm.rep_select(rep_list, rep) }}
+  <label>Category
+    <select class="r-select" name="category" onchange="this.form.submit()">
+      <option value="">All</option>
+      {% for c in categories %}<option value="{{ c }}" {% if c == category %}selected{% endif %}>{{ c|title }}</option>{% endfor %}
+    </select>
+  </label>
+  {% if measure == 'merch' %}
+  <label>Banner
+    <select class="r-select" name="banner" onchange="this.form.submit()">
+      <option value="">JB + TGG</option>
+      <option value="JB" {% if banner == 'JB' %}selected{% endif %}>JB Hi-Fi</option>
+      <option value="TGG" {% if banner == 'TGG' %}selected{% endif %}>The Good Guys</option>
+    </select>
+  </label>
+  {% endif %}
+</form>
+
+<div class="r-stats">
+  <div class="r-stat">
+    <div class="lbl">{{ 'HN core range on display' if measure == 'hn' else 'JB / TGG on display' }}</div>
+    <div class="val">{{ m.total.rate|pct or '—' }}</div>
+    <div class="sub">{{ m.total.yes }} of {{ m.total.checks }} store × products · target 80%</div>
+  </div>
+  <div class="r-stat">
+    <div class="lbl">Not on display</div>
+    <div class="val">{{ m.total.no }}</div>
+    <div class="sub">store × products, latest answer No or blank</div>
+  </div>
+  {% if measure == 'hn' %}
+  <div class="r-stat">
+    <div class="lbl">Left out — store doesn't range it</div>
+    <div class="val">{{ comp.excluded.hn_not_ranged }}</div>
+    <div class="sub">grade not in the store's tier</div>
+  </div>
+  <div class="r-stat">
+    <div class="lbl">Left out — not HN core / no tier yet</div>
+    <div class="val">{{ comp.excluded.hn_not_core }} <small>/ {{ comp.excluded.hn_no_tier }}</small></div>
+    <div class="sub">grade E–Z or none / category without a tier list</div>
+  </div>
+  {% else %}
+  <div class="r-stat">
+    <div class="lbl">Left out — rep says not ranged</div>
+    <div class="val">{{ comp.excluded.merch_not_ranged }}</div>
+    <div class="sub">a No whose follow-up says "not ranged"</div>
+  </div>
+  {% endif %}
+  <div class="r-stat">
+    <div class="lbl">Old Power BI method, all banners</div>
+    <div class="val">{{ comp.every_answer.rate|pct or '—' }}</div>
+    <div class="sub">every Yes ÷ (Yes + No), nothing left out</div>
+  </div>
+</div>
+
+<div class="r-grid r-cols-2 r-sec">
+  <div class="r-card">
+    <div class="r-card-h"><h2>By product</h2></div>
+    <div class="r-tablewrap"><table class="r-table">
+      <thead><tr><th class="l">Product</th>{% if measure == 'hn' %}<th class="l">Grade</th>{% endif %}<th class="l" style="width:42%">On display</th><th>Yes</th><th>Stores</th></tr></thead>
+      <tbody>
+      {% for p in m.products %}
+        <tr><td class="l">{{ p.name }} <span class="r-faint">{{ p.category|title }}</span></td>
+          {% if measure == 'hn' %}<td class="l"><span class="f-pill grade">{{ p.grade }}</span></td>{% endif %}
+          <td class="l">{{ fm.bar(p.rate) }}</td><td>{{ p.yes }}</td><td>{{ p.checks }}</td></tr>
+      {% else %}<tr><td colspan="5" class="l r-muted">No answers in this period.</td></tr>{% endfor %}
+      </tbody>
+    </table></div>
+  </div>
+  <div class="r-grid" style="align-content:start">
+    <div class="r-card">
+      <div class="r-card-h"><h2>By rep</h2><span class="r-muted">credited to the rep who gave the latest answer</span></div>
+      <table class="r-table">
+        <thead><tr><th class="l">Rep</th><th class="l" style="width:50%">On display</th><th>Checks</th><th>Stores</th></tr></thead>
+        {% for r in m.reps|sort(attribute='name') %}
+        <tr><td class="l"><a href="?measure={{ measure }}&month={{ month }}&rep={{ r.key }}">{{ r.name }}</a></td>
+          <td class="l">{{ fm.bar(r.rate) }}</td><td>{{ r.checks }}</td><td>{{ r.stores }}</td></tr>
+        {% else %}<tr><td colspan="4" class="l r-muted">—</td></tr>{% endfor %}
+      </table>
+    </div>
+    <div class="r-card">
+      <div class="r-card-h"><h2>Why not on display</h2></div>
+      <table class="r-table">
+        {% for r, n in m.reasons %}<tr><td class="l">{{ r }}</td><td>{{ n }}</td></tr>
+        {% else %}<tr><td class="l r-muted">Nothing recorded.</td></tr>{% endfor %}
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="r-card r-sec">
+  <div class="r-card-h"><h2>By store</h2><span class="r-muted">lowest first · {{ m.stores|length }} stores</span></div>
+  <div class="r-tablewrap"><table class="r-table">
+    <thead><tr><th class="l">Store</th><th class="l">State</th>{% if measure == 'hn' %}<th class="l">Tier</th>{% endif %}<th class="l" style="width:24%">On display</th><th>Checks</th><th class="l">Not on display</th></tr></thead>
+    {% for st in m.stores %}
+    <tr><td class="l">{{ st.name }}</td><td class="l">{{ st.state or '' }}</td>
+      {% if measure == 'hn' %}<td class="l"><span class="f-pill grade">{{ st.grades }}</span></td>{% endif %}
+      <td class="l">{{ fm.bar(st.rate) }}</td><td>{{ st.checks }}</td>
+      <td class="l" style="white-space:normal">{{ st.missing|join(', ') }}</td></tr>
+    {% endfor %}
+  </table></div>
+</div>
+
+<div class="r-card r-sec" id="gaps">
+  <div class="r-card-h"><h2>Persistent gaps</h2><span class="r-muted">off display on the last 2+ visits (120 days) · {{ n_gaps }}</span></div>
+  <div class="r-tablewrap"><table class="r-table">
+    <thead><tr><th class="l">Store</th><th class="l">Product</th><th>Visits in a row</th><th class="l">Since</th><th class="l">Rep</th><th class="l">Last reason</th></tr></thead>
+    {% for g in gaps %}
+    <tr><td class="l">{{ g.store_name }}</td><td class="l">{{ g.product }}</td><td>{{ g.run }}</td>
+      <td class="l">{{ g.since|dmy }}</td><td class="l">{{ g.rep_name }}</td><td class="l" style="white-space:normal">{{ g.reason }}</td></tr>
+    {% else %}<tr><td colspan="6" class="l r-muted">None.</td></tr>{% endfor %}
+  </table></div>
+</div>
+
+<div class="r-card r-sec">
+  <div class="r-card-h"><h2>How the % is worked out</h2></div>
+  <ul class="f-def">
+    <li><b>One count per store × product</b> for the period, using its <b>latest</b> answer. A store visited three times counts once.</li>
+    <li><b>A blank answer counts as No</b> — skipping a question never helps.</li>
+    <li><b>Harvey Norman core range:</b> only products HN grades <b>A–D</b> (HN's weekly Mova file), and only at stores whose tier ranges that grade — an <b>AB</b> store is measured on A and B products. Other grades (new, clearing, special order, deleted) never count. Only Floorcare has a tier list so far; other categories show as "no tier yet".</li>
+    <li><b>JB / TGG merchandising</b> is measured separately: every product asked, except a No the rep marks "not ranged".</li>
+    <li>"Is X <i>still</i> on display" questions (products being cleared) are not compliance.</li>
+    <li>The rep credited is the rep who gave the latest answer.</li>
+  </ul>
+</div>
+
+{% if unmapped %}
+<div class="r-card r-sec" id="unmapped">
+  <div class="r-card-h"><h2>Questions not in the map</h2><span class="r-muted">new or reworded Repsly questions — add them to <code>reference/field/question_map.csv</code></span></div>
+  <table class="r-table">
+    <thead><tr><th class="l">Question</th><th>Answers</th><th class="l">Last seen</th></tr></thead>
+    {% for q in unmapped %}<tr><td class="l" style="white-space:normal">{{ q.question }}</td><td>{{ q.answers }}</td><td class="l">{{ q.last_seen|dmy }}</td></tr>{% endfor %}
+  </table>
+</div>
+{% endif %}
+{% endblock %}

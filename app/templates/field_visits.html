@@ -1,0 +1,38 @@
+{% extends "_rpt_base.html" %}
+{% import "_field_macros.html" as fm %}
+{% block title %}Visits · Macgear{% endblock %}
+{% block pagename %}Field Activity{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/field.css?v={{ asset_ver }}">{% endblock %}
+{% block content %}
+{% include "_field_head.html" %}
+<div class="f-head">
+  <div><p class="r-eyebrow">{{ s|dmy }} – {{ e|dmy }}</p><h1>Visits <span class="r-muted" style="font-weight:600">{{ n }}</span></h1></div>
+</div>
+<form class="r-filters" method="get" style="margin-bottom:12px">
+  <label>From <input class="r-input" type="date" name="start" value="{{ s }}"></label>
+  <label>To <input class="r-input" type="date" name="end" value="{{ e }}"></label>
+  {{ fm.rep_select(rep_list, rep) }}
+  <label>Banner
+    <select class="r-select" name="banner" onchange="this.form.submit()">
+      <option value="">All</option>
+      {% for k, lbl in banners.items() %}<option value="{{ k }}" {% if k == banner %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Store <input class="r-input" name="q" value="{{ q }}" placeholder="name contains…"></label>
+  <button class="r-btn" type="submit">Show</button>
+</form>
+<div class="r-tablewrap"><table class="r-table">
+  <thead><tr><th class="l">Date</th><th class="l">Start</th><th class="l">Rep</th><th class="l">Store</th><th class="l">State</th><th>Minutes</th><th>Check-in</th><th>Forms</th><th>Photos</th><th>Notes</th></tr></thead>
+  <tbody>
+  {% for v in visits %}
+  <tr><td class="l">{{ v.visit_date|dmy }}</td><td class="l">{{ v.started_at|hm }}</td><td class="l">{{ v.rep_name }}</td>
+    <td class="l"><a href="/reports/field/visits/{{ v.visit_id }}">{{ v.store_name or v.client_code }}</a></td><td class="l">{{ v.state or '' }}</td>
+    <td>{{ v.minutes|int if v.minutes is not none }}</td>
+    <td>{% if v.checkin_m is not none %}<span class="{{ 'down' if v.checkin_m > 300 }}">{{ v.checkin_m|int }} m</span>{% endif %}</td>
+    <td>{{ v.forms }}</td><td>{{ v.photos }}</td><td>{{ v.notes }}</td></tr>
+  {% else %}<tr><td colspan="10" class="l r-muted">No visits.</td></tr>{% endfor %}
+  </tbody>
+</table></div>
+{% if n > visits|length %}<p class="r-note">Showing the latest {{ visits|length }} of {{ n }} — narrow the dates to see the rest.</p>{% endif %}
+<p class="r-note">Check-in = how far the rep was from the store's Repsly location when checking in; over 300 m is red.</p>
+{% endblock %}

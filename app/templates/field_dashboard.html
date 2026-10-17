@@ -1,0 +1,90 @@
+{% extends "_rpt_base.html" %}
+{% import "_field_macros.html" as fm %}
+{% block title %}Field Activity · Macgear{% endblock %}
+{% block pagename %}Field Activity{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/field.css?v={{ asset_ver }}">{% endblock %}
+{% block content %}
+{% include "_field_head.html" %}
+<div class="f-head">
+  <div>
+    <p class="r-eyebrow">Mova field reps · Repsly</p>
+    <h1>Field dashboard</h1>
+  </div>
+  <div class="r-meta">{{ fm.synced(sync) }}<span class="r-chip">Week of&nbsp;<b>{{ wk|dmy }}</b></span></div>
+</div>
+
+<div class="r-stats">
+  <a class="r-stat" href="/reports/field/compliance" style="text-decoration:none">
+    <div class="lbl">HN core range on display · {{ m0.strftime('%B') }}</div>
+    <div class="val">{{ comp.hn.total.rate|pct or '—' }}</div>
+    <div class="sub">{{ comp.hn.total.yes }} of {{ comp.hn.total.checks }} store × products (A–D, ranged)</div>
+  </a>
+  <a class="r-stat" href="/reports/field/compliance?measure=merch" style="text-decoration:none">
+    <div class="lbl">JB / TGG merchandising · {{ m0.strftime('%B') }}</div>
+    <div class="val">{{ comp.merch.total.rate|pct or '—' }}</div>
+    <div class="sub">{{ comp.merch.total.yes }} of {{ comp.merch.total.checks }} store × products</div>
+  </a>
+  <a class="r-stat" href="/reports/field/schedule" style="text-decoration:none">
+    <div class="lbl">Visits this week</div>
+    <div class="val">{{ week_visits }}</div>
+    <div class="sub">{{ week_stores }} stores · {{ week_sched_done }} of {{ week_sched }} scheduled done</div>
+  </a>
+  <a class="r-stat" href="/reports/field/compliance#gaps" style="text-decoration:none">
+    <div class="lbl">HN persistent gaps</div>
+    <div class="val">{{ n_gaps }}</div>
+    <div class="sub">ranged product off display 2+ visits running</div>
+  </a>
+  <a class="r-stat" href="/reports/field/photos" style="text-decoration:none">
+    <div class="lbl">Photos this week</div>
+    <div class="val">{{ week_photos }}</div>
+    <div class="sub">from visits since {{ wk|dmy }}</div>
+  </a>
+</div>
+{% if unmapped %}<p class="r-banner r-sec">{{ unmapped }} Repsly question{{ 's' if unmapped != 1 }} not in the question map yet — <a href="/reports/field/compliance#unmapped">see which</a>. A new or reworded display question won't count until it's mapped.</p>{% endif %}
+
+<div class="r-grid r-cols-2 r-sec">
+  <div class="r-card">
+    <div class="r-card-h"><h2>HN core range by product <span class="r-muted" style="font-weight:500">— {{ m0.strftime('%B') }} to date</span></h2></div>
+    <div class="r-tablewrap"><table class="r-table">
+      <thead><tr><th class="l">Product</th><th class="l">Grade</th><th class="l" style="width:45%">On display</th><th>Stores</th></tr></thead>
+      <tbody>
+      {% for p in comp.hn.products %}
+        <tr><td class="l"><a href="/reports/field/compliance?category={{ p.category|urlencode }}">{{ p.name }}</a></td>
+          <td class="l"><span class="f-pill grade">{{ p.grade }}</span></td>
+          <td class="l">{{ fm.bar(p.rate) }}</td><td>{{ p.checks }}</td></tr>
+      {% else %}<tr><td colspan="4" class="l r-muted">No HN checks this month yet.</td></tr>{% endfor %}
+      </tbody>
+    </table></div>
+  </div>
+  <div class="r-grid" style="align-content:start">
+    <div class="r-card">
+      <div class="r-card-h"><h2>Why not on display (HN)</h2></div>
+      <table class="r-table">
+        {% for r, n in comp.hn.reasons %}<tr><td class="l">{{ r }}</td><td>{{ n }}</td></tr>
+        {% else %}<tr><td class="l r-muted">Nothing recorded.</td></tr>{% endfor %}
+      </table>
+    </div>
+    <div class="r-card" id="gaps">
+      <div class="r-card-h"><h2>Chase these</h2><span class="r-muted">HN, off display visit after visit</span></div>
+      <table class="r-table">
+        <thead><tr><th class="l">Store</th><th class="l">Product</th><th>Visits</th></tr></thead>
+        {% for g in gaps %}
+        <tr><td class="l">{{ g.store_name }}</td><td class="l">{{ g.product }}</td><td>{{ g.run }}</td></tr>
+        {% else %}<tr><td colspan="3" class="l r-muted">None.</td></tr>{% endfor %}
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="r-card r-sec">
+  <div class="r-card-h"><h2>Latest visits</h2><a class="r-btn ghost" href="/reports/field/visits">All visits</a></div>
+  <div class="r-tablewrap"><table class="r-table">
+    <thead><tr><th class="l">When</th><th class="l">Rep</th><th class="l">Store</th><th>Minutes</th><th>Forms</th><th>Photos</th></tr></thead>
+    {% for v in recent %}
+    <tr><td class="l">{{ v.visit_date|dmy }} {{ v.started_at|hm }}</td><td class="l">{{ v.rep_name }}</td>
+      <td class="l"><a href="/reports/field/visits/{{ v.visit_id }}">{{ v.store_name or v.client_code }}</a></td>
+      <td>{{ v.minutes|int if v.minutes is not none }}</td><td>{{ v.forms }}</td><td>{{ v.photos }}</td></tr>
+    {% endfor %}
+  </table></div>
+</div>
+{% endblock %}

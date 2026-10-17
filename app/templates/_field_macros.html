@@ -1,0 +1,26 @@
+{# {% import "_field_macros.html" as fm with context %} #}
+{% macro bar(rate, target=0.8) -%}
+  {%- if rate is none -%}<span class="r-faint">—</span>
+  {%- else -%}<div class="f-bar {{ 'lo' if rate < target - 0.2 else ('mid' if rate < target else '') }}"><i style="width:{{ (rate * 100)|round(1) }}%"></i><em>{{ rate|pct }}</em><span class="tgt" style="left:{{ target * 100 }}%" title="Target {{ (target * 100)|int }}%"></span></div>
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro synced(sync) -%}
+  <span class="r-chip" title="Repsly is loaded into the warehouse by a scheduled job">
+    {%- if sync.newest_form %}Latest form&nbsp;<b>{{ sync.newest_form|dmy }} {{ sync.newest_form|hm }}</b>{% else %}No Repsly data loaded{% endif %}
+    {%- if sync.status == 'failed' %}<span class="down">&nbsp;· last load failed</span>{% endif -%}
+  </span>
+{%- endmacro %}
+
+{% macro rep_select(rep_list, rep) -%}
+  <label>Rep
+    <select class="r-select" name="rep" onchange="this.form.submit()">
+      <option value="">All reps</option>
+      {% for r in rep_list %}<option value="{{ r.rep_code }}" {% if r.rep_code == rep %}selected{% endif %}>{{ r.rep_name }}{% if not r.active %} (inactive){% endif %}</option>{% endfor %}
+    </select>
+  </label>
+{%- endmacro %}
+
+{% macro answer(v) -%}
+  {%- if v == 'Yes' %}<span class="f-pill yes">Yes</span>{% elif v == 'No' %}<span class="f-pill no">No</span>{% else %}<span class="f-pill no" title="Blank counts as No">blank</span>{% endif -%}
+{%- endmacro %}

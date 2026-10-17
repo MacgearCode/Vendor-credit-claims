@@ -7,6 +7,7 @@ import shutil
 import time
 import urllib.request
 import uuid
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -30,7 +31,7 @@ from .service import build_promo_view
 from .pricing_sync import sync_pricing
 from .security import (hash_password, hash_token, make_reset_token, sign,
                        unsign, verify_password)
-from . import (bill_export, bill_service, items, notify, perms, receipts, sales,
+from . import (bill_export, bill_service, field, items, notify, perms, receipts, sales,
                sales_explorer, sell_through, st_table, warehouse, workflow)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -69,6 +70,9 @@ def sydney(dt):
 templates.env.filters["money"] = money
 templates.env.filters["pct"] = pct
 templates.env.filters["sydney"] = sydney
+# Repsly times are the rep's local wall-clock time (no zone), shown as they are.
+templates.env.filters["hm"] = lambda dt: "" if dt is None else dt.strftime("%H:%M")
+templates.env.filters["dmy"] = lambda d: "" if d is None else f"{d:%a} {d.day} {d:%b}"
 # slug for pill css classes, and the workflow taxonomy, available in all templates
 templates.env.filters["slug"] = lambda s: (s or "").lower().replace(" ", "")
 templates.env.globals.update(workflow.context())
@@ -157,6 +161,7 @@ _TOOL_PATHS = [
     ("/reports/sell-through", "sell_through"),
     ("/reports/items", "items"),
     ("/reports/table", "st_table"),
+    ("/reports/field", "field"),
     ("/vendor-bills", "vendor_bills"),
     ("/promos", "promos"),
     ("/promo", "promos"),          # /promo/new, /promo/{id}, /promo/{id}/...
@@ -487,6 +492,8 @@ REPORTS = [
      "blurb": "The weekly workbook as a live table — filter, sort, and download to Excel."},
     {"key": "sell_through", "href": "/reports/sell-through", "title": "Sell-Through Dashboard", "icon": "◔",
      "blurb": "Weekly units, retail value, stock and cover by retailer and product."},
+    {"key": "field", "href": "/reports/field", "title": "Field Activity", "icon": "⚑",
+     "blurb": "Mova reps: visits, schedule, photos and display compliance (Harvey Norman core range)."},
 ]
 TOOLS = [
     {"key": "promos", "href": "/promos", "title": "Vendor Promos", "icon": "%",
@@ -707,6 +714,7 @@ async def _lifespan(app):
     # Tests and machines without a warehouse URL skip the warm-up entirely.
     if os.environ.get("REPORTING_DB_URL"):
         warehouse.watch(sales.data_version, sales.SALES_CACHE_PREFIXES)
+        warehouse.watch(field.data_version, field.CACHE_PREFIXES)
         warehouse.start_refresher(lambda: _warm_reports())
     yield
 
@@ -950,6 +958,197 @@ def report_sales_xlsx(request: Request, region: str = "", p: str = "ytd", fy: in
     name = f"Macgear_Sales_{a['region']}_{data['period']['from']}_{data['period']['to']}.xlsx"
     return Response(body, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+# ---- Field Activity (Repsly) -----------------------------------------------------
+# Mova reps from Repsly via the warehouse (app/field.py). Staff only: the area key
+# "field" is not in VENDOR_AREAS. Rep GPS, notes and photos are internal.
+def _date(v: str, default: date) -> date:
+    try:
+        return date.fromisoformat(v) if v else default
+    except ValueError:
+        return default
+
+
+def _field_ctx(request: Request, page: str):
+    try:
+        status = field.sync_status()
+        rep_list = field.reps()
+    except warehouse.WarehouseUnavailable as e:
+        return None, templates.TemplateResponse(request, "denied.html",
+                                                {"message": _warehouse_error(e)}, status_code=503)
+    return {"page": page, "sync": status, "rep_list": rep_list, "today": sales_today(),
+            "banners": field.BANNERS}, None
+
+
+@app.get("/reports/field", response_class=HTMLResponse)
+def field_dashboard(request: Request):
+    t = sales_today()
+    ctx, err = _field_ctx(request, "dash")
+    if err:
+        return err
+    wk = field.week_start(t)
+    m0, _ = field.month_bounds(t)
+    rows = field.display_rows()
+    vis = field.visits()
+    week_vis = [v for v in vis if v["visit_date"] and wk <= v["visit_date"] <= t]
+    sched = [s for s in field.schedule() if wk <= s["schedule_date"] <= t]
+    gaps = field.persistent_gaps(rows, t)
+    ctx.update({"t": t, "wk": wk, "m0": m0, "comp": field.compliance(rows, m0, t),
+                "week_visits": len(week_vis), "week_stores": len({v["client_code"] for v in week_vis}),
+                "week_sched": len(sched), "week_sched_done": sum(1 for s in sched if s["visited"]),
+                "week_photos": sum(1 for p in field.photos() if p["photo_date"] and wk <= p["photo_date"] <= t),
+                "gaps": gaps[:12], "n_gaps": len(gaps), "recent": vis[:10],
+                "unmapped": len(field.unmapped_questions())})
+    return templates.TemplateResponse(request, "field_dashboard.html", ctx)
+
+
+@app.get("/reports/field/compliance", response_class=HTMLResponse)
+def field_compliance(request: Request, month: str = "", start: str = "", end: str = "",
+                     rep: str = "", banner: str = "", category: str = "", measure: str = "hn"):
+    t = sales_today()
+    ctx, err = _field_ctx(request, "comp")
+    if err:
+        return err
+    m = _date(month + "-01" if len(month) == 7 else "", t)
+    s, e = field.month_bounds(m)
+    s, e = _date(start, s), min(_date(end, e), t)
+    rows = field.display_rows()
+    measure = measure if measure in ("hn", "merch") else "hn"
+    comp = field.compliance(rows, s, e, rep=rep, banner=banner, category=category)
+    gaps = field.persistent_gaps(rows, e, measure=measure)
+    if rep:
+        gaps = [g for g in gaps if g["rep_code"] == rep]
+    ctx.update({"comp": comp, "measure": measure, "m": comp[measure], "s": s, "e": e,
+                "month": m.strftime("%Y-%m"),
+                "months": sorted({r["answer_date"].strftime("%Y-%m") for r in rows}, reverse=True),
+                "rep": rep, "banner": banner, "category": category,
+                "categories": sorted({r["category"] for r in rows if r["category"]}),
+                "gaps": gaps[:40], "n_gaps": len(gaps), "unmapped": field.unmapped_questions()[:20]})
+    return templates.TemplateResponse(request, "field_compliance.html", ctx)
+
+
+@app.get("/reports/field/feed", response_class=HTMLResponse)
+def field_feed(request: Request, day: str = "", rep: str = ""):
+    t = sales_today()
+    ctx, err = _field_ctx(request, "feed")
+    if err:
+        return err
+    d = _date(day, t)
+    allv = field.visits()
+    vis = [v for v in allv if v["visit_date"] == d and (not rep or v["rep_code"] == rep)]
+    ids = {v["visit_id"] for v in vis}
+    disp = defaultdict(lambda: {"yes": 0, "n": 0, "missing": []})
+    for r in field.display_rows():
+        if r["visit_id"] in ids:
+            x = disp[r["visit_id"]]
+            x["n"] += 1
+            if r["answer"] == "Yes":
+                x["yes"] += 1
+            else:
+                x["missing"].append(r["product_name"])
+    ph, nt = defaultdict(list), defaultdict(list)
+    for p in field.photos():
+        if p["visit_id"] in ids:
+            ph[p["visit_id"]].append(p)
+    for n in field.notes():
+        if n["visit_id"] in ids:
+            nt[n["visit_id"]].append(n)
+    stores = {s["client_code"]: s for s in field.stores()}
+    points = [{"lat": stores[v["client_code"]]["lat"], "lng": stores[v["client_code"]]["lng"],
+               "name": v["store_name"], "rep": v["rep_name"]}
+              for v in vis if v["client_code"] in stores and stores[v["client_code"]]["lat"]]
+    last_active = None
+    if not vis:
+        prior = [v["visit_date"] for v in allv if v["visit_date"] and v["visit_date"] < d]
+        last_active = max(prior) if prior else None
+    ctx.update({"d": d, "rep": rep, "visits": vis, "disp": disp, "photos": ph, "notes": nt,
+                "points": points, "last_active": last_active,
+                "prev": d - timedelta(days=1), "next": d + timedelta(days=1)})
+    return templates.TemplateResponse(request, "field_feed.html", ctx)
+
+
+@app.get("/reports/field/schedule", response_class=HTMLResponse)
+def field_schedule(request: Request, week: str = "", rep: str = ""):
+    t = sales_today()
+    ctx, err = _field_ctx(request, "sched")
+    if err:
+        return err
+    wk = field.week_start(_date(week, t))
+    days = [wk + timedelta(days=i) for i in range(7)]
+    grid, done, names = defaultdict(list), defaultdict(list), {}
+    for s in field.schedule():
+        if wk <= s["schedule_date"] <= days[-1] and (not rep or s["rep_code"] == rep):
+            grid[(s["rep_code"], s["schedule_date"])].append(s)
+            names[s["rep_code"]] = s["rep_name"] or s["rep_code"]
+    for v in field.visits():            # visits made, scheduled or not
+        if v["visit_date"] and wk <= v["visit_date"] <= days[-1] and (not rep or v["rep_code"] == rep):
+            done[(v["rep_code"], v["visit_date"])].append(v)
+            names.setdefault(v["rep_code"], v["rep_name"] or v["rep_code"])
+    ctx.update({"wk": wk, "days": days, "grid": grid, "done": done, "rep": rep, "t": t,
+                "shown": sorted(names.items(), key=lambda x: x[1]),
+                "prev": wk - timedelta(days=7), "next": wk + timedelta(days=7)})
+    return templates.TemplateResponse(request, "field_schedule.html", ctx)
+
+
+@app.get("/reports/field/visits", response_class=HTMLResponse)
+def field_visits(request: Request, start: str = "", end: str = "", rep: str = "", banner: str = "",
+                 q: str = ""):
+    t = sales_today()
+    ctx, err = _field_ctx(request, "visits")
+    if err:
+        return err
+    s, e = _date(start, t - timedelta(days=13)), _date(end, t)
+    ql = q.lower().strip()
+    vis = [v for v in field.visits() if v["visit_date"] and s <= v["visit_date"] <= e
+           and (not rep or v["rep_code"] == rep) and (not banner or v["banner"] == banner)
+           and (not ql or ql in (v["store_name"] or "").lower())]
+    ctx.update({"visits": vis[:1000], "n": len(vis), "s": s, "e": e, "rep": rep, "banner": banner, "q": q})
+    return templates.TemplateResponse(request, "field_visits.html", ctx)
+
+
+@app.get("/reports/field/visits/{visit_id}", response_class=HTMLResponse)
+def field_visit(request: Request, visit_id: int):
+    ctx, err = _field_ctx(request, "visits")
+    if err:
+        return err
+    v = next((x for x in field.visits() if x["visit_id"] == visit_id), None)
+    if v is None:
+        return templates.TemplateResponse(request, "denied.html", {"message": "No such visit."}, status_code=404)
+    forms = defaultdict(list)
+    for a in field.visit_answers(visit_id):
+        forms[(a["form_id"], a["form_name"])].append(a)
+    ctx.update({"v": v, "forms": dict(forms),
+                "photos": [p for p in field.photos() if p["visit_id"] == visit_id],
+                "notes": [n for n in field.notes() if n["visit_id"] == visit_id],
+                "display": [r for r in field.display_rows() if r["visit_id"] == visit_id]})
+    return templates.TemplateResponse(request, "field_visit.html", ctx)
+
+
+@app.get("/reports/field/activity", response_class=HTMLResponse)
+def field_activity(request: Request, start: str = "", end: str = ""):
+    t = sales_today()
+    ctx, err = _field_ctx(request, "act")
+    if err:
+        return err
+    m0, _ = field.month_bounds(t)
+    s, e = _date(start, m0), _date(end, t)
+    ctx.update({"s": s, "e": e, "rows": field.rep_activity(field.visits(), field.schedule(), s, e, t)})
+    return templates.TemplateResponse(request, "field_activity.html", ctx)
+
+
+@app.get("/reports/field/photos", response_class=HTMLResponse)
+def field_photos(request: Request, start: str = "", end: str = "", rep: str = "", q: str = ""):
+    t = sales_today()
+    ctx, err = _field_ctx(request, "photos")
+    if err:
+        return err
+    s, e = _date(start, t - timedelta(days=6)), _date(end, t)
+    ql = q.lower().strip()
+    ph = [p for p in field.photos() if p["photo_date"] and s <= p["photo_date"] <= e
+          and (not rep or p["rep_code"] == rep) and (not ql or ql in (p["store_name"] or "").lower())]
+    ctx.update({"photos": ph[:400], "n": len(ph), "s": s, "e": e, "rep": rep, "q": q})
+    return templates.TemplateResponse(request, "field_photos.html", ctx)
 
 
 # ---- dashboard ---------------------------------------------------------------
