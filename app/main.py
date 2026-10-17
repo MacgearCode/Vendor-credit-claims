@@ -994,7 +994,7 @@ def field_dashboard(request: Request):
     week_vis = [v for v in vis if v["visit_date"] and wk <= v["visit_date"] <= t]
     sched = [s for s in field.schedule() if wk <= s["schedule_date"] <= t]
     gaps = field.persistent_gaps(rows, t)
-    ctx.update({"t": t, "wk": wk, "m0": m0, "comp": field.compliance(rows, m0, t),
+    ctx.update({"t": t, "wk": wk, "m0": m0, "comp": field.compliance(rows, m0, t, network=field.hn_network(field.stores())),
                 "week_visits": len(week_vis), "week_stores": len({v["client_code"] for v in week_vis}),
                 "week_sched": len(sched), "week_sched_done": sum(1 for s in sched if s["visited"]),
                 "week_photos": sum(1 for p in field.photos() if p["photo_date"] and wk <= p["photo_date"] <= t),
@@ -1015,7 +1015,8 @@ def field_compliance(request: Request, month: str = "", start: str = "", end: st
     s, e = _date(start, s), min(_date(end, e), t)
     rows = field.display_rows()
     measure = measure if measure in ("hn", "merch") else "hn"
-    comp = field.compliance(rows, s, e, rep=rep, banner=banner, category=category)
+    comp = field.compliance(rows, s, e, rep=rep, banner=banner, category=category,
+                                network=field.hn_network(field.stores()))
     gaps = field.persistent_gaps(rows, e, measure=measure)
     if rep:
         gaps = [g for g in gaps if g["rep_code"] == rep]

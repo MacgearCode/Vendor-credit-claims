@@ -72,6 +72,44 @@ def test_only_ranged_core_grades_count_for_hn():
     assert c["excluded"] == {"hn_not_ranged": 1, "hn_not_core": 1, "hn_no_tier": 1, "merch_not_ranged": 0}
 
 
+def test_graded_over_and_above_and_coverage_stay_separate():
+    rows = [row(store="HN 1", product="V70 ULTRA", grade="B", tier="AB", answer="Yes"),     # graded, on display
+            row(store="HN 2", product="V70 ULTRA", grade="B", tier="A", answer="Yes"),      # outside grade, on display
+            row(store="HN 3", product="V70 ULTRA", grade="B", tier="A", answer="No"),       # outside grade, not
+            row(store="HN 4", product="V70 ULTRA", grade="B", has_tier=False, tier=None, answer="Yes"),  # off the tier list
+            row(store="HN 5", product="V70 ULTRA", grade="B", tier="AB", answer="Yes",
+                day=date(2026, 8, 20)),                                                     # earlier: coverage only
+            row(store="HN 6", product="Z60 ULTRA", grade="F", answer="Yes"),                # clearing: in none of them
+            row(store="JB 1", product="V70 ULTRA", banner="JB", answer="Yes")]              # not HN
+    c = field.compliance(rows, date(2026, 10, 1), date(2026, 10, 31), network=10)
+    p = next(x for x in c["hn"]["products"] if x["key"] == "V70 ULTRA")
+    assert (p["checks"], p["rate"]) == (1, 1.0)                     # graded: 1 of 1, never above 100%
+    assert p["over_and_above"] == 2                                 # HN 2 + HN 4
+    # coverage: tier-list stores only, latest answer in the 90 days to 31 Oct: HN 1, 2, 5 on; HN 3 off
+    assert p["coverage"] == {"on": 3, "off": 1, "unknown": 6, "rate": 0.3}
+    assert c["hn"]["over_and_above"] == 2 and c["hn"]["coverage"]["network"] == 10
+    assert [x["key"] for x in c["hn"]["products"]] == ["V70 ULTRA"]
+
+
+def test_coverage_ignores_answers_older_than_the_window_and_the_rep_filter():
+    rows = [row(store="HN 1", answer="Yes", day=date(2026, 6, 1), rep="R1"),        # > 90 days before 31 Oct
+            row(store="HN 2", answer="Yes", day=date(2026, 10, 2), rep="R2")]
+    c = field.compliance(rows, date(2026, 10, 1), date(2026, 10, 31), rep="R1", network=4)
+    assert c["hn"]["coverage"]["on"] == 1 and c["hn"]["total"]["checks"] == 0
+
+
+def test_a_core_product_seen_only_outside_its_grade_is_still_listed():
+    rows = [row(product="MOBIUS 60", grade="C", tier="AB", answer="Yes")]
+    p = field.compliance(rows, date(2026, 10, 1), date(2026, 10, 31), network=5)["hn"]["products"][0]
+    assert p["checks"] == 0 and p["rate"] is None and p["over_and_above"] == 1 and p["coverage"]["on"] == 1
+
+
+def test_hn_network_counts_tiered_hn_stores():
+    st = [{"banner": "HN", "floorcare_grades": "AB"}, {"banner": "HN", "floorcare_grades": ""},
+          {"banner": "HN", "floorcare_grades": None}, {"banner": "JB", "floorcare_grades": None}]
+    assert field.hn_network(st) == 2
+
+
 def test_jb_tgg_are_their_own_measure():
     rows = [row(banner="JB", store="JB 1", answer="Yes"), row(banner="TGG", store="TGG 1", answer="No"),
             row(banner="TGG", store="TGG 2", answer="No", reason="N/A not ranged")]

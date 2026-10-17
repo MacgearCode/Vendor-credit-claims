@@ -46,13 +46,17 @@
   <div class="r-card">
     <div class="r-card-h"><h2>HN core range by product <span class="r-muted" style="font-weight:500">— {{ m0.strftime('%B') }} to date</span></h2></div>
     <div class="r-tablewrap"><table class="r-table">
-      <thead><tr><th class="l">Product</th><th class="l">Grade</th><th class="l" style="width:45%">On display</th><th>Stores</th></tr></thead>
+      <thead><tr><th class="l">Product</th><th class="l">Grade</th><th class="l" style="width:30%">Graded stores</th>
+        <th title="On display at HN stores outside the grading">Over</th>
+        <th class="l" title="On display across all {{ comp.hn.coverage.network }} HN stores (latest answer, last 90 days)">Coverage</th></tr></thead>
       <tbody>
       {% for p in comp.hn.products %}
         <tr><td class="l"><a href="/reports/field/compliance?category={{ p.category|urlencode }}">{{ p.name }}</a></td>
           <td class="l"><span class="f-pill grade">{{ p.grade }}</span></td>
-          <td class="l">{{ fm.bar(p.rate) }}</td><td>{{ p.checks }}</td></tr>
-      {% else %}<tr><td colspan="4" class="l r-muted">No HN checks this month yet.</td></tr>{% endfor %}
+          <td class="l">{{ fm.bar(p.rate) }}</td>
+          <td>{% if p.over_and_above %}<span class="f-plus">+{{ p.over_and_above }}</span>{% else %}<span class="r-faint">0</span>{% endif %}</td>
+          <td class="l">{{ p.coverage.rate|pct }} <span class="r-faint">{{ p.coverage.on }}/{{ comp.hn.coverage.network }}</span></td></tr>
+      {% else %}<tr><td colspan="5" class="l r-muted">No HN checks this month yet.</td></tr>{% endfor %}
       </tbody>
     </table></div>
   </div>

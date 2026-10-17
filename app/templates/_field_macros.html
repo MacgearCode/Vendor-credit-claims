@@ -5,6 +5,13 @@
   {%- endif -%}
 {%- endmacro %}
 
+{# Reach has no target: a plain accent bar #}
+{% macro reachbar(rate) -%}
+  {%- if rate is none -%}<span class="r-faint">—</span>
+  {%- else -%}<div class="f-bar reach"><i style="width:{{ (rate * 100)|round(1) }}%"></i><em>{{ rate|pct }}</em></div>
+  {%- endif -%}
+{%- endmacro %}
+
 {% macro synced(sync) -%}
   <span class="r-chip" title="Repsly is loaded into the warehouse by a scheduled job">
     {%- if sync.newest_form %}Latest form&nbsp;<b>{{ sync.newest_form|dmy }} {{ sync.newest_form|hm }}</b>{% else %}No Repsly data loaded{% endif %}

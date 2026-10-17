@@ -21,6 +21,18 @@ DISPLAY COMPLIANCE — the measure reps are judged on (user, 2026-10-17). Rules:
     "not ranged" is left out; everything else counts.
   * "Is X STILL on display" (products being cleared) is never compliance.
 
+THREE HN MEASURES per core (A–D) product, side by side, never blended (user, 2026-10-18):
+  1. GRADED — on display ÷ stores whose tier ranges it, in the period (the rules above).
+     "We've made sure stock and display are where they should be." Reps are judged on it.
+  2. OVER AND ABOVE — HN stores OUTSIDE the grading (tier doesn't range it, or the store
+     isn't on the tier list) with it on display, in the period. What reps secured beyond
+     the grading. A count, so the graded % never goes over 100.
+  3. TOTAL COVERAGE — of ALL the HN stores on the tier list that reps cover, how many have
+     it on display: each store's latest answer in the COVERAGE_DAYS up to the period end
+     (reps reach only ~a third of HN stores in a month, so a month alone would understate
+     it). Stores not checked in that window are "unknown", not counted as missing.
+     The retailer-penetration figure a vendor cares about.
+
 The rules live in classify() / compliance() and are unit-tested
 (tests/test_field.py). The warehouse views only lay out the facts per answer.
 """
@@ -31,6 +43,7 @@ from . import warehouse
 
 TTL = 10 * 60
 CORE_GRADES = set("ABCD")
+COVERAGE_DAYS = 90
 BANNERS = {"HN": "Harvey Norman", "JB": "JB Hi-Fi", "TGG": "The Good Guys", "OTHER": "Other"}
 CACHE_PREFIXES = ("field_",)
 
@@ -157,9 +170,15 @@ def _rate(rows) -> dict:
     return {"checks": n, "yes": y, "no": n - y, "rate": y / n if n else None}
 
 
+def hn_network(store_list: list[dict]) -> int:
+    """HN stores on HN's tier list that reps cover (= matched to a Repsly store)."""
+    return sum(1 for s in store_list if s["banner"] == "HN" and s["floorcare_grades"] is not None)
+
+
 def compliance(rows: list[dict], start: date, end: date, *, rep: str = "", banner: str = "",
-               category: str = "") -> dict:
-    """Display compliance over [start, end]. rows = display_rows() (any range)."""
+               category: str = "", network: int = 0) -> dict:
+    """Display compliance over [start, end]. rows = display_rows() (any range);
+    network = hn_network(stores()) for total coverage."""
     sel = [r for r in rows if start <= r["answer_date"] <= end
            and (not category or r["category"] == category)]
     every = [r for r in sel if r["answer"] in ("Yes", "No")]       # the old Power BI way, for comparison
@@ -206,7 +225,55 @@ def compliance(rows: list[dict], start: date, end: date, *, rep: str = "", banne
         }
     for k in ("hn_not_ranged", "hn_not_core", "hn_no_tier", "merch_not_ranged"):
         res["excluded"][k] = len(cls.get(k, []))
+
+    # 2. OVER AND ABOVE — on display at HN stores outside the grading, this period.
+    outside = cls.get("hn_not_ranged", []) + cls.get("hn_no_tier", [])
+    extra = Counter(r["product_key"] for r in outside if r["answer"] == "Yes")
+    res["hn"]["over_and_above"] = sum(extra.values())
+    seen = {p["key"] for p in res["hn"]["products"]}
+    for r in outside:                   # a core product only ever seen outside its grade
+        if r["product_key"] not in seen:
+            seen.add(r["product_key"])
+            res["hn"]["products"].append({"checks": 0, "yes": 0, "no": 0, "rate": None, "stores": 0,
+                                          "key": r["product_key"], "name": r["product_name"],
+                                          "grade": r.get("hn_grade"), "category": r["category"],
+                                          "sort": r["sort_order"]})
+    for p in res["hn"]["products"]:
+        p["over_and_above"] = extra.get(p["key"], 0)
+
+    # 3. TOTAL COVERAGE — across all tiered HN stores, latest answer in the look-back.
+    cov = coverage(rows, end, network or 0, category=category)
+    res["hn"]["coverage"] = cov["total"]
+    res["hn"]["coverage_from"] = cov["from"]
+    for p in res["hn"]["products"]:
+        p["coverage"] = cov["products"].get(p["key"], {"on": 0, "off": 0, "unknown": network or 0,
+                                                       "rate": 0.0 if network else None})
     return res
+
+
+def coverage(rows: list[dict], end: date, network: int, *, category: str = "",
+             days: int = COVERAGE_DAYS) -> dict:
+    """Total coverage per core (A–D) product: of the `network` HN stores on the tier list
+    (that reps cover), how many have it on display by each store's latest answer in the
+    `days` up to `end`. Grading doesn't matter here — this is penetration, not compliance.
+    Stores with no answer in the window are 'unknown'. Not filtered by rep: it describes
+    the retailer, not who visited."""
+    start = end - timedelta(days=days - 1)
+    sel = [r for r in rows if start <= r["answer_date"] <= end and r["banner"] == "HN"
+           and r.get("store_has_tier") and (r.get("hn_grade") or "").upper() in CORE_GRADES
+           and (not category or r["category"] == category)]
+    per = defaultdict(lambda: {"on": 0, "off": 0})
+    for r in latest(sel).values():
+        per[r["product_key"]]["on" if r["answer"] == "Yes" else "off"] += 1
+    out = {}
+    for k, c in per.items():
+        c["unknown"] = max(network - c["on"] - c["off"], 0)
+        c["rate"] = c["on"] / network if network else None
+        out[k] = dict(c)
+    on = sum(c["on"] for c in out.values())
+    slots = network * len(out)
+    return {"from": start, "products": out,
+            "total": {"on": on, "slots": slots, "rate": on / slots if slots else None, "network": network}}
 
 
 def persistent_gaps(rows: list[dict], end: date, *, measure: str = "hn", min_run: int = 2,

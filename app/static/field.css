@@ -5,6 +5,8 @@
 .f-bar{position:relative;height:22px;background:var(--r-card-2);border-radius:7px;overflow:hidden;min-width:120px}
 .f-bar i{position:absolute;left:0;top:0;bottom:0;border-radius:7px;background:var(--r-pos)}
 .f-bar.mid i{background:var(--r-warn)} .f-bar.lo i{background:var(--r-neg)}
+.f-bar.reach i{background:var(--r-accent)}
+.f-plus{color:var(--r-accent);font-weight:700;font-size:12px}
 .f-bar em{position:absolute;left:8px;top:2px;font-style:normal;font-weight:700;font-size:12.5px;color:var(--r-ink)}
 .f-bar .tgt{position:absolute;top:0;bottom:0;width:2px;background:var(--r-ink);opacity:.5}
 .f-pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:700;background:var(--r-card-2);color:var(--r-ink-2)}
