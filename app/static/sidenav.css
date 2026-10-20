@@ -17,6 +17,16 @@
 .sn-open:hover{background:rgba(255,255,255,.28)}
 .sn-open.on-light{background:rgba(22,32,43,.06);color:#16202b}
 .sn-open.on-light:hover{background:rgba(22,32,43,.12)}
+/* the light / dark switch at the right of each top bar: the same button look */
+.tm-btn{display:inline-flex;align-items:center;justify-content:center;flex:none;margin-left:auto;
+  width:40px;height:40px;border:0;border-radius:9px;cursor:pointer;padding:0;
+  background:rgba(255,255,255,.15);color:#fff}
+.tm-btn:hover{background:rgba(255,255,255,.28)}
+.tm-btn.on-light{background:rgba(22,32,43,.06);color:#16202b}
+.tm-btn.on-light:hover{background:rgba(22,32,43,.12)}
+.tm-btn .tm-sun{display:none}
+[data-theme="dark"] .tm-btn .tm-sun{display:block}
+[data-theme="dark"] .tm-btn .tm-moon{display:none}
 
 .sn-overlay{position:fixed;inset:0;z-index:90;background:rgba(10,16,24,.45);
   opacity:0;transition:opacity .2s ease}

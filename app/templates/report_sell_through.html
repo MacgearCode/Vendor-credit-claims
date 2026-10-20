@@ -71,7 +71,7 @@
     --tip-sub: #5F687A;
   }
   [data-theme="dark"] .brand .logo-img { background: #fff; padding: 3px 7px; border-radius: 6px; }
-  [data-theme="dark"] .sn-open.on-light { background: var(--surface-2); color: var(--text); }
+  [data-theme="dark"] .sn-open.on-light, [data-theme="dark"] .tm-btn.on-light { background: var(--surface-2); color: var(--text); }
   [data-theme="dark"] select option { background: var(--surface); color: var(--text); }
 
   * { box-sizing: border-box; }
@@ -360,6 +360,7 @@
         <input id="search" type="search" placeholder="Find a product or SKU…" aria-label="Search products" />
       </div>
     </div>
+    {% set tm_on_light = true %}{% include "_theme_btn.html" %}
   </div>
 </header>
 

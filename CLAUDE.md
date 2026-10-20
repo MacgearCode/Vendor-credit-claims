@@ -447,7 +447,7 @@ Landing pages: `home.html` (reports), `tools.html`. Reports: `report_sell_throug
 **Navigation is a left fly-out menu** (`_sidenav.html` + `static/sidenav.css`,
 2026-10-15, built for phones first): a ☰ button in each page's top bar opens a
 drawer listing the current tool's own links, Reports, Tools, Admin, then the
-user, dark mode and sign-out. `base.html` includes it and also shows the
+user and sign-out. The light / dark switch is a sun/moon button at the top right of every top bar (`_theme_btn.html`, included by `base.html`, `_rpt_base.html` and the dashboard; moved out of the menu 2026-10-21). `base.html` includes the drawer and also shows the
 current tool's `{% block nav %}` links in the top bar on screens wider than
 760px; the self-styled report pages include the same partial. The drawer lists
 only what `nav_reports` / `nav_tools` allow — presentation only.

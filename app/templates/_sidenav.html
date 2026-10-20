@@ -61,7 +61,6 @@
     </div>
     {% endif %}
     <div class="sn-actions">
-      {% if not sn_no_theme %}<button type="button" class="sn-theme" id="snTheme">Dark mode</button>{% endif %}
       {% if me %}<a href="/logout" class="sn-signout">Sign out</a>{% endif %}
     </div>
   </div>
@@ -96,17 +95,18 @@
     if(e.key==='Escape' && document.body.classList.contains('sn-is-open')) close();
   });
 
-  // dark mode lives in the menu now; same localStorage key the shell reads in <head>
-  var t=document.getElementById('snTheme'); if(!t) return;
+  // light / dark: the switch at the top right of each top bar (_theme_btn.html);
+  // same localStorage key the shell reads in <head>
+  var ts=document.querySelectorAll('[data-theme-toggle]');
   function isDark(){ return document.documentElement.getAttribute('data-theme')==='dark'; }
-  function paint(){ t.textContent=isDark()?'Light mode':'Dark mode'; }
+  function paint(){ ts.forEach(function(t){ t.setAttribute('aria-label', isDark()?'Switch to light mode':'Switch to dark mode'); }); }
   paint();
-  t.addEventListener('click', function(){
+  ts.forEach(function(t){ t.addEventListener('click', function(){
     var dark=!isDark();
     if(dark) document.documentElement.setAttribute('data-theme','dark');
     else document.documentElement.removeAttribute('data-theme');
     try{ localStorage.setItem('theme', dark?'dark':'light'); }catch(e){}
     paint();
-  });
+  }); });
 })();
 </script>

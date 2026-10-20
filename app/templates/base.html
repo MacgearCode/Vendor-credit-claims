@@ -23,6 +23,7 @@
       <span class="brand-word">{% block brandword %}Reporting{% endblock %}</span>
     </a>
     {% if sn_tool_nav|trim %}<nav class="toolnav">{{ sn_tool_nav }}</nav>{% endif %}
+    {% include "_theme_btn.html" %}
   </header>
   {% include "_sidenav.html" %}
   <main>
