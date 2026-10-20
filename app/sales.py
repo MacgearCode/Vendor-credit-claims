@@ -150,7 +150,7 @@ def data_version():
 
 # Everything built from NetSuite sales or stock: rebuilt as soon as a new load lands.
 SALES_CACHE_PREFIXES = ("sales_daily", "sales_tops", "sales_fresh", "sales_ic",
-                        "sx_day", "sx_month", "sx_items", "sx_opts", "item")
+                        "sx_day", "sx_month", "sx_items", "sx_opts", "item", "st_weekly")
 
 
 def intercompany(start: date, end: date) -> dict:

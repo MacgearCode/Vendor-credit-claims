@@ -52,7 +52,7 @@ a:hover{text-decoration:underline}
   width:34px;height:34px;border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
 .theme-toggle:hover{background:rgba(255,255,255,.3)}
 
-main{max-width:1680px;margin:1.5rem auto;padding:0 1.2rem}
+main{margin:1.5rem 0;padding:0 1.5rem}
 h1{margin:.2rem 0}
 h2{margin:.2rem 0;font-size:1.15rem}
 h3{margin:.6rem 0;font-size:1rem}

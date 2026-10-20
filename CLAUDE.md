@@ -29,6 +29,7 @@ warehouse host in the droplet `.env` broke the warm-up — compare the host, not
 | `/reports/items` | Item Explorer — search + leaderboards; `/reports/items/i/<code>` = one item | staff, vendors |
 | `/reports/table` | Sell-Through Table — the weekly workbook live; `/reports/table/export.xlsx` | staff, vendors |
 | `/reports/sell-through` | Sell-Through Dashboard (from `Sell Through/prototype/`) | staff, vendors |
+| `/reports/weekly` | Weekly Sell-Through — the consolidated weekly report, full screen | staff only |
 | `/reports/field` | Field Activity — Mova reps from Repsly: dashboard, display compliance, feed, schedule, visits, reps, photos | staff only |
 | `/tools` | Tools landing (tools are also listed in the side menu) | staff |
 | `/promos` | Vendor Promos — promotional credit claims | sales, finance |
@@ -252,6 +253,40 @@ decision about what they may see). Pages under `/reports/field`: dashboard, `/co
 - Local check against the LOCAL warehouse copy: launch config `reporting-site-localdb`
   (port 8031, throwaway SQLite in %TEMP% so auth is off; the real `data/app.db` untouched).
 
+**Weekly Sell-Through** (`app/st_weekly.py`, `templates/st_weekly.html`, `static/stw.js` +
+`stw.css`; built 2026-10-20). The LAYOUT of a staff member's dashboard over the "Consolidated
+Sell Through ANZ" workbook (their build guide's file-drop / IndexedDB / live-NetSuite parts were
+deliberately dropped — data comes from the warehouse). Full width, sticky filter bar (market AU / NZ —
+AU first, no ANZ, user 2026-10-20; brand, customer, period 13/26/52/All, sell-in reporting retailers vs all channels), headings
+pinned under it, tabs Overview / Brands / Customers / Stores / Products (+ side panel) / Stock watch / How it
+works, a Full screen button (F).
+- One dataset per scope from `/reports/weekly/data.json` (104 weeks, ~440 KB gzipped, ~18 s to
+  build, cached + warmed, expired by the sales watch); the browser does every filter and total.
+  Area key `st_weekly`, **staff only** for now (not in `VENDOR_AREAS`). Sell-in, Macgear stock and
+  ETAs are the `sell_in` capability — not queried without it.
+- **Stores** (2026-10-20): only some retailers send stores (AU: HN, Bunnings, Bing Lee, Retravision;
+  NZ: JB HI-FI, PB Tech, HN, Bunnings — `st_weekly.store_retailers`). Loaded on demand from
+  `/reports/weekly/stores.json?region=&retailer=` (one retailer's stores × products; HN AU ≈ 194 stores,
+  ~24k lines, ~180 KB gz, ~20 s cold — warmed last at startup) or `&code=` (one product's stores, for
+  the product panel's "By store"). Picking a retailer on the Stores tab selects it as the customer,
+  so the rest of the page stays retailer-safe. Per store: units, vs 6-wk / LY, SOH, cover, products
+  selling, "out of stock" = sold in the last 6 weeks with SOH ≤ 0 now; a store opens its product list.
+  Checked: HN AU store rows w/e 18 Oct = 2,247 = the retailer total.
+- **Selecting a customer limits every number on every tab and the product panel to that customer**
+  (the guide's "retailer-safe view"); Macgear open orders (all customers) are hidden then.
+- Rules: 6-wk avg incl. this week; cover = retail SOH ÷ 6-wk avg (SOH ≤ 0 = 0 cover); vs LY = 364
+  days earlier; **YTD is CALENDAR** (the guide said FY from 1 April — sell-through is calendar here);
+  sell-in → retailer by `map_retailer`, else by normalised name (case, punctuation, "(NZ)",
+  Limited/Ltd, Computers ignored). Macgear totals cover the SKUs on the page.
+- **PO ETAs are a placeholder**: `reporting.fact_open_po` over `netsuite_raw.dw_open_po_line`
+  (`Sell Through/db/11_open_po.sql`, written 2026-10-20, NOT applied to the cluster). Until it
+  exists the page says "PO ETAs not loaded yet"; once loaded, Next ETA / the stock-watch pill /
+  the panel's "Incoming Macgear stock" fill in with no code change.
+- Checked 2026-10-20 vs independent SQL (w/e 18 Oct): NZ 3,214 units, 13 wks 43,011, SOH 74,466,
+  sell-in (reporting retailers) 7,855; AU 20,323 / 252,466 / 292,961 / 23,803 — equal.
+- Local preview without sign-in: launch config `reporting-site-preview` (port 8032, live
+  warehouse via `.env`, throwaway SQLite in %TEMP%).
+
 **Receipt strip** (`app/receipts.py`, `templates/_st_status.html`, 2026-10-15) —
 "who have we received" for sell-through, a one-line collapsible bar at the top
 of home, Item Explorer (landing + item), the table and the dashboard: "w/e 11 Oct
@@ -343,6 +378,9 @@ workers would each warm their own (fine at this size).
 by default (light if the viewer chose it in the side menu), `r-` prefixed
 classes, a no-build SVG chart (`RPT.chart`, bars can `stack`), sparklines, the
 search box. `asset_ver` is the newest mtime of any static file.
+**Every page is full width (user, 2026-10-21)** — no centred max-width container (`.r-wrap`,
+`.r-top-in`, `style.css` `main`, the dashboard's `.wrap`); most use is on a computer. Phones keep
+their own padding rules. Narrow measures stay only where they help reading (forms, help text).
 
 ## Run it
 

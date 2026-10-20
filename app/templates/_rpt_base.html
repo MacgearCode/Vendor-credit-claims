@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="/static/report.css?v={{ asset_ver }}">
   {% block head %}{% endblock %}
 </head>
-<body>
+<body class="{% block bodyclass %}{% endblock %}">
   <header class="r-top">
     <div class="r-top-in">
       <button type="button" class="sn-open" aria-label="Open menu" aria-controls="snDrawer">&#9776;</button>

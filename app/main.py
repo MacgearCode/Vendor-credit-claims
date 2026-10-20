@@ -32,7 +32,7 @@ from .pricing_sync import sync_pricing
 from .security import (hash_password, hash_token, make_reset_token, sign,
                        unsign, verify_password)
 from . import (bill_export, bill_service, field, items, notify, perms, receipts, sales,
-               sales_explorer, sell_through, st_table, warehouse, workflow)
+               sales_explorer, sell_through, st_table, st_weekly, warehouse, workflow)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 rebuild_reference_tables()   # drop legacy products/retailers so they rebuild country-scoped
@@ -161,6 +161,7 @@ _TOOL_PATHS = [
     ("/reports/sell-through", "sell_through"),
     ("/reports/items", "items"),
     ("/reports/table", "st_table"),
+    ("/reports/weekly", "st_weekly"),
     ("/reports/field", "field"),
     ("/vendor-bills", "vendor_bills"),
     ("/promos", "promos"),
@@ -490,6 +491,8 @@ REPORTS = [
      "blurb": "Search any product: sell-through, stock and cover by retailer, with trends and insights."},
     {"key": "st_table", "href": "/reports/table", "title": "Sell-Through Table", "icon": "▦",
      "blurb": "The weekly workbook as a live table — filter, sort, and download to Excel."},
+    {"key": "st_weekly", "href": "/reports/weekly", "title": "Weekly Sell-Through", "icon": "▤",
+     "blurb": "The consolidated weekly report: sell-through vs sell-in, stock, cover and PO ETAs."},
     {"key": "sell_through", "href": "/reports/sell-through", "title": "Sell-Through Dashboard", "icon": "◔",
      "blurb": "Weekly units, retail value, stock and cover by retailer and product."},
     {"key": "field", "href": "/reports/field", "title": "Field Activity", "icon": "⚑",
@@ -617,6 +620,37 @@ def report_sell_through(request: Request):
         "data": data, "error": error, "scoped": brands is not None})
 
 
+@app.get("/reports/weekly", response_class=HTMLResponse)
+def report_weekly(request: Request):
+    _, regions = _scope(request)
+    return templates.TemplateResponse(request, "st_weekly.html", {
+        "regions": regions, "sell_in": "sell_in" in _caps(request)})
+
+
+@app.get("/reports/weekly/data.json")
+def report_weekly_data(request: Request):
+    """The page's whole dataset for this user's scope; the browser filters it."""
+    brands, regions = _scope(request)
+    try:
+        return JSONResponse(st_weekly.for_user(brands, regions, "sell_in" in _caps(request)),
+                            headers={"Cache-Control": "private, no-cache"})
+    except warehouse.WarehouseUnavailable as e:
+        return JSONResponse({"error": _warehouse_error(e)}, status_code=503)
+
+
+@app.get("/reports/weekly/stores.json")
+def report_weekly_stores(request: Request, region: str = "", retailer: str = "", code: str = ""):
+    """Store-level rows on demand: one retailer's stores, or one product's stores."""
+    brands, regions = _scope(request)
+    if region not in regions:
+        return JSONResponse({"error": "no access"}, status_code=403)
+    try:
+        return JSONResponse(st_weekly.stores_for(brands, region, retailer, code),
+                            headers={"Cache-Control": "private, no-cache"})
+    except warehouse.WarehouseUnavailable as e:
+        return JSONResponse({"error": _warehouse_error(e)}, status_code=503)
+
+
 def _caps(request: Request) -> set:
     user = current_user(request)
     return set(perms.CAP_KEYS) if user is None else perms.effective_caps(user)
@@ -640,7 +674,7 @@ def _weekfmt(iso: str) -> str:
 templates.env.filters["weekfmt"] = _weekfmt
 
 
-_ST_AREAS = ("sell_through", "items", "st_table")
+_ST_AREAS = ("sell_through", "items", "st_table", "st_weekly")
 
 
 def st_status(request: Request):
@@ -671,12 +705,17 @@ def _warm_reports():
         sales_explorer.options(region, sales_today())
     receipts.status(None, list(perms.REGIONS), sales_today())
     sell_through.for_user(None, list(perms.REGIONS))
+    st_weekly.for_user(None, list(perms.REGIONS), True)
     for region in perms.REGIONS:
         items.leaderboard_for(None, region)
         opts = st_table.options(None, region)
         if opts["weeks"]:
             st_table.build_for(None, region, "retailer", date.fromisoformat(opts["weeks"][0]),
                                12, "", "")
+    # Weekly Sell-Through's store data last: the slowest (~10-20 s per retailer)
+    for region in perms.REGIONS:
+        for retailer in st_weekly.store_retailers(None, region):
+            st_weekly.stores_for(None, region, retailer)
 
 
 def deployment_problems(public_base_url: str, secret: str, shared_password: str,

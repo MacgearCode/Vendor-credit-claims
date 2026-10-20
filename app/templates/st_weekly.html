@@ -1,0 +1,55 @@
+{% extends "_rpt_base.html" %}
+{# Weekly Sell-Through — the consolidated weekly report as one full-width page.
+   The dataset comes from /reports/weekly/data.json (scoped server-side); every
+   filter, total and tab is worked out in static/stw.js. #}
+{% block title %}Weekly Sell-Through · Macgear{% endblock %}
+{% block pagename %}Weekly Sell-Through{% endblock %}
+{% block bodyclass %}stw{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/stw.css?v={{ asset_ver }}">{% endblock %}
+{% block content %}
+{% include "_st_status.html" %}
+<div class="stw-bar" id="stwBar">
+  <div class="stw-bar-row">
+    <div class="stw-title">
+      <h1>Weekly Sell-Through</h1>
+      <span class="r-chip" id="stwWeek">Loading…</span>
+      <span class="stw-chips" id="stwChips"></span>
+    </div>
+    <button type="button" class="r-btn ghost stw-fs" id="stwFull" title="Full screen (F)">⛶ <span>Full screen</span></button>
+  </div>
+  <div class="stw-bar-row stw-filters">
+    <div class="r-seg" role="group" aria-label="Market" id="stwMarket">
+      {% if 'AU' in regions %}<button type="button" data-mk="AU">AU</button>{% endif %}
+      {% if 'NZ' in regions %}<button type="button" data-mk="NZ">NZ</button>{% endif %}
+    </div>
+    <select class="r-select" id="stwBrand" aria-label="Brand"><option value="">All brands</option></select>
+    <select class="r-select" id="stwCust" aria-label="Customer"><option value="">All customers</option></select>
+    <div class="r-seg" role="group" aria-label="Period" id="stwPeriod">
+      <button type="button" data-per="13">13 wks</button>
+      <button type="button" data-per="26">26 wks</button>
+      <button type="button" data-per="52">52 wks</button>
+      <button type="button" data-per="0">All</button>
+    </div>
+    {% if sell_in %}
+    <div class="r-seg" role="group" aria-label="Sell-in counts" id="stwSi">
+      <button type="button" data-si="rep" title="Only customers that also send sell-through">Reporting retailers</button>
+      <button type="button" data-si="all" title="Adds Air NZ, loyalty, online and other channels">All channels</button>
+    </div>
+    {% endif %}
+    <span id="stwClear"></span>
+  </div>
+  <nav class="stw-tabs" id="stwTabs" aria-label="Views">
+    <button type="button" data-tab="overview">Overview</button>
+    <button type="button" data-tab="brands">Brands</button>
+    <button type="button" data-tab="customers">Customers</button>
+    <button type="button" data-tab="stores">Stores</button>
+    <button type="button" data-tab="products">Products</button>
+    <button type="button" data-tab="stock">Stock watch</button>
+    <button type="button" data-tab="how">How it works</button>
+  </nav>
+</div>
+<div id="stwView" class="stw-view"><div class="stw-loading">Loading this week's data…</div></div>
+<div class="stw-scrim" id="stwScrim" hidden></div>
+<aside class="stw-panel" id="stwPanel" aria-hidden="true" tabindex="-1"></aside>
+{% endblock %}
+{% block scripts %}<script src="/static/stw.js?v={{ asset_ver }}"></script>{% endblock %}
