@@ -17,6 +17,13 @@
 .sn-open:hover{background:rgba(255,255,255,.28)}
 .sn-open.on-light{background:rgba(22,32,43,.06);color:#16202b}
 .sn-open.on-light:hover{background:rgba(22,32,43,.12)}
+/* "What's new" dot: on the menu link, and on the ☰ button while the menu is shut */
+.sn-updates{display:flex !important;align-items:center;gap:8px}
+.sn-dot{width:8px;height:8px;border-radius:50%;background:#e5484d;flex:none}
+.sn-dot[hidden]{display:none}
+.sn-open{position:relative}
+.sn-open.has-new::after{content:"";position:absolute;top:7px;right:7px;width:8px;height:8px;border-radius:50%;
+  background:#e5484d;box-shadow:0 0 0 2px rgba(0,0,0,.25)}
 /* the light / dark switch at the right of each top bar: the same button look */
 .tm-wrap{display:flex;align-items:center;gap:8px;flex:none;margin-left:auto;position:relative}
 .tm-btn{display:inline-flex;align-items:center;justify-content:center;flex:none;

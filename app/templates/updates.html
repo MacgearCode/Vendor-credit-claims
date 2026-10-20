@@ -1,0 +1,53 @@
+{% extends "_rpt_base.html" %}
+{# What's new — the update log from app/updates.md (app/updates.py), filtered to
+   what this user can see. "New" marks entries since this browser last opened it. #}
+{% block title %}What's new · Macgear Reporting{% endblock %}
+{% block pagename %}What's new{% endblock %}
+{% block head %}
+<style>
+  .up-wrap{max-width:860px}
+  .up-day{margin:26px 0 10px;font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--r-muted)}
+  .up-card{background:var(--r-card);border:1px solid var(--r-line);border-radius:14px;padding:16px 18px;margin-bottom:10px}
+  .up-card h2{margin:0;font-size:16.5px;letter-spacing:-.01em;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .up-card ul{margin:8px 0 0;padding-left:20px;color:var(--r-ink-2);font-size:14px;line-height:1.55}
+  .up-card p{margin:8px 0 0;color:var(--r-ink-2);font-size:14px}
+  .up-new{font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:2px 8px;border-radius:999px;
+    background:var(--r-accent-soft);color:var(--r-accent)}
+  .up-new[hidden]{display:none}
+</style>
+{% endblock %}
+{% block content %}
+<div class="up-wrap">
+  <p class="r-eyebrow">Macgear Reporting · beta</p>
+  <h1 style="margin:0">What's new</h1>
+  <p class="r-muted" style="margin:6px 0 0">Changes to the site, newest first. Spotted something wrong, or want something added? Tell the Macgear team.</p>
+  {% set ns = namespace(day=None) %}
+  {% for e in entries %}
+    {% if e.date != ns.day %}{% set ns.day = e.date %}<p class="up-day">{{ e.date.day }} {{ e.date.strftime('%B %Y') }}</p>{% endif %}
+    <article class="up-card" data-date="{{ e.date.isoformat() }}">
+      <h2>{{ e.title }} <span class="up-new" hidden>New</span></h2>
+      {% for t in e.text %}<p>{{ t }}</p>{% endfor %}
+      {% if e.points %}<ul>{% for p in e.points %}<li>{{ p }}</li>{% endfor %}</ul>{% endif %}
+    </article>
+  {% else %}
+    <p class="r-muted" style="margin-top:20px">No updates yet.</p>
+  {% endfor %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  // mark what's new since this browser last looked, then remember the newest entry
+  (function(){
+    var seen=''; try{ seen=localStorage.getItem('updates_seen')||''; }catch(e){}
+    var newest='';
+    document.querySelectorAll('.up-card[data-date]').forEach(function(c){
+      var d=c.getAttribute('data-date');
+      if(seen && d>seen) c.querySelector('.up-new').hidden=false;
+      if(d>newest) newest=d;
+    });
+    try{ if(newest) localStorage.setItem('updates_seen', newest); }catch(e){}
+    var dot=document.querySelector('.sn-updates .sn-dot'); if(dot) dot.hidden=true;
+    document.querySelectorAll('.sn-open.has-new').forEach(function(b){ b.classList.remove('has-new'); });
+  })();
+</script>
+{% endblock %}

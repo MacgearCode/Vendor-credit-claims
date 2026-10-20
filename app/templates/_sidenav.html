@@ -51,6 +51,13 @@
       <a href="/admin/users" class="{{ 'sn-active' if here.startswith('/admin/users') }}">Users</a>
     </div>
     {% endif %}
+
+    {% set upd_latest = updates_latest(request) %}
+    {% if upd_latest %}
+    <div class="sn-section">
+      <a href="/updates" class="sn-updates {{ 'sn-active' if here == '/updates' }}" data-latest="{{ upd_latest }}">What's new<span class="sn-dot" hidden aria-label="new"></span></a>
+    </div>
+    {% endif %}
   </nav>
 
   <div class="sn-foot">
@@ -94,6 +101,16 @@
   document.addEventListener('keydown', function(e){
     if(e.key==='Escape' && document.body.classList.contains('sn-is-open')) close();
   });
+
+  // "What's new": a dot until this browser has opened /updates since the newest entry
+  var up=document.querySelector('.sn-updates[data-latest]');
+  if(up){
+    var seen=''; try{ seen=localStorage.getItem('updates_seen')||''; }catch(e){}
+    if(up.getAttribute('data-latest')>seen){
+      up.querySelector('.sn-dot').hidden=false;
+      document.querySelectorAll('.sn-open').forEach(function(b){ b.classList.add('has-new'); });
+    }
+  }
 
   // colour palette: the picker beside the light / dark switch (_theme_btn.html)
   function palette(){ return document.documentElement.getAttribute('data-palette')||''; }

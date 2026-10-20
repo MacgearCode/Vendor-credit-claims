@@ -32,7 +32,7 @@ from .pricing_sync import sync_pricing
 from .security import (hash_password, hash_token, make_reset_token, sign,
                        unsign, verify_password)
 from . import (bill_export, bill_service, field, items, notify, perms, receipts, sales,
-               sales_explorer, sell_through, st_table, st_weekly, warehouse, workflow)
+               sales_explorer, sell_through, st_table, st_weekly, updates, warehouse, workflow)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 rebuild_reference_tables()   # drop legacy products/retailers so they rebuild country-scoped
@@ -175,6 +175,10 @@ _TOOL_PATHS = [
 ]
 
 
+# Paths every signed-in user, vendors included, may open without an area.
+_VENDOR_OPEN_PATHS = ("/", "/updates")
+
+
 def _tool_for_path(path: str) -> str | None:
     best = None
     for prefix, key in _TOOL_PATHS:
@@ -214,7 +218,7 @@ async def require_login(request: Request, call_next):
     # reports ticked on their account, and nothing else. A path no area claims
     # (a new tool someone forgot to add to _TOOL_PATHS, /api/..., /tools) is
     # refused rather than let through.
-    if perms.is_vendor(user) and path != "/" and tool is None:
+    if perms.is_vendor(user) and path not in _VENDOR_OPEN_PATHS and tool is None:
         return templates.TemplateResponse(request, "denied.html",
                                           {"tool": "this page"}, status_code=403)
     if tool and not perms.can_access(user, tool):
@@ -522,6 +526,26 @@ def nav_reports(request: Request) -> list[dict]:
             and (r["key"] != "sales" or "sell_in_value" in caps)]
 
 
+def my_updates(request: Request) -> list[dict]:
+    """The update log entries this user may see (areas as the side menu lists them)."""
+    user = current_user(request)
+    areas = {r["key"] for r in nav_reports(request)} | {t["key"] for t in nav_tools(request)}
+    if user is None or perms.is_admin(user):
+        areas.add("admin")
+    return updates.visible(updates.load(), areas)
+
+
+def updates_latest(request: Request) -> str:
+    u = my_updates(request)
+    return u[0]["date"].isoformat() if u else ""
+
+
+@app.get("/updates", response_class=HTMLResponse)
+def updates_page(request: Request):
+    return templates.TemplateResponse(request, "updates.html", {"entries": my_updates(request)})
+
+
+templates.env.globals["updates_latest"] = updates_latest
 templates.env.globals["nav_tools"] = nav_tools
 templates.env.globals["nav_reports"] = nav_reports
 

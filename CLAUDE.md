@@ -31,6 +31,7 @@ warehouse host in the droplet `.env` broke the warm-up — compare the host, not
 | `/reports/sell-through` | Sell-Through Dashboard (from `Sell Through/prototype/`) | staff, vendors |
 | `/reports/weekly` | Weekly Sell-Through — the consolidated weekly report, full screen | staff only |
 | `/reports/field` | Field Activity — Mova reps from Repsly: dashboard, display compliance, feed, schedule, visits, reps, photos | staff only |
+| `/updates` | What's new — the site's update log (`app/updates.md`) | everyone, filtered by area |
 | `/tools` | Tools landing (tools are also listed in the side menu) | staff |
 | `/promos` | Vendor Promos — promotional credit claims | sales, finance |
 | `/vendor-bills` | PDF Bill Upload — Amazon Advertising → NetSuite CSV | accounts |
@@ -40,6 +41,15 @@ warehouse host in the droplet `.env` broke the warm-up — compare the host, not
 (`app/main.py`), its key in `perms.REPORT_KEYS` / `TOOL_KEYS` + `AREA_LABELS`
 (and `VENDOR_AREAS` if vendors may have it), and its URL prefix in `_TOOL_PATHS`.
 Miss the last one and staff can reach it by typing the URL (vendors can't — see below).
+
+**What's new / update log (2026-10-21).** `/updates` lists `app/updates.md`, newest first
+(`app/updates.py`). **With every commit people would notice, add an entry there in the same
+commit**: `## YYYY-MM-DD | Title | area keys` + `- ` lines in plain words for site users. Area
+keys hide an entry from anyone who can't open that area (same rule as the side menu, so `sales`
+needs Sell-in $; `admin` = admins); **no keys = everyone, vendors included** — keep internal
+detail out of those. Vendors may open `/updates` (`_VENDOR_OPEN_PATHS`). The side menu's
+"What's new" (and the ☰ button) carry a dot until this browser has opened the page since the
+newest entry (`localStorage.updates_seen`). Tests: `tests/test_updates.py`.
 
 ## Access control
 
