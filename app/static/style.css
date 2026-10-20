@@ -47,7 +47,7 @@ a:hover{text-decoration:underline}
 .brand-word{color:#fff;font-weight:600}
 .topbar nav{display:flex;gap:1.2rem;align-items:center}
 .topbar .toolnav{margin-left:auto}
-.topbar .toolnav + .tm-btn{margin-left:0}
+.topbar .toolnav + .tm-wrap{margin-left:0}
 .topbar nav a{color:#dfe7f5}
 .topbar nav a:hover{color:#fff}
 .theme-toggle{background:rgba(255,255,255,.15);border:0;color:#fff;font-size:1rem;line-height:1;
@@ -382,7 +382,7 @@ table.grid tfoot .totrow td{border-top:2px solid var(--line);font-weight:600;
 @media (max-width:760px){
   .topbar{padding:.55rem .8rem}
   .topbar .toolnav{display:none}
-  .topbar .toolnav + .tm-btn{margin-left:auto}
+  .topbar .toolnav + .tm-wrap{margin-left:auto}
   .brand-logo{height:28px}
   main{padding:0 .8rem;margin-top:1rem}
   .toolgrid{grid-template-columns:1fr}

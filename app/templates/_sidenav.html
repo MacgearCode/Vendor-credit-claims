@@ -95,6 +95,37 @@
     if(e.key==='Escape' && document.body.classList.contains('sn-is-open')) close();
   });
 
+  // colour palette: the picker beside the light / dark switch (_theme_btn.html)
+  function palette(){ return document.documentElement.getAttribute('data-palette')||''; }
+  function markPalette(){
+    document.querySelectorAll('.tm-pop [data-palette]').forEach(function(b){
+      b.setAttribute('aria-checked', b.getAttribute('data-palette')===palette()?'true':'false'); });
+  }
+  function closePops(){
+    document.querySelectorAll('.tm-pop').forEach(function(p){ p.hidden=true; });
+    document.querySelectorAll('[data-palette-open]').forEach(function(b){ b.setAttribute('aria-expanded','false'); });
+  }
+  markPalette();
+  document.querySelectorAll('[data-palette-open]').forEach(function(b){
+    b.addEventListener('click', function(e){
+      e.stopPropagation();
+      var pop=b.parentNode.querySelector('.tm-pop'), show=pop.hidden;
+      closePops(); pop.hidden=!show; b.setAttribute('aria-expanded', show?'true':'false');
+      if(show){ var on=pop.querySelector('[aria-checked="true"]'); if(on) on.focus(); }
+    });
+  });
+  document.querySelectorAll('.tm-pop [data-palette]').forEach(function(b){
+    b.addEventListener('click', function(){
+      var p=b.getAttribute('data-palette');
+      if(p) document.documentElement.setAttribute('data-palette', p);
+      else document.documentElement.removeAttribute('data-palette');
+      try{ if(p) localStorage.setItem('palette', p); else localStorage.removeItem('palette'); }catch(e){}
+      markPalette(); closePops();
+    });
+  });
+  document.addEventListener('click', function(e){ if(!e.target.closest('.tm-pop')) closePops(); });
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape') closePops(); });
+
   // light / dark: the switch at the top right of each top bar (_theme_btn.html);
   // same localStorage key the shell reads in <head>
   var ts=document.querySelectorAll('[data-theme-toggle]');

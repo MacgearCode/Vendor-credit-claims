@@ -121,7 +121,7 @@
     if (v == null) return '<span class="q0">·</span>';
     if (!max || v <= 0) return '<span class="r-heat' + (v === 0 ? " q0" : "") + '">' + RPT.int(v) + "</span>";
     var a = Math.min(1, v / max) * 0.55 + 0.06;
-    return '<span class="r-heat" style="background:rgba(62,160,255,' + a.toFixed(2) + ')">' + RPT.int(v) + "</span>";
+    return '<span class="r-heat" style="background:color-mix(in srgb,var(--r-accent) ' + Math.round(a * 100) + '%,transparent)">' + RPT.int(v) + "</span>";
   }
   function sumOf(list, f) { var s = 0, any = false; list.forEach(function (r) { var v = f(r); if (v != null) { s += v; any = true; } }); return any ? s : null; }
 

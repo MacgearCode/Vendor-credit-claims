@@ -52,7 +52,7 @@ a[data-lb]{cursor:zoom-in}
   color:#fff;font-size:34px;line-height:1;cursor:pointer}
 .f-lb-nav.prev{grid-column:1;grid-row:1}.f-lb-nav.next{grid-column:3;grid-row:1}
 .f-lb-x:hover,.f-lb-nav:hover{background:rgba(255,255,255,.24)}
-.f-lb-x:focus-visible,.f-lb-nav:focus-visible{outline:2px solid #3ea0ff;outline-offset:2px}
+.f-lb-x:focus-visible,.f-lb-nav:focus-visible{outline:2px solid var(--r-accent,#3ea0ff);outline-offset:2px}
 .f-lb-bar{grid-column:1 / -1;grid-row:2;display:flex;gap:14px;align-items:center;justify-content:center;flex-wrap:wrap;
   padding:6px 16px;font-size:13.5px}
 .f-lb-cap{font-weight:600}
@@ -61,7 +61,7 @@ a[data-lb]{cursor:zoom-in}
 .f-lb-bar a:hover{text-decoration:underline}
 .f-lb-strip{grid-column:1 / -1;grid-row:3;display:flex;gap:6px;overflow-x:auto;padding:8px 16px 14px;justify-content:safe center}
 .f-lb-strip button{flex:none;padding:0;border:2px solid transparent;border-radius:8px;background:none;cursor:pointer;opacity:.55}
-.f-lb-strip button.on,.f-lb-strip button:hover{opacity:1;border-color:#3ea0ff}
+.f-lb-strip button.on,.f-lb-strip button:hover{opacity:1;border-color:var(--r-accent,#3ea0ff)}
 .f-lb-strip img{display:block;width:64px;height:64px;object-fit:cover;border-radius:6px}
 @media (max-width:640px){
   .f-lb{grid-template-columns:0 1fr 0}

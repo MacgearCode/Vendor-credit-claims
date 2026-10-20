@@ -18,7 +18,8 @@
 .sn-open.on-light{background:rgba(22,32,43,.06);color:#16202b}
 .sn-open.on-light:hover{background:rgba(22,32,43,.12)}
 /* the light / dark switch at the right of each top bar: the same button look */
-.tm-btn{display:inline-flex;align-items:center;justify-content:center;flex:none;margin-left:auto;
+.tm-wrap{display:flex;align-items:center;gap:8px;flex:none;margin-left:auto;position:relative}
+.tm-btn{display:inline-flex;align-items:center;justify-content:center;flex:none;
   width:40px;height:40px;border:0;border-radius:9px;cursor:pointer;padding:0;
   background:rgba(255,255,255,.15);color:#fff}
 .tm-btn:hover{background:rgba(255,255,255,.28)}
@@ -27,6 +28,43 @@
 .tm-btn .tm-sun{display:none}
 [data-theme="dark"] .tm-btn .tm-sun{display:block}
 [data-theme="dark"] .tm-btn .tm-moon{display:none}
+.tm-pop{position:absolute;top:calc(100% + 8px);right:48px;z-index:80;min-width:150px;padding:6px;
+  background:var(--sn-bg);color:var(--sn-ink);border:1px solid var(--sn-line);border-radius:12px;
+  box-shadow:0 12px 32px rgba(0,0,0,.22);display:flex;flex-direction:column;gap:2px}
+.tm-pop[hidden]{display:none}
+.tm-pop button{display:flex;align-items:center;gap:10px;border:0;background:transparent;color:inherit;
+  font:inherit;font-size:14px;padding:8px 10px;border-radius:8px;cursor:pointer;text-align:left}
+.tm-pop button:hover{background:var(--sn-hover)}
+.tm-pop button i{width:18px;height:18px;border-radius:50%;flex:none;box-shadow:inset 0 0 0 2px rgba(255,255,255,.35)}
+.tm-pop button[aria-checked="true"]{font-weight:700}
+.tm-pop button[aria-checked="true"]::after{content:"✓";margin-left:auto}
+
+/* ---- colour palettes (user, 2026-10-21) ----
+   Blue = no attribute (each stylesheet's own colours). A palette swaps only the
+   accent family in every stylesheet - report.css (--r-accent*), style.css (--brand:
+   top bar + links), the dashboard (--accent*), this menu (--sn-*) - never the
+   up/down, warning or sell-in colours, so charts keep their meaning. html[...]
+   outranks the :root / [data-theme] blocks whatever order the files load in. */
+html[data-palette="teal"]{
+  --r-accent:#0d9488; --r-accent-soft:rgba(13,148,136,.12); --r-accent-2:#6366f1;
+  --brand:#0f766e; --accent:#0d9488; --accent-soft:rgba(13,148,136,.12);
+  --sn-active:#ddf3f0; --sn-active-ink:#0f766e; --sn-brand:#0f766e;
+}
+html[data-theme="dark"][data-palette="teal"]{
+  --r-accent:#2dd4bf; --r-accent-soft:rgba(45,212,191,.16); --r-accent-2:#818cf8;
+  --accent:#2dd4bf; --accent-soft:rgba(45,212,191,.16);
+  --sn-active:#13302d; --sn-active-ink:#5eead4;
+}
+html[data-palette="violet"]{
+  --r-accent:#7c3aed; --r-accent-soft:rgba(124,58,237,.12); --r-accent-2:#db2777;
+  --brand:#5b21b6; --accent:#7c3aed; --accent-soft:rgba(124,58,237,.12);
+  --sn-active:#efe7fd; --sn-active-ink:#5b21b6; --sn-brand:#5b21b6;
+}
+html[data-theme="dark"][data-palette="violet"]{
+  --r-accent:#a78bfa; --r-accent-soft:rgba(167,139,250,.17); --r-accent-2:#f472b6;
+  --accent:#a78bfa; --accent-soft:rgba(167,139,250,.17);
+  --sn-active:#251d3d; --sn-active-ink:#c4b5fd;
+}
 
 .sn-overlay{position:fixed;inset:0;z-index:90;background:rgba(10,16,24,.45);
   opacity:0;transition:opacity .2s ease}

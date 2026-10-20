@@ -9,7 +9,7 @@
   <title>{% block title %}Macgear Reporting{% endblock %}</title>
   <script>
     (function(){var t=null;try{t=localStorage.getItem('theme');}catch(e){}
-      if(t!=='light')document.documentElement.setAttribute('data-theme','dark');})();
+      if(t!=='light')document.documentElement.setAttribute('data-theme','dark');try{var p=localStorage.getItem('palette');if(p)document.documentElement.setAttribute('data-palette',p);}catch(e){}})();
   </script>
   <link rel="stylesheet" href="/static/sidenav.css?v={{ asset_ver }}">
   <link rel="stylesheet" href="/static/report.css?v={{ asset_ver }}">

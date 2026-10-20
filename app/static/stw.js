@@ -842,7 +842,7 @@
   document.addEventListener("fullscreenchange", function () { setFull(!!document.fullscreenElement); });
 
   /* redraw charts when the theme flips (colours are read at draw time) */
-  new MutationObserver(function () { if (D) render(); }).observe(document.documentElement, {attributes: true, attributeFilter: ["data-theme"]});
+  new MutationObserver(function () { if (D) render(); }).observe(document.documentElement, {attributes: true, attributeFilter: ["data-theme", "data-palette"]});
 
   /* ---------- load ---------- */
   var YTD = {a: 0, la: -1, lb: -1};

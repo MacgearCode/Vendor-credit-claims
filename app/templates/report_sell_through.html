@@ -10,7 +10,7 @@
   // Same rule as the other report pages: dark unless the viewer chose light
   // (side menu switch, localStorage "theme"). Applied before first paint.
   (function(){var t=null;try{t=localStorage.getItem('theme');}catch(e){}
-    if(t!=='light')document.documentElement.setAttribute('data-theme','dark');})();
+    if(t!=='light')document.documentElement.setAttribute('data-theme','dark');try{var p=localStorage.getItem('palette');if(p)document.documentElement.setAttribute('data-palette',p);}catch(e){}})();
 </script>
 <link rel="stylesheet" href="/static/sidenav.css?v={{ asset_ver }}">
 <style>
@@ -898,7 +898,7 @@
 
   // the side menu flips data-theme on <html>; redraw so SVG colours follow
   new MutationObserver(function () { render(); })
-    .observe(document.documentElement, {attributes: true, attributeFilter: ["data-theme"]});
+    .observe(document.documentElement, {attributes: true, attributeFilter: ["data-theme", "data-palette"]});
 
   window.addEventListener("resize", function () {
     clearTimeout(window.__rz);

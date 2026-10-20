@@ -170,6 +170,8 @@
     }
     draw();
     if (window.ResizeObserver) new ResizeObserver(function () { draw(); }).observe(el);
+    new MutationObserver(function () { if (el.isConnected) draw(); })
+      .observe(document.documentElement, {attributes: true, attributeFilter: ["data-theme", "data-palette"]});
     return {redraw: draw};
   }
   function niceMax(v) {

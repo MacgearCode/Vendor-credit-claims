@@ -1,6 +1,18 @@
-{# Light / dark switch, top right of every page's top bar (user, 2026-10-21). Styled in
-   sidenav.css like the ☰ button; the click handler is in _sidenav.html. #}
-<button type="button" class="tm-btn{{ ' on-light' if tm_on_light }}" data-theme-toggle aria-label="Switch to dark mode" title="Light / dark mode">
-  <svg class="tm-moon" viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7z" fill="currentColor"/></svg>
-  <svg class="tm-sun" viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></g></svg>
-</button>
+{# Colour palette + light / dark switch, top right of every page's top bar (user,
+   2026-10-21). Styled in sidenav.css like the ☰ button (palettes are defined there
+   too); the click handlers are in _sidenav.html. Saved per browser in localStorage
+   "palette" / "theme" and applied in each shell's <head> before first paint. #}
+<div class="tm-wrap">
+  <button type="button" class="tm-btn{{ ' on-light' if tm_on_light }}" data-palette-open aria-haspopup="true" aria-expanded="false" aria-label="Colour palette" title="Colour palette">
+    <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H16.8A4.2 4.2 0 0 0 21 10.8C21 6.5 17 3 12 3z" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="7.5" cy="11" r="1.4" fill="currentColor"/><circle cx="10.5" cy="7.2" r="1.4" fill="currentColor"/><circle cx="15" cy="7.4" r="1.4" fill="currentColor"/></svg>
+  </button>
+  <div class="tm-pop" role="menu" aria-label="Colour palette" hidden>
+    <button type="button" role="menuitemradio" data-palette="" aria-checked="true"><i style="background:#1f8fff"></i>Blue</button>
+    <button type="button" role="menuitemradio" data-palette="teal" aria-checked="false"><i style="background:#0d9488"></i>Teal</button>
+    <button type="button" role="menuitemradio" data-palette="violet" aria-checked="false"><i style="background:#7c3aed"></i>Violet</button>
+  </div>
+  <button type="button" class="tm-btn{{ ' on-light' if tm_on_light }}" data-theme-toggle aria-label="Switch to dark mode" title="Light / dark mode">
+    <svg class="tm-moon" viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7z" fill="currentColor"/></svg>
+    <svg class="tm-sun" viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></g></svg>
+  </button>
+</div>

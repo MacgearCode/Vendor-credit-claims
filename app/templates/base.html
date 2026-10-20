@@ -6,7 +6,7 @@
   <title>{% block title %}Macgear Reporting{% endblock %}</title>
   <script>
     // apply saved theme before first paint to avoid a flash of the light theme
-    (function(){try{if(localStorage.getItem('theme')==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();
+    (function(){try{if(localStorage.getItem('theme')==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}try{var p=localStorage.getItem('palette');if(p)document.documentElement.setAttribute('data-palette',p);}catch(e){}})();
   </script>
   <link rel="stylesheet" href="/static/style.css?v={{ asset_ver }}">
   <link rel="stylesheet" href="/static/sidenav.css?v={{ asset_ver }}">
