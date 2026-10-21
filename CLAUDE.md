@@ -446,8 +446,35 @@ Shared shell:
 | `app/static/style.css` | All CSS, light + dark. No framework, no build step |
 
 Vendor Promos: `calc.py`, `service.py`, `export.py`, `workflow.py`,
-`pricing_sync.py`, `seed.py`, templates `promo_base.html` / `dashboard.html` /
+`promo_data.py`, `pricing_sync.py`, `seed.py`, templates `promo_base.html` / `dashboard.html` /
 `promo_detail.html` / `promo_new.html` / `help.html`.
+
+**Promo reference data comes from the warehouse (2026-10-21, user's request)** —
+`app/promo_data.py`, not the `products` table. Item = `dim_item` (case-insensitive
+code), buy price = `dim_item_price` for the block's price level, RRP = level 1.
+- **Retailer picker** = NetSuite price levels with prices in the promo's currency,
+  except a level used by sell-through retailers is listed as those retailers
+  (`dim_ns_customer.customer_key`; a retailer's level = the one most of its accounts
+  are on). NZ level 28 → "Noel Leeming" and "Warehouse Stationery", separately
+  (user). `promo_retailers.price_level_id` / `st_customer_key` store the pick; blocks
+  made earlier hold only a name and are matched by `norm_name` once, then remember.
+- **Rebates stay the tool's own list** (`retailers` table, user — NOT NetSuite's
+  `base_rebate_pct`, which differs: Bunnings 8% vs 15%), matched by the entry's name
+  only (a shared price level must not pass NL's rebate to Warehouse Stationery).
+  Retailers with no row default to 0 (Retravision, NZ Bunnings, Warehouse Stationery).
+- **6wk avg = sell-through only (user):** sum of `fact_sell_through.qty_sold` over the
+  retailer's last six LOADED weeks with week-ending before the promo start, ÷ weeks
+  found (zero weeks count) — a late file never blanks it. Filled on add / copy, stored
+  with `line_items.avg_6wk_source` (tooltip; "Entered by hand" when typed over);
+  "refresh 6wk avg" per block overwrites. No sell-through feed → blank, typed by hand.
+  Checked 2026-10-21 vs independent SQL (HN AU / JB AU / NL NZ E8173C22, OW A1902T11):
+  averages and buy prices equal.
+- `/api/product` is now under the promos area in `_TOOL_PATHS` (it returns buy prices
+  and sell-through; before, any staff login could call it).
+- **Not yet removed:** the n8n nightly pricing push → `/admin/sync-pricing` →
+  `products` still runs but nothing reads `products` any more. Retire the n8n
+  workflow, then the endpoint, `pricing_sync.py`, the product seed and the
+  `products` table.
 
 Vendor Bill Importer: `bill_calc.py`, `bill_pdf.py`, `bill_export.py`,
 `bill_service.py`, template `bills.html`.

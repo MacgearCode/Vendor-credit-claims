@@ -9,6 +9,12 @@ st_weekly, field, items, st_table, sell_through, promos, vendor_bills) or
 Add an entry with every commit people would notice. Everything above the first
 "##" is ignored.
 
+## 2026-10-21 | Vendor Promos: 6wk avg fills itself | promos
+- Typing a SKU on a promo now fills the 6wk avg from the retailer's own sell-through (its last six weeks loaded before the promo starts), as well as the description, RRP and buy price.
+- If a retailer's latest week isn't in yet, the six weeks before it are used. Hover a 6wk avg to see where it came from; type over it to use your own figure.
+- New "refresh 6wk avg" link on each retailer block re-pulls them all. Copying SKUs to another retailer now brings that retailer's 6wk avg too.
+- The retailer list now comes straight from NetSuite price levels, so buy prices always match the retailer's level. Noel Leeming and Warehouse Stationery are listed separately.
+
 ## 2026-10-21 | Pick a colour palette
 - New palette button next to the light / dark switch: choose Blue, Teal or Violet.
 - Your choice is remembered on this browser.

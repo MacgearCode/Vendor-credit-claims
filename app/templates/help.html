@@ -24,8 +24,8 @@
       name, brand, date range, the AUD→USD rate, and the default funding split. Tick the retailers
       taking part (set each one's rebate if it differs).</li>
     <li><strong>Add line items.</strong> On the promo page, add SKUs under each retailer. Type the
-      product code and the description / RRP / buy price autofill from the product master. Enter the
-      <em>% off</em> and the <em>6-week average</em> weekly units. You can copy SKUs from another
+      product code and the description, RRP, the retailer's buy price (its NetSuite price level) and
+      the <em>6-week average</em> fill in. Enter the <em>% off</em>. You can copy SKUs from another
       retailer block to save re-keying.</li>
     <li><strong>Send for approval.</strong> Move the promo status through the workflow (see below) as
       the vendor approves the spend and Sales releases it to the customer.</li>
@@ -39,8 +39,12 @@
 <div class="card help">
   <h2>The line-item columns</h2>
   <ul>
-    <li><strong>6wk avg</strong> — the customer's average weekly unit sales over the prior 6 weeks.
-      Used (with growth) to project <em>expected sales</em> over the promo period.</li>
+    <li><strong>6wk avg</strong> — the customer's average weekly unit sales over the prior 6 weeks:
+      the retailer's own sell-through over its last six weeks loaded before the promo starts (if its
+      latest week isn't in yet, the six before it). Weeks it didn't sell count as zero. Retailers that
+      don't send sell-through are left blank to enter by hand. Hover a figure to see where it came
+      from; <em>refresh 6wk avg</em> on a retailer block re-pulls them all. Used (with growth) to
+      project <em>expected sales</em> over the promo period.</li>
     <li><strong>Actual sales</strong> — the real units sold once known. The customer-claim summary
       shows both an <em>expected</em> figure (from 6wk avg) and an <em>actual</em> figure (from this).
       The quantity highlights <span class="ok">green</span> when actuals beat expectation and

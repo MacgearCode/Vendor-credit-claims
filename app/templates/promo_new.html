@@ -7,6 +7,8 @@
 <div class="banner error">Funding split must be valid — Supplier + MacGear between 0 and 1 (Retailer takes the remainder).</div>
 {% elif request.query_params.get('err') == 'dates' %}
 <div class="banner error">End date can't be before the start date.</div>
+{% elif request.query_params.get('err') == 'warehouse' %}
+<div class="banner error">The reporting warehouse couldn't be reached, so the promotion wasn't created. Try again shortly.</div>
 {% endif %}
 
 <form method="post" action="/promo/new" class="card form" id="promoform">
@@ -73,16 +75,23 @@
 
   <fieldset>
     <legend>Retailers in this promotion</legend>
-    <p class="hint">Tick each retailer running the promo. Rebate % is pre-filled from the
-       retailer master — adjust if needed. The list shows retailers for the selected country.</p>
+    <p class="hint">Tick each retailer running the promo. Buy prices come from the retailer's
+       NetSuite price level; the 6wk avg from its sell-through where it sends it. Rebate % is
+       pre-filled from the retailer master — adjust if needed. The list shows retailers for the
+       selected country.</p>
+    {% if wh_down %}
+    <div class="banner error">The retailer list comes from the reporting warehouse, which couldn't be reached — reload in a moment.</div>
+    {% endif %}
     <table class="grid compact">
-      <thead><tr><th></th><th>Retailer</th><th class="num">Rebate %</th></tr></thead>
+      <thead><tr><th></th><th>Retailer</th><th>Price level</th><th>6wk avg from</th><th class="num">Rebate %</th></tr></thead>
       <tbody>
-      {% for r in retailers %}
+      {% for r in retailers or [] %}
         <tr class="ret-row" data-country="{{ r.country }}">
-          <td><input type="checkbox" name="retailer" value="{{ r.name }}" id="r{{ loop.index }}"></td>
+          <td><input type="checkbox" name="retailer" value="{{ r.key }}" id="r{{ loop.index }}"></td>
           <td><label for="r{{ loop.index }}">{{ r.name }}</label></td>
-          <td class="num"><input type="number" step="any" min="0" max="1" name="rebate_{{ r.name }}" value="{{ r.default_rebate }}" style="width:6em"></td>
+          <td class="muted">{{ r.price_level }}</td>
+          <td class="muted">{{ 'sell-through' if r.sell_through else '—' }}</td>
+          <td class="num"><input type="number" step="any" min="0" max="1" name="rebate_{{ r.key }}" value="{{ r.default_rebate }}" style="width:6em"></td>
         </tr>
       {% endfor %}
       </tbody>

@@ -8,6 +8,10 @@
 <div class="banner error">Funding split not saved — Supplier + MacGear must each be 0 or more and total no more than 1 (Retailer takes the remainder).</div>
 {% elif request.query_params.get('err') == 'dates' %}
 <div class="banner error">Dates not saved — the end date can't be before the start date.</div>
+{% elif request.query_params.get('err') == 'warehouse' %}
+<div class="banner error">The reporting warehouse couldn't be reached, so item details, buy prices and the 6wk avg weren't filled in. Enter them by hand or try again shortly.</div>
+{% elif request.query_params.get('err') == 'no_st' %}
+<div class="banner error">That retailer doesn't send sell-through, so there's no 6wk avg to pull — enter it by hand.</div>
 {% endif %}
 
 <div class="head-row">
@@ -77,10 +81,15 @@
 
 {% for rv in pv.retailers %}
 {% set pr = rv.pr %}
-<section class="card retailer">
+<section class="card retailer" id="pr{{ pr.id }}">
   <div class="head-row">
     <h2>{{ pr.retailer_name }} <small class="muted">rebate {{ pr.rebate|pct }}</small></h2>
     {% if editable %}
+    {% if rv.lines %}
+    <form method="post" action="/retailer/{{ pr.id }}/refresh_avg" data-confirm="Replace every line's 6wk avg in this block with the latest sell-through (hand-entered figures included)?" data-confirm-ok="Refresh">
+      <button class="link" title="Re-pull each line's 6wk avg from this retailer's sell-through">refresh 6wk avg</button>
+    </form>
+    {% endif %}
     <form method="post" action="/retailer/{{ pr.id }}/delete" data-confirm="Remove this retailer block and all its lines?" data-confirm-ok="Remove">
       <button class="link danger">remove retailer</button>
     </form>
@@ -136,7 +145,7 @@
           <td class="num">{{ c.total_support|money }}</td>
           <td class="num">{{ c.std_margin|pct }}</td>
           <td class="num">{{ c.promo_margin|pct }}</td>
-          <td class="num">{{ l.avg_6wk if l.avg_6wk is not none else '' }}</td>
+          <td class="num"{% if l.avg_6wk_source %} title="{{ l.avg_6wk_source }}"{% endif %}>{{ l.avg_6wk if l.avg_6wk is not none else '' }}</td>
           <td class="num">{{ c.expected_sales|money }}</td>
           <td class="num{% if l.actual_sales is not none and c.expected_sales is not none %}{{ ' cell-up' if l.actual_sales > c.expected_sales else (' cell-down' if l.actual_sales < c.expected_sales) }}{% endif %}">{{ l.actual_sales if l.actual_sales is not none else '' }}</td>
           <td class="num">{{ c.supplier_claim|money }}</td>
@@ -217,9 +226,10 @@
   <details class="addline">
     <summary>+ Add line item</summary>
     <form method="post" action="/retailer/{{ pr.id }}/line" class="inline-form"
-          data-retailer="{{ pr.retailer_name }}">
+          data-pr="{{ pr.id }}">
+      <input type="hidden" name="avg_6wk_source">
       <label>
-        <span class="fld">Code<span class="info" data-tip="Product SKU code. Type it and the description, RRP and buy price auto-fill from the product master.">i</span></span>
+        <span class="fld">Code<span class="info" data-tip="Product SKU code. Type it and the description, RRP, buy price and 6wk avg auto-fill from NetSuite and the retailer's sell-through.">i</span></span>
         <input name="product_code" placeholder="SKU code" class="code" autocomplete="off" style="width:9em">
       </label>
       <label class="grow">
@@ -263,7 +273,7 @@
         <input name="cogs_mg_pct" class="cmp" type="number" step="any" min="0" placeholder="MG % off cost" value="{{ (promo.cogs_mg_pct_default * 100)|round(4) if promo.cogs_mg_pct_default is not none else '' }}" style="width:11em">
       </label>
       <label>
-        <span class="fld">6wk avg<span class="info" data-tip="Average weekly units sold over the last 6 weeks. Drives the expected-sales forecast and claim.">i</span></span>
+        <span class="fld">6wk avg<span class="info" data-tip="Average weekly units this retailer sold (its sell-through) over its last 6 loaded weeks before the promo starts. Auto-fills from the SKU code; type over it to use your own figure. Drives the expected-sales forecast and claim.">i</span></span>
         <input name="avg_6wk" type="number" step="any" min="0" placeholder="6wk avg" style="width:7em">
       </label>
       <label>
@@ -285,7 +295,7 @@
       </select>
     </label>
     <button class="btn small ghost">Copy SKUs →</button>
-    <span class="hint">copies code/RRP/% off; buy price re-derived for this retailer; 6wk avg left blank</span>
+    <span class="hint">copies code/RRP/% off; buy price and 6wk avg re-pulled for this retailer</span>
   </form>
   {% endif %}
   {% endif %}
@@ -367,9 +377,12 @@
 <section class="card addretailer">
   <h3>Add a retailer to this promotion</h3>
   <form method="post" action="/promo/{{ promo.id }}/retailer" class="inline-form">
-    <select name="retailer_name" required>
+    {% if all_retailers is none %}
+    <p class="hint">The retailer list comes from the reporting warehouse, which couldn't be reached — try again shortly.</p>
+    {% endif %}
+    <select name="retailer_key" required>
       <option value="">— select retailer —</option>
-      {% for r in all_retailers %}<option value="{{ r.name }}" data-rebate="{{ r.default_rebate }}">{{ r.name }}</option>{% endfor %}
+      {% for r in all_retailers or [] %}<option value="{{ r.key }}" data-rebate="{{ r.default_rebate }}">{{ r.name }}{% if r.sell_through %} · sell-through{% endif %}{% if r.price_level != r.name %} ({{ r.price_level }} prices){% endif %}</option>{% endfor %}
     </select>
     <label>Rebate (blank = default) <input name="rebate" type="number" step="any" style="width:7em"></label>
     <button class="btn small">Add retailer</button>
@@ -446,20 +459,32 @@ const PROMO_COUNTRY = "{{ promo.country or 'AU' }}";
 document.querySelectorAll('.inline-form .code').forEach(function (input) {
   input.addEventListener('change', async function () {
     const form = input.closest('form');
-    const retailer = encodeURIComponent(form.dataset.retailer || '');
     const code = input.value.trim();
     if (!code) return;
-    const res = await fetch(`/api/product/${encodeURIComponent(code)}?retailer=${retailer}&country=${PROMO_COUNTRY}`);
+    const res = await fetch(`/api/product/${encodeURIComponent(code)}?pr=${form.dataset.pr}`);
     const d = await res.json();
     if (!d.found) return;
+    if (code !== d.code) input.value = d.code;
+    if (form.avg_6wk && !form.avg_6wk.value && d.avg_6wk != null) {
+      form.avg_6wk.value = d.avg_6wk;
+      form.avg_6wk.title = d.avg_6wk_source || '';
+      form.avg_6wk_source.value = d.avg_6wk_source || '';
+      form.avg_6wk.dataset.filled = d.avg_6wk;
+    }
     if (form.description && !form.description.value) form.description.value = d.description || '';
     if (form.rrp_inc && !form.rrp_inc.value && d.rrp_inc != null) form.rrp_inc.value = d.rrp_inc;
     if (form.retailer_buy_ex && !form.retailer_buy_ex.value && d.retailer_buy_ex != null)
       form.retailer_buy_ex.value = d.retailer_buy_ex;
   });
 });
+// a 6wk avg typed over the sell-through figure is the user's own
+document.querySelectorAll('.inline-form input[name="avg_6wk"]').forEach(function (inp) {
+  inp.addEventListener('input', function () {
+    if (inp.form.avg_6wk_source && inp.value !== inp.dataset.filled) inp.form.avg_6wk_source.value = '';
+  });
+});
 // prefill rebate when picking a retailer to add
-document.querySelectorAll('select[name="retailer_name"]').forEach(function (sel) {
+document.querySelectorAll('select[name="retailer_key"]').forEach(function (sel) {
   sel.addEventListener('change', function () {
     const opt = sel.selectedOptions[0];
     const reb = sel.closest('form').querySelector('input[name="rebate"]');

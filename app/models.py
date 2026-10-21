@@ -79,6 +79,11 @@ class PromoRetailer(Base):
     promo_id: Mapped[int] = mapped_column(ForeignKey("promotions.id"))
     retailer_name: Mapped[str] = mapped_column(String)
     rebate: Mapped[float] = mapped_column(Float, default=0.0)  # rebate for this block
+    # Picker entry behind the block (app/promo_data.py) — NetSuite price level for the
+    # buy price, sell-through retailer for the 6wk avg. NULL on blocks made before
+    # 2026-10-21; those are matched by name.
+    price_level_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    st_customer_key: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     promotion: Mapped[Promotion] = relationship(back_populates="retailers")
     lines: Mapped[list[LineItem]] = relationship(
@@ -99,6 +104,7 @@ class LineItem(Base):
     retailer_buy_ex: Mapped[float] = mapped_column(Float, default=0.0)
     pct_off: Mapped[float] = mapped_column(Float, default=0.0)
     avg_6wk: Mapped[float | None] = mapped_column(Float, nullable=True)
+    avg_6wk_source: Mapped[str | None] = mapped_column(String, nullable=True)  # where avg_6wk came from
     actual_sales: Mapped[float | None] = mapped_column(Float, nullable=True)  # qty actually claimed
     # support basis: "pct_off" (discount, default) | "margin" (target margin) | "cogs" (% off cost)
     support_basis: Mapped[str] = mapped_column(String, default="pct_off")
