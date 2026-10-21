@@ -504,7 +504,7 @@ user and sign-out. The light / dark switch is a sun/moon button at the top right
 family in each stylesheet (`--r-accent*`, `style.css --brand`, the dashboard's `--accent*`,
 `--sn-*`) — defined once at the end of `sidenav.css`, never the up/down / warning / sell-in
 colours. Saved per browser (`localStorage.palette`), applied pre-paint in each shell's head;
-`RPT.chart` redraws on a theme or palette change. A new colour should use the accent tokens,
+`RPT.chart` redraws on a theme or palette change. **Every page's top bar is the solid `--hdr-bg` colour** (Blue #2f5496 / Teal / Violet, set in `sidenav.css`; user 2026-10-22) with a white logo pill and white buttons — report pages, tool pages and the dashboard alike. A new colour should use the accent tokens,
 not a hard-coded blue, or it won't follow the palette. `base.html` includes the drawer and also shows the
 current tool's `{% block nav %}` links in the top bar on screens wider than
 760px; the self-styled report pages include the same partial. The drawer lists

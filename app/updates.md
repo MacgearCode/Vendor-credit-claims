@@ -9,6 +9,9 @@ st_weekly, field, items, st_table, sell_through, promos, vendor_bills) or
 Add an entry with every commit people would notice. Everything above the first
 "##" is ignored.
 
+## 2026-10-22 | Every page's header follows your colour palette
+- The bar across the top of every page is now the colour of the palette you picked (Blue, Teal or Violet) - reports included, not just the tools.
+
 ## 2026-10-21 | Vendor Promos: paste products, side-by-side retailers | promos
 - Paste a list of product codes from Excel (a second column can be the % off) and tick which retailers get them — or use "+ products" on one retailer, or "+ add" in an empty cell.
 - The promo page is now one grid: products down the side, each retailer as a group of columns you can collapse and expand.

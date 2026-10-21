@@ -40,7 +40,7 @@ a{color:var(--brand);text-decoration:none}
 a:hover{text-decoration:underline}
 
 .topbar{display:flex;justify-content:space-between;align-items:center;gap:1rem;
-  background:var(--brand);color:#fff;padding:.7rem 1.4rem}
+  background:var(--hdr-bg,var(--brand));color:#fff;padding:.7rem 1.4rem}
 .topbar .brand{display:flex;align-items:center;gap:.6rem;color:#fff;font-weight:700;font-size:1.05rem}
 .topbar .brand:hover{text-decoration:none}
 .brand-logo{height:32px;width:auto;display:block;background:#fff;padding:5px 10px;border-radius:7px}
