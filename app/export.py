@@ -4,6 +4,7 @@ Mirrors the column subsets of the original template's Promo Form / Sales Copy / 
 Copy tabs, one sheet per retailer block plus a summary.
 """
 import io
+from datetime import date
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -18,6 +19,8 @@ VIEWS = {
     "internal": [
         ("Code", "line.product_code", None),
         ("Description", "line.description", None),
+        ("From", "start", "dd/mm/yyyy"),
+        ("To", "end", "dd/mm/yyyy"),
         ("Retailer Buy ex", "line.retailer_buy_ex", "#,##0.00"),
         ("Supplier Support", "result.supplier_support", "#,##0.00"),
         ("MG Support", "result.mg_support", "#,##0.00"),
@@ -34,6 +37,8 @@ VIEWS = {
     "sales": [
         ("Code", "line.product_code", None),
         ("Description", "line.description", None),
+        ("From", "start", "dd/mm/yyyy"),
+        ("To", "end", "dd/mm/yyyy"),
         ("Retailer Buy ex", "line.retailer_buy_ex", "#,##0.00"),
         ("Total Support", "result.total_support", "#,##0.00"),
         ("Std Margin", "result.std_margin", "0.0%"),
@@ -46,6 +51,8 @@ VIEWS = {
     "vendor": [
         ("Code", "line.product_code", None),
         ("Description", "line.description", None),
+        ("From", "start", "dd/mm/yyyy"),
+        ("To", "end", "dd/mm/yyyy"),
         ("Supplier Support", "result.supplier_support", "#,##0.00"),
         ("Expected Sales", "result.expected_sales", "#,##0"),
         ("Supplier Claim", "result.supplier_claim", "#,##0.00"),
@@ -57,6 +64,8 @@ VIEWS = {
 
 
 def _resolve(lv, path):
+    if "." not in path:                  # the line view's own field (product dates)
+        return getattr(lv, path)
     obj, attr = path.split(".")
     return getattr(getattr(lv, obj), attr)
 
@@ -96,13 +105,13 @@ def build_workbook(pv, view: str) -> io.BytesIO:
             for c, (_, path, fmt) in enumerate(cols, start=1):
                 val = _resolve(lv, path)
                 cell = sh.cell(r, c, val)
-                if fmt and isinstance(val, (int, float)):
+                if fmt and isinstance(val, (int, float, date)):
                     cell.number_format = fmt
         # widths
         sh.column_dimensions["A"].width = 16
         sh.column_dimensions["B"].width = 42
         for col_letter in [chr(ord("C") + i) for i in range(len(cols) - 2)]:
-            sh.column_dimensions[col_letter].width = 15
+            sh.column_dimensions[col_letter].width = 12 if col_letter in "CD" else 15
 
     buf = io.BytesIO()
     wb.save(buf)

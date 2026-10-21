@@ -1,0 +1,172 @@
+{# The promo grid: one row per product, one collapsible column group per retailer
+   (like the Excel promo form). Included by promo_detail.html inside #promo-live,
+   which the page re-fetches and swaps after every in-place edit. #}
+{% set COLS = {
+  'internal': [('buy','Buy ex'),('pct','% Off'),('price','Promo Price'),('ssup','Supp Sup'),('msup','MG Sup'),
+               ('tsup','Tot Sup'),('std','Std Mgn'),('pmg','Promo Mgn'),('avg','6wk Avg'),('exp','Exp Sales'),
+               ('act','Actual Sales'),('sclaim','Supp Claim'),('mclaim','MG Claim'),('tools','')],
+  'sales':    [('buy','Buy ex'),('tsup','Tot Sup'),('std','Std Mgn'),('pmg','Promo Mgn'),('exp','Exp Sales'),
+               ('pct','% Off'),('price','Promo Price')],
+  'vendor':   [('ssup','Supp Sup'),('exp','Exp Sales'),('sclaim','Supp Claim'),('pct','% Off'),('price','Promo Price')],
+} %}
+{% set MINI = {'internal': [('pct','% Off'),('sclaim','Supp Claim')],
+               'sales': [('pct','% Off'),('price','Promo Price')],
+               'vendor': [('pct','% Off'),('sclaim','Supp Claim')]} %}
+{% set cols = COLS[view] %}
+{% set mini = MINI[view] %}
+
+{% macro cell(key, lv, cls, editable) -%}
+  {%- set l = lv.line %}{% set c = lv.result -%}
+  {%- if key == 'buy' -%}
+    <td class="num {{ cls }}">{% if editable %}<input class="gin" type="number" step="any" min="0" data-line="{{ l.id }}" data-field="retailer_buy_ex" value="{{ l.retailer_buy_ex }}">{% else %}{{ l.retailer_buy_ex|money }}{% endif %}</td>
+  {%- elif key == 'pct' -%}
+    <td class="num {{ cls }}">{% if editable %}<input class="gin pct" type="number" step="any" min="0" max="100" data-line="{{ l.id }}" data-field="pct_off" value="{{ (l.pct_off * 100)|round(4) }}">{% else %}{{ l.pct_off|pct }}{% endif %}
+      {%- if l.support_basis == 'margin' %} <span class="muted" title="Support set to target promo margin {{ (l.target_margin * 100)|round(2) if l.target_margin is not none else '?' }}%">⌖</span>{% elif l.support_basis == 'cogs' %} <span class="muted" title="Support = % off cost (supplier {{ (l.cogs_supplier_pct * 100)|round(2) if l.cogs_supplier_pct is not none else 0 }}% + MacGear {{ (l.cogs_mg_pct * 100)|round(2) if l.cogs_mg_pct is not none else 0 }}% of buy ex)">⊘</span>{% endif %}</td>
+  {%- elif key == 'price' -%}<td class="num {{ cls }}">{{ c.rec_sale_inc|money }}</td>
+  {%- elif key == 'ssup' -%}<td class="num {{ cls }}">{{ c.supplier_support|money }}</td>
+  {%- elif key == 'msup' -%}<td class="num {{ cls }}">{{ c.mg_support|money }}</td>
+  {%- elif key == 'tsup' -%}<td class="num {{ cls }}">{{ c.total_support|money }}</td>
+  {%- elif key == 'std' -%}<td class="num {{ cls }}">{{ c.std_margin|pct }}</td>
+  {%- elif key == 'pmg' -%}<td class="num {{ cls }}">{{ c.promo_margin|pct }}</td>
+  {%- elif key == 'avg' -%}
+    <td class="num {{ cls }}"><input class="gin{{ ' hand' if l.avg_6wk_source == 'Entered by hand' }}" type="number" step="any" min="0" data-line="{{ l.id }}" data-field="avg_6wk" value="{{ l.avg_6wk if l.avg_6wk is not none else '' }}" title="{{ l.avg_6wk_source or 'No sell-through figure — type one in' }}"></td>
+  {%- elif key == 'exp' -%}<td class="num {{ cls }}" title="{{ lv.weeks|round(1) }} wks">{{ c.expected_sales|money }}</td>
+  {%- elif key == 'act' -%}
+    <td class="num {{ cls }}{% if l.actual_sales is not none and c.expected_sales is not none %}{{ ' cell-up' if l.actual_sales > c.expected_sales else (' cell-down' if l.actual_sales < c.expected_sales) }}{% endif %}"><input class="gin" type="number" step="any" min="0" data-line="{{ l.id }}" data-field="actual_sales" value="{{ l.actual_sales if l.actual_sales is not none else '' }}"></td>
+  {%- elif key == 'sclaim' -%}<td class="num {{ cls }}">{{ c.supplier_claim|money }}</td>
+  {%- elif key == 'mclaim' -%}<td class="num {{ cls }}">{{ c.mg_claim|money }}</td>
+  {%- elif key == 'tools' -%}
+    <td class="rowactions {{ cls }}">
+      <button type="button" class="link" title="More settings: description, RRP, support basis, growth, funding split" onclick="openLine({{ l.id }})">✎</button>
+      <form method="post" action="/line/{{ l.id }}/delete" data-confirm="Take {{ l.product_code or 'this line' }} off this retailer?" data-confirm-ok="Remove"><button class="link danger" title="Remove from this retailer">✕</button></form>
+    </td>
+  {%- endif -%}
+{%- endmacro %}
+
+{% if pv.retailers %}
+<div class="grid-tools">
+  <button type="button" class="link" data-expand="all">expand all</button> ·
+  <button type="button" class="link" data-expand="none">collapse all</button>
+  <span class="hint">Click a retailer's name to expand or collapse it.{% if editable %} Type in the boxes — each saves as you leave it; Enter moves down.{% endif %}</span>
+</div>
+<div class="pgrid-wrap">
+<table class="grid pgrid" data-promo="{{ promo.id }}">
+  <thead>
+    <tr class="grp">
+      <th class="stick s1" rowspan="2">Code</th>
+      <th class="stick s2" rowspan="2">Description</th>
+      <th class="num" rowspan="2">RRP</th>
+      <th rowspan="2">From</th><th rowspan="2">To</th>
+      {% for rv in pv.retailers %}{% set pr = rv.pr %}
+        <th class="ghead full g{{ pr.id }}" colspan="{{ cols|length }}" data-pr="{{ pr.id }}">
+          <button type="button" class="gtoggle" data-pr="{{ pr.id }}" title="Collapse">▾ {{ pr.retailer_name }}</button>
+          <small class="muted">rebate {{ pr.rebate|pct }}</small>
+          {% if editable %}<button type="button" class="link gadd" data-pr="{{ pr.id }}" title="Paste products for {{ pr.retailer_name }} only">+ products</button>{% endif %}
+        </th>
+        <th class="ghead mini g{{ pr.id }}" colspan="{{ mini|length }}" data-pr="{{ pr.id }}">
+          <button type="button" class="gtoggle" data-pr="{{ pr.id }}" title="Expand">▸ {{ pr.retailer_name }}</button>
+        </th>
+      {% endfor %}
+      {% if editable %}<th rowspan="2"></th>{% endif %}
+    </tr>
+    <tr class="cols">
+      {% for rv in pv.retailers %}{% set pr = rv.pr %}
+        {% for k, label in cols %}<th class="num full g{{ pr.id }}{{ ' gstart' if loop.first }}">{{ label }}</th>{% endfor %}
+        {% for k, label in mini %}<th class="num mini g{{ pr.id }}{{ ' gstart' if loop.first }}">{{ label }}</th>{% endfor %}
+      {% endfor %}
+    </tr>
+  </thead>
+  <tbody>
+  {% for row in pv.products %}
+    <tr>
+      <td class="stick s1 code">{{ row.code }}</td>
+      <td class="stick s2 desc">{{ row.description }}</td>
+      <td class="num">{{ row.rrp_inc|money }}</td>
+      {% if editable %}
+        <td class="pdate{{ ' own' if row.own_dates }}"><input type="date" class="pd" data-key="{{ row.key }}" data-which="start" value="{{ row.start }}"></td>
+        <td class="pdate{{ ' own' if row.own_dates }}"><input type="date" class="pd" data-key="{{ row.key }}" data-which="end" value="{{ row.end }}"></td>
+      {% else %}
+        <td class="pdate{{ ' own' if row.own_dates }}">{{ row.start.strftime('%d/%m/%Y') }}</td>
+        <td class="pdate{{ ' own' if row.own_dates }}">{{ row.end.strftime('%d/%m/%Y') }}</td>
+      {% endif %}
+      {% for rv in pv.retailers %}{% set pr = rv.pr %}{% set lv = row.cells.get(pr.id) %}
+        {% if lv %}
+          {% for k, label in cols %}{{ cell(k, lv, 'full g' ~ pr.id ~ (' gstart' if loop.first else ''), editable) }}{% endfor %}
+          {% for k, label in mini %}{{ cell(k, lv,'mini g' ~ pr.id ~ (' gstart' if loop.first else ''), editable) }}{% endfor %}
+        {% else %}
+          <td class="none full g{{ pr.id }} gstart" colspan="{{ cols|length }}">{% if editable and row.code %}<form method="post" action="/promo/{{ promo.id }}/products" class="addone"><input type="hidden" name="codes" value="{{ row.code }}"><input type="hidden" name="pr" value="{{ pr.id }}"><button class="link" title="Add {{ row.code }} to {{ pr.retailer_name }}">+ add</button></form>{% else %}—{% endif %}</td>
+          <td class="none mini g{{ pr.id }} gstart" colspan="{{ mini|length }}">—</td>
+        {% endif %}
+      {% endfor %}
+      {% if editable %}
+        <td class="rowactions"><form method="post" action="/promo/{{ promo.id }}/product_delete" data-confirm="Take {{ row.code or 'this product' }} off the promotion for every retailer?" data-confirm-ok="Remove"><input type="hidden" name="key" value="{{ row.key }}"><button class="link danger" title="Remove from every retailer">✕</button></form></td>
+      {% endif %}
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="muted">No products yet{% if editable %} — paste some codes above{% endif %}.</td>
+      {% for rv in pv.retailers %}<td class="full g{{ rv.pr.id }}" colspan="{{ cols|length }}"></td><td class="mini g{{ rv.pr.id }}" colspan="{{ mini|length }}"></td>{% endfor %}
+      {% if editable %}<td></td>{% endif %}</tr>
+  {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr class="totrow">
+      <td class="stick s1">Totals</td><td class="stick s2"></td><td colspan="3"></td>
+      {% for rv in pv.retailers %}{% set pr = rv.pr %}
+        {% for k, label in cols %}<td class="num full g{{ pr.id }}{{ ' gstart' if loop.first }}">
+          {%- if k == 'sclaim' %}{{ rv.supplier_total|money }}{% elif k == 'mclaim' %}{{ rv.mg_total|money }}{% elif k == 'tsup' and view == 'sales' %}{{ rv.total_support_total|money }}{% endif -%}
+        </td>{% endfor %}
+        {% for k, label in mini %}<td class="num mini g{{ pr.id }}{{ ' gstart' if loop.first }}">
+          {%- if k == 'sclaim' %}{{ rv.supplier_total|money }}{% endif -%}
+        </td>{% endfor %}
+      {% endfor %}
+      {% if editable %}<td></td>{% endif %}
+    </tr>
+  </tfoot>
+</table>
+</div>
+
+{% if editable %}
+{# the rarer per-line settings, one dialog per line #}
+{% for rv in pv.retailers %}{% set pr = rv.pr %}
+{% for lv in rv.lines %}{% set l = lv.line %}
+<dialog class="linedlg" id="line-{{ l.id }}">
+  <h3>{{ l.product_code }} · {{ pr.retailer_name }}</h3>
+  <form method="post" action="/line/{{ l.id }}/edit" class="inline-form editline">
+    <label>Code <input name="product_code" class="code" value="{{ l.product_code }}" style="width:9em"></label>
+    <label class="grow">Description <input name="description" class="desc" value="{{ l.description }}"></label>
+    <label>RRP inc <input name="rrp_inc" type="number" step="any" min="0" value="{{ l.rrp_inc if l.rrp_inc is not none else '' }}" style="width:7em"></label>
+    <label>Buy ex <input name="retailer_buy_ex" type="number" step="any" min="0" value="{{ l.retailer_buy_ex }}" style="width:7em"></label>
+    <label>% off <input name="pct_off" type="number" step="any" min="0" max="100" value="{{ (l.pct_off * 100)|round(6) }}" style="width:6em"></label>
+    <label>Promo price <input class="pp" type="number" step="any" min="0" value="{{ (l.rrp_inc * (1 - l.pct_off))|round(2) if l.rrp_inc is not none else '' }}" style="width:7em" title="RRP less % off — enter either one"></label>
+    <label>Support basis
+      <select name="support_basis" class="basis">
+        <option value="pct_off" {{ 'selected' if (l.support_basis or 'pct_off') == 'pct_off' }}>% off (discount)</option>
+        <option value="margin" {{ 'selected' if l.support_basis == 'margin' }}>Target promo margin</option>
+        <option value="cogs" {{ 'selected' if l.support_basis == 'cogs' }}>% off cost (COGS)</option>
+      </select>
+    </label>
+    <label class="tgt-wrap">Target promo % <input name="target_margin" class="tgt" type="number" step="any" value="{{ (l.target_margin * 100)|round(4) if l.target_margin is not none else '' }}" style="width:6em" title="Support is back-solved to hit this end-to-end promo margin"></label>
+    <label class="cogs-wrap">Supplier % off cost <input name="cogs_supplier_pct" class="csp" type="number" step="any" min="0" value="{{ (l.cogs_supplier_pct * 100)|round(4) if l.cogs_supplier_pct is not none else '' }}" style="width:6em" title="Supplier funds this % of the buy-ex (gross)"></label>
+    <label class="cogs-wrap">MacGear % off cost <input name="cogs_mg_pct" class="cmp" type="number" step="any" min="0" value="{{ (l.cogs_mg_pct * 100)|round(4) if l.cogs_mg_pct is not none else '' }}" style="width:6em" title="MacGear funds this % of the buy-ex (gross)"></label>
+    <label>6wk avg <input name="avg_6wk" type="number" step="any" min="0" value="{{ l.avg_6wk if l.avg_6wk is not none else '' }}" style="width:7em"></label>
+    <label>Actual sales <input name="actual_sales" type="number" step="any" min="0" value="{{ l.actual_sales if l.actual_sales is not none else '' }}" style="width:7em"></label>
+    <label>Growth <input name="growth" type="number" step="any" placeholder="def {{ promo.growth_default }}" value="{{ l.growth if l.growth is not none else '' }}" style="width:6em"></label>
+    {% set overridden = (l.ratio_supplier is not none or l.ratio_mg is not none or l.ratio_retailer is not none) %}
+    {% set es = l.ratio_supplier if l.ratio_supplier is not none else promo.ratio_supplier %}
+    {% set em = l.ratio_mg if l.ratio_mg is not none else promo.ratio_mg %}
+    {% set er = l.ratio_retailer if l.ratio_retailer is not none else promo.ratio_retailer %}
+    <fieldset class="split-group">
+      <legend>Funding split</legend>
+      <label class="chk"><input type="checkbox" name="override_split" class="ovr" {{ 'checked' if overridden }}> Override (else uses promo default)</label>
+      <label>Supplier <input name="ratio_supplier" class="rs" type="number" step="any" min="0" max="1" value="{{ es }}" style="width:6em" {{ 'disabled' if not overridden }}></label>
+      <label>MacGear <input name="ratio_mg" class="rm" type="number" step="any" min="0" max="1" value="{{ em }}" style="width:6em" {{ 'disabled' if not overridden }}></label>
+      <label>Retailer <input name="ratio_retailer" class="rr" type="number" step="any" value="{{ er }}" style="width:6em" readonly title="auto = 1 − supplier − MacGear"></label>
+      <span class="split-total"></span>
+    </fieldset>
+    <button class="btn small">Save</button>
+    <button type="button" class="link" onclick="this.closest('dialog').close()">cancel</button>
+  </form>
+</dialog>
+{% endfor %}{% endfor %}
+{% endif %}
+{% endif %}

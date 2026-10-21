@@ -22,13 +22,13 @@ six LOADED weeks ending before the promo starts, so a retailer whose latest file
 hasn't arrived still gets an average (from the weeks it has), zero weeks count.
 Filled when a line is added and stored on it; "Refresh" re-pulls it.
 """
+import re
 from dataclasses import dataclass
 from datetime import date, timedelta
 
 from . import warehouse
 
 ENTRIES_TTL = 60 * 60            # price levels / customers load daily
-ITEM_TTL = 10 * 60
 
 _CURRENCY = {"AU": "AUD", "NZ": "NZD"}
 # Levels that are not a customer's buy price.
@@ -139,35 +139,72 @@ def default_rebate(entry: RetailerEntry, rebate_list) -> float:
 
 
 # ---- items -------------------------------------------------------------------
-def _build_item(code: str, country: str, level_id):
-    rows = warehouse.query(
-        """select i.macgear_code, i.description, i.brand, i.aud_rrp, i.nzd_rrp,
-                  i.au_status, i.nz_status,
-                  (select p.unit_price from reporting.dim_item_price p
-                   where p.ns_item_id = i.ns_item_id and p.price_level_id = %s
-                     and p.currency_code = %s)
-           from reporting.dim_item i
-           where upper(i.macgear_code) = upper(%s)
-           order by (i.ns_item_id is null), i.is_matched desc, i.item_key
-           limit 1""", (level_id, _CURRENCY[country], code))
-    if not rows:
-        return None
-    c, desc, brand, aud_rrp, nzd_rrp, au_status, nz_status, buy = rows[0]
-    rrp = nzd_rrp if country == "NZ" else aud_rrp
-    return {"code": c, "description": desc or "", "brand": brand or "",
-            "rrp_inc": float(rrp) if rrp is not None else None,
-            "status": (nz_status if country == "NZ" else au_status) or "",
-            "retailer_buy_ex": float(buy) if buy is not None else None}
+def items(codes, country: str, level_ids) -> dict:
+    """Item master for many codes at once, with each code's buy price (ex GST) at
+    each of the given price levels. {upper(code): {"code", "description", "brand",
+    "rrp_inc", "status", "prices": {level_id: price}}}; codes not in NetSuite are
+    absent. One round trip each for items and prices. Raises WarehouseUnavailable."""
+    country = (country or "AU").upper()
+    wanted = sorted({(c or "").strip().upper() for c in codes if (c or "").strip()})
+    if not wanted:
+        return {}
+    out, ns_ids = {}, {}
+    for (c, desc, brand, aud_rrp, nzd_rrp, au_status, nz_status, ns_id) in warehouse.query(
+            """select i.macgear_code, i.description, i.brand, i.aud_rrp, i.nzd_rrp,
+                      i.au_status, i.nz_status, i.ns_item_id
+               from reporting.dim_item i
+               where upper(i.macgear_code) = any(%s)
+               order by (i.ns_item_id is null), i.is_matched desc, i.item_key""", (wanted,)):
+        key = c.upper()
+        if key in out:                    # first row per code wins (NetSuite, matched)
+            continue
+        rrp = nzd_rrp if country == "NZ" else aud_rrp
+        out[key] = {"code": c, "description": desc or "", "brand": brand or "",
+                    "rrp_inc": float(rrp) if rrp is not None else None,
+                    "status": (nz_status if country == "NZ" else au_status) or "",
+                    "prices": {}}
+        if ns_id is not None:
+            ns_ids[ns_id] = key
+    levels = sorted({l for l in level_ids if l is not None})
+    if ns_ids and levels:
+        for ns_id, lid, price in warehouse.query(
+                """select ns_item_id, price_level_id, unit_price from reporting.dim_item_price
+                   where ns_item_id = any(%s) and price_level_id = any(%s)
+                     and currency_code = %s and unit_price is not null""",
+                (list(ns_ids), levels, _CURRENCY[country])):
+            out[ns_ids[ns_id]]["prices"][lid] = float(price)
+    return out
 
 
-def item(code: str, country: str, level_id: int | None = None) -> dict | None:
-    """Item master + this price level's buy price (ex GST), or None if the code
-    isn't in NetSuite. Raises WarehouseUnavailable."""
-    code, country = (code or "").strip(), (country or "AU").upper()
-    if not code:
-        return None
-    return warehouse.cached(("promo_item", code.upper(), country, level_id),
-                            lambda: _build_item(code, country, level_id), ttl=ITEM_TTL)
+def parse_paste(text: str):
+    """Rows pasted from Excel (or typed): one product per line, code first, an
+    optional second column = % off ("20", "20%", or 0.2 as Excel copies a
+    percent-formatted cell's raw value). Returns ([(code, pct_or_None)], [bad lines]);
+    a code pasted twice keeps its first row."""
+    rows, bad, seen = [], [], set()
+    for raw in (text or "").splitlines():
+        parts = [p.strip() for p in re.split(r"[\t,;]", raw) if p.strip()]
+        if len(parts) == 1 and " " in parts[0]:
+            parts = parts[0].split()          # "CODE 20" typed with a space
+        if not parts:
+            continue
+        code, pct = parts[0], None
+        if len(parts) > 1:
+            v = parts[1].replace("%", "").strip()
+            try:
+                pct = float(v)
+            except ValueError:
+                bad.append(raw.strip())
+                continue
+            if "%" not in parts[1] and 0 < pct < 1:
+                pct *= 100                    # 0.2 -> 20%
+            if not 0 <= pct <= 100:
+                bad.append(raw.strip())
+                continue
+        if code.upper() not in seen:
+            seen.add(code.upper())
+            rows.append((code, pct))
+    return rows, bad
 
 
 # ---- 6-week average ------------------------------------------------------------

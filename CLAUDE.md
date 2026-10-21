@@ -471,6 +471,21 @@ code), buy price = `dim_item_price` for the block's price level, RRP = level 1.
   averages and buy prices equal.
 - `/api/product` is now under the promos area in `_TOOL_PATHS` (it returns buy prices
   and sell-through; before, any staff login could call it).
+- **The promo page is a grid (user, 2026-10-21, from their Excel promo form):** products
+  = rows (`service.ProductRow`, keyed by upper(code)), each retailer block = a column group
+  (`templates/_promo_grid.html`), collapsible per browser (`localStorage promo-open-<id>`).
+  Buy ex / % off / 6wk avg / actual sales are typed in the grid → `POST /line/{id}/set`
+  (JSON), then the page re-fetches itself and swaps `#promo-live` (totals, grid, customer
+  cards, vendor request) keeping focus — numbers are only ever computed server-side.
+  ✎ = the old line form in a `<dialog>`. Products are added by paste
+  (`POST /promo/{id}/products`, `promo_data.parse_paste` + `items()` — two queries for
+  the whole paste) to the ticked blocks; codes not in NetSuite are skipped and listed.
+  The old one-line add form, `/api/product` and copy-from are gone.
+- **Per-product dates:** `line_items.start_date/end_date` (NULL = the promo's), kept
+  equal on every line of a code (`_set_product_dates`); a line's weeks = its own window
+  (`service.line_dates`) and its 6wk-avg window ends before its own start. Moving a
+  product's or the promo's start re-pulls sell-through avgs, never hand-typed ones.
+  The export has From / To columns.
 - **Not yet removed:** the n8n nightly pricing push → `/admin/sync-pricing` →
   `products` still runs but nothing reads `products` any more. Retire the n8n
   workflow, then the endpoint, `pricing_sync.py`, the product seed and the

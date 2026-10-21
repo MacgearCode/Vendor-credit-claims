@@ -9,6 +9,12 @@ st_weekly, field, items, st_table, sell_through, promos, vendor_bills) or
 Add an entry with every commit people would notice. Everything above the first
 "##" is ignored.
 
+## 2026-10-21 | Vendor Promos: paste products, side-by-side retailers | promos
+- Paste a list of product codes from Excel (a second column can be the % off) and tick which retailers get them — or use "+ products" on one retailer, or "+ add" in an empty cell.
+- The promo page is now one grid: products down the side, each retailer as a group of columns you can collapse and expand.
+- Type buy ex, % off, 6wk avg and actual sales straight into the grid; it saves as you go and the totals update.
+- Products can have their own From / To dates; expected sales use that product's dates.
+
 ## 2026-10-21 | Vendor Promos: 6wk avg fills itself | promos
 - Typing a SKU on a promo now fills the 6wk avg from the retailer's own sell-through (its last six weeks loaded before the promo starts), as well as the description, RRP and buy price.
 - If a retailer's latest week isn't in yet, the six weeks before it are used. Hover a 6wk avg to see where it came from; type over it to use your own figure.

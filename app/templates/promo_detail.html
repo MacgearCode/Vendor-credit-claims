@@ -10,8 +10,16 @@
 <div class="banner error">Dates not saved — the end date can't be before the start date.</div>
 {% elif request.query_params.get('err') == 'warehouse' %}
 <div class="banner error">The reporting warehouse couldn't be reached, so item details, buy prices and the 6wk avg weren't filled in. Enter them by hand or try again shortly.</div>
+{% elif request.query_params.get('err') == 'paste' %}
+<div class="banner error">Nothing added — paste at least one product code and tick at least one retailer.</div>
 {% elif request.query_params.get('err') == 'no_st' %}
 <div class="banner error">That retailer doesn't send sell-through, so there's no 6wk avg to pull — enter it by hand.</div>
+{% endif %}
+{% set qp = request.query_params %}
+{% if qp.get('added') is not none %}
+<div class="banner ok">Added {{ qp.get('added') }} line{{ '' if qp.get('added') == '1' else 's' }}{% if qp.get('updated', '0') != '0' %}; updated % off on {{ qp.get('updated') }} already there{% endif %}.
+  {% if qp.get('missing') %}<br>Not in NetSuite, skipped: <strong>{{ qp.get('missing') }}</strong>{% endif %}
+  {% if qp.get('bad') %}<br>{{ qp.get('bad') }} line{{ 's' if qp.get('bad') != '1' }} had a % off that isn't a number from 0 to 100 and {{ 'were' if qp.get('bad') != '1' else 'was' }} skipped.{% endif %}</div>
 {% endif %}
 
 <div class="head-row">
@@ -58,15 +66,6 @@
 </div>
 {% endif %}
 
-<section class="totals">
-  <div class="kpi"><span>Customer expected claim</span><strong>${{ pv.customer_expected_aud|money }}</strong></div>
-  {% if view != 'vendor' %}
-  <div class="kpi"><span>MacGear absorbs</span><strong>${{ pv.mg_total_aud|money }}</strong></div>
-  {% endif %}
-  <div class="kpi accent"><span>Vendor claim ({{ cur }})</span><strong>${{ pv.supplier_total_aud|money }}</strong></div>
-  <div class="kpi"><span>Vendor claim (USD @ {{ promo.aud_usd_rate }})</span><strong>${{ pv.supplier_total_usd|money }}</strong></div>
-</section>
-
 <section class="card workflow">
   <form method="post" action="/promo/{{ promo.id }}/status" class="inline-form">
     <label>Promo status
@@ -79,226 +78,71 @@
   </form>
 </section>
 
+{% if editable %}
+<details class="card addproducts" id="addproducts"{{ ' open' if not pv.products }}>
+  <summary>+ Add products</summary>
+  {% if pv.retailers %}
+  <form method="post" action="/promo/{{ promo.id }}/products" class="addprod-form">
+    <label class="paste">Product codes — one per line, pasted from Excel or typed. A second column is the % off (optional).
+      <textarea name="codes" rows="6" placeholder="ELK-80150-R&#9;20&#10;ELK-80151-R&#9;20&#10;ELK-80152-R" required></textarea>
+    </label>
+    <div class="addprod-side">
+      <fieldset>
+        <legend>Add to</legend>
+        {% for rv in pv.retailers %}
+        <label class="chk"><input type="checkbox" name="pr" value="{{ rv.pr.id }}" checked> {{ rv.pr.retailer_name }}</label>
+        {% endfor %}
+        <span class="hint"><button type="button" class="link" data-tick="all">all</button> · <button type="button" class="link" data-tick="none">none</button></span>
+      </fieldset>
+      <fieldset>
+        <legend>Dates for these products (blank = the promo's {{ promo.start_date.strftime('%d/%m') }}–{{ promo.end_date.strftime('%d/%m') }})</legend>
+        <label>From <input type="date" name="start_date" min="{{ promo.start_date }}"></label>
+        <label>To <input type="date" name="end_date"></label>
+      </fieldset>
+      <button class="btn small">Add products</button>
+    </div>
+  </form>
+  <p class="hint">Each line gets that retailer's buy price and 6wk avg. A product already on a
+     retailer is left as it is, except a pasted % off updates it. Codes not in NetSuite are skipped.</p>
+  {% else %}
+  <p class="hint">Add a retailer first (bottom of the page).</p>
+  {% endif %}
+</details>
+{% endif %}
+
+<div id="promo-live">
+<section class="totals">
+  <div class="kpi"><span>Customer expected claim</span><strong>${{ pv.customer_expected_aud|money }}</strong></div>
+  {% if view != 'vendor' %}
+  <div class="kpi"><span>MacGear absorbs</span><strong>${{ pv.mg_total_aud|money }}</strong></div>
+  {% endif %}
+  <div class="kpi accent"><span>Vendor claim ({{ cur }})</span><strong>${{ pv.supplier_total_aud|money }}</strong></div>
+  <div class="kpi"><span>Vendor claim (USD @ {{ promo.aud_usd_rate }})</span><strong>${{ pv.supplier_total_usd|money }}</strong></div>
+</section>
+
+<section class="card promogrid">
+  {% include "_promo_grid.html" %}
+</section>
+
+{% if pv.retailers %}
+<h2 class="custhead">Customers</h2>
+<div class="custcards">
 {% for rv in pv.retailers %}
 {% set pr = rv.pr %}
 <section class="card retailer" id="pr{{ pr.id }}">
   <div class="head-row">
-    <h2>{{ pr.retailer_name }} <small class="muted">rebate {{ pr.rebate|pct }}</small></h2>
+    <h2>{{ pr.retailer_name }} <small class="muted">rebate {{ pr.rebate|pct }} · {{ rv.lines|length }} product{{ 's' if rv.lines|length != 1 }}</small></h2>
     {% if editable %}
     {% if rv.lines %}
-    <form method="post" action="/retailer/{{ pr.id }}/refresh_avg" data-confirm="Replace every line's 6wk avg in this block with the latest sell-through (hand-entered figures included)?" data-confirm-ok="Refresh">
+    <form method="post" action="/retailer/{{ pr.id }}/refresh_avg" data-confirm="Replace every line's 6wk avg for {{ pr.retailer_name }} with the latest sell-through (hand-entered figures included)?" data-confirm-ok="Refresh">
       <button class="link" title="Re-pull each line's 6wk avg from this retailer's sell-through">refresh 6wk avg</button>
     </form>
     {% endif %}
-    <form method="post" action="/retailer/{{ pr.id }}/delete" data-confirm="Remove this retailer block and all its lines?" data-confirm-ok="Remove">
+    <form method="post" action="/retailer/{{ pr.id }}/delete" data-confirm="Remove {{ pr.retailer_name }} and all its lines?" data-confirm-ok="Remove">
       <button class="link danger">remove retailer</button>
     </form>
     {% endif %}
   </div>
-
-  <div class="lines-wrap">
-  <table class="grid lines">
-    <thead>
-      <tr>
-        <th>Code</th><th>Description</th>
-        {% if view == 'vendor' %}
-          <th class="num">Supplier Support</th><th class="num">Exp Sales</th><th class="num">Supplier Claim</th>
-          <th class="num">RRP</th><th class="num">% Off</th><th class="num">Promo Price</th>
-        {% elif view == 'sales' %}
-          <th class="num">Buy ex</th><th class="num">Total Support</th>
-          <th class="num">Std Mgn</th><th class="num">Promo Mgn</th><th class="num">Exp Sales</th>
-          <th class="num">RRP</th><th class="num">% Off</th><th class="num">Promo Price</th>
-        {% else %}
-          <th class="num">Buy ex</th>
-          <th class="num">Supp Sup</th><th class="num">MG Sup</th><th class="num">Tot Sup</th>
-          <th class="num">Std Mgn</th><th class="num">Promo Mgn</th>
-          <th class="num">6wk Avg</th><th class="num">Exp Sales</th><th class="num">Actual Sales</th>
-          <th class="num">Supp Claim</th><th class="num">MG Claim</th>
-          <th class="num">RRP</th><th class="num">% Off</th><th class="num">Promo Price</th><th></th>
-        {% endif %}
-      </tr>
-    </thead>
-    <tbody>
-    {% for lv in rv.lines %}{% set l = lv.line %}{% set c = lv.result %}
-      <tr>
-        <td>{{ l.product_code }}</td><td>{{ l.description }}</td>
-        {% if view == 'vendor' %}
-          <td class="num">{{ c.supplier_support|money }}</td>
-          <td class="num">{{ c.expected_sales|money }}</td>
-          <td class="num">{{ c.supplier_claim|money }}</td>
-          <td class="num">{{ l.rrp_inc|money }}</td>
-          <td class="num">{{ l.pct_off|pct }}</td>
-          <td class="num">{{ c.rec_sale_inc|money }}</td>
-        {% elif view == 'sales' %}
-          <td class="num">{{ l.retailer_buy_ex|money }}</td>
-          <td class="num">{{ c.total_support|money }}</td>
-          <td class="num">{{ c.std_margin|pct }}</td>
-          <td class="num">{{ c.promo_margin|pct }}</td>
-          <td class="num">{{ c.expected_sales|money }}</td>
-          <td class="num">{{ l.rrp_inc|money }}</td>
-          <td class="num">{{ l.pct_off|pct }}</td>
-          <td class="num">{{ c.rec_sale_inc|money }}</td>
-        {% else %}
-          <td class="num">{{ l.retailer_buy_ex|money }}</td>
-          <td class="num">{{ c.supplier_support|money }}</td>
-          <td class="num">{{ c.mg_support|money }}</td>
-          <td class="num">{{ c.total_support|money }}</td>
-          <td class="num">{{ c.std_margin|pct }}</td>
-          <td class="num">{{ c.promo_margin|pct }}</td>
-          <td class="num"{% if l.avg_6wk_source %} title="{{ l.avg_6wk_source }}"{% endif %}>{{ l.avg_6wk if l.avg_6wk is not none else '' }}</td>
-          <td class="num">{{ c.expected_sales|money }}</td>
-          <td class="num{% if l.actual_sales is not none and c.expected_sales is not none %}{{ ' cell-up' if l.actual_sales > c.expected_sales else (' cell-down' if l.actual_sales < c.expected_sales) }}{% endif %}">{{ l.actual_sales if l.actual_sales is not none else '' }}</td>
-          <td class="num">{{ c.supplier_claim|money }}</td>
-          <td class="num">{{ c.mg_claim|money }}</td>
-          <td class="num">{{ l.rrp_inc|money }}</td>
-          <td class="num">{{ l.pct_off|pct }}{% if l.support_basis == 'margin' %} <span class="muted" title="Support set to target promo margin {{ (l.target_margin * 100)|round(2) if l.target_margin is not none else '?' }}%">⌖</span>{% elif l.support_basis == 'cogs' %} <span class="muted" title="Support = % off cost (supplier {{ (l.cogs_supplier_pct * 100)|round(2) if l.cogs_supplier_pct is not none else 0 }}% + MacGear {{ (l.cogs_mg_pct * 100)|round(2) if l.cogs_mg_pct is not none else 0 }}% of buy ex)">⊘</span>{% endif %}</td>
-          <td class="num">{{ c.rec_sale_inc|money }}</td>
-          <td class="rowactions">
-            <button type="button" class="link" title="edit" onclick="toggleEdit({{ l.id }})">✎</button>
-            <form method="post" action="/line/{{ l.id }}/delete"><button class="link danger" title="delete">✕</button></form>
-          </td>
-        {% endif %}
-      </tr>
-      {% if editable %}
-      <tr class="editrow" id="edit-{{ l.id }}" hidden>
-        <td colspan="17">
-          <form method="post" action="/line/{{ l.id }}/edit" class="inline-form editline" data-retailer="{{ pr.retailer_name }}">
-            <label>Code <input name="product_code" class="code" value="{{ l.product_code }}" style="width:9em"></label>
-            <label class="grow">Description <input name="description" class="desc" value="{{ l.description }}"></label>
-            <label>RRP inc <input name="rrp_inc" type="number" step="any" min="0" value="{{ l.rrp_inc if l.rrp_inc is not none else '' }}" style="width:7em"></label>
-            <label>Buy ex <input name="retailer_buy_ex" type="number" step="any" min="0" value="{{ l.retailer_buy_ex }}" style="width:7em"></label>
-            <label>% off <input name="pct_off" type="number" step="any" min="0" max="100" value="{{ (l.pct_off * 100)|round(6) }}" style="width:6em"></label>
-            <label>Promo price <input class="pp" type="number" step="any" min="0" value="{{ (l.rrp_inc * (1 - l.pct_off))|round(2) if l.rrp_inc is not none else '' }}" style="width:7em" title="RRP less % off — enter either one"></label>
-            <label>Support basis
-              <select name="support_basis" class="basis">
-                <option value="pct_off" {{ 'selected' if (l.support_basis or 'pct_off') == 'pct_off' }}>% off (discount)</option>
-                <option value="margin" {{ 'selected' if l.support_basis == 'margin' }}>Target promo margin</option>
-                <option value="cogs" {{ 'selected' if l.support_basis == 'cogs' }}>% off cost (COGS)</option>
-              </select>
-            </label>
-            <label class="tgt-wrap">Target promo % <input name="target_margin" class="tgt" type="number" step="any" value="{{ (l.target_margin * 100)|round(4) if l.target_margin is not none else '' }}" style="width:6em" title="Support is back-solved to hit this end-to-end promo margin"></label>
-            <label class="cogs-wrap">Supplier % off cost <input name="cogs_supplier_pct" class="csp" type="number" step="any" min="0" value="{{ (l.cogs_supplier_pct * 100)|round(4) if l.cogs_supplier_pct is not none else '' }}" style="width:6em" title="Supplier funds this % of the buy-ex (gross)"></label>
-            <label class="cogs-wrap">MacGear % off cost <input name="cogs_mg_pct" class="cmp" type="number" step="any" min="0" value="{{ (l.cogs_mg_pct * 100)|round(4) if l.cogs_mg_pct is not none else '' }}" style="width:6em" title="MacGear funds this % of the buy-ex (gross)"></label>
-            <label>6wk avg <input name="avg_6wk" type="number" step="any" min="0" value="{{ l.avg_6wk if l.avg_6wk is not none else '' }}" style="width:7em"></label>
-            <label>Actual sales <input name="actual_sales" type="number" step="any" min="0" value="{{ l.actual_sales if l.actual_sales is not none else '' }}" style="width:7em"></label>
-            <label>Growth <input name="growth" type="number" step="any" placeholder="def {{ promo.growth_default }}" value="{{ l.growth if l.growth is not none else '' }}" style="width:6em"></label>
-            {% set overridden = (l.ratio_supplier is not none or l.ratio_mg is not none or l.ratio_retailer is not none) %}
-            {% set es = l.ratio_supplier if l.ratio_supplier is not none else promo.ratio_supplier %}
-            {% set em = l.ratio_mg if l.ratio_mg is not none else promo.ratio_mg %}
-            {% set er = l.ratio_retailer if l.ratio_retailer is not none else promo.ratio_retailer %}
-            <fieldset class="split-group">
-              <legend>Funding split</legend>
-              <label class="chk"><input type="checkbox" name="override_split" class="ovr" {{ 'checked' if overridden }}> Override (else uses promo default)</label>
-              <label>Supplier <input name="ratio_supplier" class="rs" type="number" step="any" min="0" max="1" value="{{ es }}" style="width:6em" {{ 'disabled' if not overridden }}></label>
-              <label>MacGear <input name="ratio_mg" class="rm" type="number" step="any" min="0" max="1" value="{{ em }}" style="width:6em" {{ 'disabled' if not overridden }}></label>
-              <label>Retailer <input name="ratio_retailer" class="rr" type="number" step="any" value="{{ er }}" style="width:6em" readonly title="auto = 1 − supplier − MacGear"></label>
-              <span class="split-total"></span>
-            </fieldset>
-            <button class="btn small">Save</button>
-            <button type="button" class="link" onclick="toggleEdit({{ l.id }})">cancel</button>
-          </form>
-        </td>
-      </tr>
-      {% endif %}
-    {% else %}
-      <tr><td colspan="17" class="muted">No line items yet.</td></tr>
-    {% endfor %}
-    </tbody>
-    <tfoot>
-      <tr class="totrow">
-        <td colspan="2">Totals</td>
-        {% if view == 'vendor' %}
-          <td></td><td></td><td class="num">{{ rv.supplier_total|money }}</td><td colspan="3"></td>
-        {% elif view == 'sales' %}
-          <td></td><td class="num">{{ rv.total_support_total|money }}</td><td colspan="6"></td>
-        {% else %}
-          <td colspan="9"></td>
-          <td class="num">{{ rv.supplier_total|money }}</td>
-          <td class="num">{{ rv.mg_total|money }}</td>
-          <td colspan="4"></td>
-        {% endif %}
-      </tr>
-    </tfoot>
-  </table>
-  </div>
-
-  {% if editable %}
-  <details class="addline">
-    <summary>+ Add line item</summary>
-    <form method="post" action="/retailer/{{ pr.id }}/line" class="inline-form"
-          data-pr="{{ pr.id }}">
-      <input type="hidden" name="avg_6wk_source">
-      <label>
-        <span class="fld">Code<span class="info" data-tip="Product SKU code. Type it and the description, RRP, buy price and 6wk avg auto-fill from NetSuite and the retailer's sell-through.">i</span></span>
-        <input name="product_code" placeholder="SKU code" class="code" autocomplete="off" style="width:9em">
-      </label>
-      <label class="grow">
-        <span class="fld">Description<span class="info" data-tip="Product name. Auto-fills from the SKU code and is locked — click ✎ to edit.">i</span><button type="button" class="lockedit" title="Edit this field">✎</button></span>
-        <input name="description" placeholder="description (auto)" class="desc locked" readonly>
-      </label>
-      <label>
-        <span class="fld">RRP inc<span class="info" data-tip="Recommended retail price, GST inclusive. Auto-fills from the product master and is locked — click ✎ to edit.">i</span><button type="button" class="lockedit" title="Edit this field">✎</button></span>
-        <input name="rrp_inc" type="number" step="any" min="0" placeholder="RRP inc" class="rrp locked" style="width:7em" readonly>
-      </label>
-      <label>
-        <span class="fld">Buy ex<span class="info" data-tip="Price this retailer paid you for the stock, GST exclusive. Auto-fills per retailer and is locked — click ✎ to edit.">i</span><button type="button" class="lockedit" title="Edit this field">✎</button></span>
-        <input name="retailer_buy_ex" type="number" step="any" min="0" placeholder="Buy ex" style="width:7em" readonly class="locked">
-      </label>
-      <label>
-        <span class="fld">% off<span class="info" data-tip="Discount off RRP for the promo. Sets the customer's promo price — enter this or the promo price.">i</span></span>
-        <input name="pct_off" type="number" step="any" min="0" max="100" placeholder="% off" style="width:6em">
-      </label>
-      <label>
-        <span class="fld">Promo price<span class="info" data-tip="Advertised promo price (RRP less % off). Enter this OR % off — each updates the other.">i</span></span>
-        <input class="pp" type="number" step="any" min="0" placeholder="promo price" style="width:8em">
-      </label>
-      <label>
-        <span class="fld">Support basis<span class="info" data-tip="How funding support is calculated: % off (discount), Target promo margin (back-solved), or % off cost (COGS). Defaults to the promo's setting.">i</span></span>
-        <select name="support_basis" class="basis" style="width:11em">
-          <option value="pct_off" {{ 'selected' if (promo.support_basis_default or 'pct_off') == 'pct_off' }}>% off (discount)</option>
-          <option value="margin" {{ 'selected' if promo.support_basis_default == 'margin' }}>Target promo margin</option>
-          <option value="cogs" {{ 'selected' if promo.support_basis_default == 'cogs' }}>% off cost (COGS)</option>
-        </select>
-      </label>
-      <label class="tgt-wrap">
-        <span class="fld">Target promo %<span class="info" data-tip="Only for the Target-margin basis: support is back-solved so the line hits this end-to-end promo margin.">i</span></span>
-        <input name="target_margin" class="tgt" type="number" step="any" placeholder="target promo %" value="{{ (promo.target_margin_default * 100)|round(4) if promo.target_margin_default is not none else '' }}" style="width:9em">
-      </label>
-      <label class="cogs-wrap">
-        <span class="fld">Supplier % off cost<span class="info" data-tip="Only for the COGS basis: the % of buy-ex (gross) that the supplier funds.">i</span></span>
-        <input name="cogs_supplier_pct" class="csp" type="number" step="any" min="0" placeholder="supplier % off cost" value="{{ (promo.cogs_supplier_pct_default * 100)|round(4) if promo.cogs_supplier_pct_default is not none else '' }}" style="width:11em">
-      </label>
-      <label class="cogs-wrap">
-        <span class="fld">MacGear % off cost<span class="info" data-tip="Only for the COGS basis: the % of buy-ex (gross) that MacGear funds.">i</span></span>
-        <input name="cogs_mg_pct" class="cmp" type="number" step="any" min="0" placeholder="MG % off cost" value="{{ (promo.cogs_mg_pct_default * 100)|round(4) if promo.cogs_mg_pct_default is not none else '' }}" style="width:11em">
-      </label>
-      <label>
-        <span class="fld">6wk avg<span class="info" data-tip="Average weekly units this retailer sold (its sell-through) over its last 6 loaded weeks before the promo starts. Auto-fills from the SKU code; type over it to use your own figure. Drives the expected-sales forecast and claim.">i</span></span>
-        <input name="avg_6wk" type="number" step="any" min="0" placeholder="6wk avg" style="width:7em">
-      </label>
-      <label>
-        <span class="fld">Actual sales<span class="info" data-tip="Units actually sold during the promo. Fill in after it ends to reconcile the claim vs forecast.">i</span></span>
-        <input name="actual_sales" type="number" step="any" min="0" placeholder="actual sales" style="width:8em">
-      </label>
-      <button class="btn small">Add</button>
-    </form>
-  </details>
-  {% set siblings = pv.retailers | rejectattr('pr.id', 'equalto', pr.id) | selectattr('lines') | list %}
-  {% if siblings %}
-  <form method="post" action="/retailer/{{ pr.id }}/copy_from" class="inline-form copyform">
-    <label>Copy SKUs from
-      <select name="source_pr_id" required>
-        <option value="">— choose retailer —</option>
-        {% for s in siblings %}
-          <option value="{{ s.pr.id }}">{{ s.pr.retailer_name }} ({{ s.lines|length }} SKU{{ 's' if s.lines|length != 1 }})</option>
-        {% endfor %}
-      </select>
-    </label>
-    <button class="btn small ghost">Copy SKUs →</button>
-    <span class="hint">copies code/RRP/% off; buy price and 6wk avg re-pulled for this retailer</span>
-  </form>
-  {% endif %}
-  {% endif %}
 
   <!-- customer claim panel -->
   {% set cc = pr.customer_claim %}
@@ -372,22 +216,7 @@
   </div>
 </section>
 {% endfor %}
-
-{% if editable %}
-<section class="card addretailer">
-  <h3>Add a retailer to this promotion</h3>
-  <form method="post" action="/promo/{{ promo.id }}/retailer" class="inline-form">
-    {% if all_retailers is none %}
-    <p class="hint">The retailer list comes from the reporting warehouse, which couldn't be reached — try again shortly.</p>
-    {% endif %}
-    <select name="retailer_key" required>
-      <option value="">— select retailer —</option>
-      {% for r in all_retailers or [] %}<option value="{{ r.key }}" data-rebate="{{ r.default_rebate }}">{{ r.name }}{% if r.sell_through %} · sell-through{% endif %}{% if r.price_level != r.name %} ({{ r.price_level }} prices){% endif %}</option>{% endfor %}
-    </select>
-    <label>Rebate (blank = default) <input name="rebate" type="number" step="any" style="width:7em"></label>
-    <button class="btn small">Add retailer</button>
-  </form>
-</section>
+</div>
 {% endif %}
 
 <!-- vendor request -->
@@ -417,6 +246,24 @@
     <button class="btn small">Save</button>
   </form>
 </section>
+</div>
+
+{% if editable %}
+<section class="card addretailer">
+  <h3>Add a retailer to this promotion</h3>
+  <form method="post" action="/promo/{{ promo.id }}/retailer" class="inline-form">
+    {% if all_retailers is none %}
+    <p class="hint">The retailer list comes from the reporting warehouse, which couldn't be reached — try again shortly.</p>
+    {% endif %}
+    <select name="retailer_key" required>
+      <option value="">— select retailer —</option>
+      {% for r in all_retailers or [] %}<option value="{{ r.key }}" data-rebate="{{ r.default_rebate }}">{{ r.name }}{% if r.sell_through %} · sell-through{% endif %}{% if r.price_level != r.name %} ({{ r.price_level }} prices){% endif %}</option>{% endfor %}
+    </select>
+    <label>Rebate (blank = default) <input name="rebate" type="number" step="any" style="width:7em"></label>
+    <button class="btn small">Add retailer</button>
+  </form>
+</section>
+{% endif %}
 
 <form method="post" action="/promo/{{ promo.id }}/delete" class="delete-promo"
       data-confirm="Delete this entire promotion and all its data? This cannot be undone.">
@@ -434,55 +281,130 @@ function toggleEdit(id) {
     if (!row.hidden) { const f = row.querySelector('input'); if (f) f.focus(); }
   }
 }
-// add-line: Description / RRP / Buy ex are locked (auto-filled) until you click ✎
-document.querySelectorAll('.lockedit').forEach(function (btn) {
-  btn.addEventListener('click', function (e) {
-    e.preventDefault();
-    const input = btn.closest('label').querySelector('input');
-    if (!input) return;
-    if (input.hasAttribute('readonly')) {
-      input.removeAttribute('readonly');
-      input.classList.remove('locked');
-      btn.classList.add('on');
-      btn.title = 'Lock this field';
-      input.focus();
-    } else {
-      input.setAttribute('readonly', '');
-      input.classList.add('locked');
-      btn.classList.remove('on');
-      btn.title = 'Edit this field';
-    }
+// ---- the promo grid ----------------------------------------------------------
+const PROMO_ID = {{ promo.id }};
+const OPEN_KEY = 'promo-open-' + PROMO_ID;   // which retailers are expanded, per browser
+const grid = () => document.querySelector('table.pgrid');
+
+function openSet() {
+  try { const v = JSON.parse(localStorage.getItem(OPEN_KEY)); if (Array.isArray(v)) return new Set(v.map(String)); } catch (e) {}
+  // first visit: everything open when there are one or two retailers, else just the first
+  const ids = [...document.querySelectorAll('.ghead.full')].map(th => th.dataset.pr);
+  return new Set(ids.length <= 2 ? ids : ids.slice(0, 1));
+}
+function saveOpen(set) { try { localStorage.setItem(OPEN_KEY, JSON.stringify([...set])); } catch (e) {} }
+function applyOpen(set) {
+  const t = grid(); if (!t) return;
+  const ids = new Set([...t.querySelectorAll('.ghead.full')].map(th => th.dataset.pr));
+  ids.forEach(function (id) {
+    t.querySelectorAll('.g' + id).forEach(el => el.classList.toggle('closed', !set.has(id)));
   });
+}
+document.addEventListener('click', function (e) {
+  const tog = e.target.closest('.gtoggle');
+  if (tog) {
+    const set = openSet(), id = tog.dataset.pr;
+    set.has(id) ? set.delete(id) : set.add(id);
+    saveOpen(set); applyOpen(set); return;
+  }
+  const all = e.target.closest('[data-expand]');
+  if (all) {
+    const set = all.dataset.expand === 'all'
+      ? new Set([...document.querySelectorAll('.ghead.full')].map(th => th.dataset.pr)) : new Set();
+    saveOpen(set); applyOpen(set); return;
+  }
+  // "+ products" on a retailer: open the paste box with just that retailer ticked
+  const add = e.target.closest('.gadd');
+  if (add) {
+    const box = document.getElementById('addproducts');
+    box.open = true;
+    box.querySelectorAll('input[name="pr"]').forEach(cb => cb.checked = cb.value === add.dataset.pr);
+    box.scrollIntoView({behavior: 'smooth', block: 'start'});
+    box.querySelector('textarea').focus();
+    return;
+  }
+  const tick = e.target.closest('[data-tick]');
+  if (tick) {
+    tick.closest('fieldset').querySelectorAll('input[name="pr"]')
+      .forEach(cb => cb.checked = tick.dataset.tick === 'all');
+  }
 });
-// autofill description / RRP / buy-ex when a SKU code is entered
-const PROMO_COUNTRY = "{{ promo.country or 'AU' }}";
-document.querySelectorAll('.inline-form .code').forEach(function (input) {
-  input.addEventListener('change', async function () {
-    const form = input.closest('form');
-    const code = input.value.trim();
-    if (!code) return;
-    const res = await fetch(`/api/product/${encodeURIComponent(code)}?pr=${form.dataset.pr}`);
-    const d = await res.json();
-    if (!d.found) return;
-    if (code !== d.code) input.value = d.code;
-    if (form.avg_6wk && !form.avg_6wk.value && d.avg_6wk != null) {
-      form.avg_6wk.value = d.avg_6wk;
-      form.avg_6wk.title = d.avg_6wk_source || '';
-      form.avg_6wk_source.value = d.avg_6wk_source || '';
-      form.avg_6wk.dataset.filled = d.avg_6wk;
-    }
-    if (form.description && !form.description.value) form.description.value = d.description || '';
-    if (form.rrp_inc && !form.rrp_inc.value && d.rrp_inc != null) form.rrp_inc.value = d.rrp_inc;
-    if (form.retailer_buy_ex && !form.retailer_buy_ex.value && d.retailer_buy_ex != null)
-      form.retailer_buy_ex.value = d.retailer_buy_ex;
-  });
+applyOpen(openSet());
+
+// ✎ on a cell: the line's rarer settings in a dialog
+function openLine(id) { const d = document.getElementById('line-' + id); if (d) d.showModal(); }
+
+// Re-render the live part of the page from the server (totals, grid, customers),
+// keeping the cursor where it was and anything half-typed in the next box.
+const focusKey = el => el && el.dataset && (el.dataset.line
+  ? el.dataset.line + ':' + el.dataset.field + ':' + (el.closest('td').classList.contains('mini') ? 'm' : 'f')
+  : el.dataset.key ? el.dataset.key + ':' + el.dataset.which : null);
+let refreshing = null;
+async function refreshLive() {
+  const res = await fetch(location.pathname + location.search);
+  if (!res.ok) return;
+  const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+  const fresh = doc.getElementById('promo-live');
+  if (!fresh) return;
+  const act = document.activeElement, key = focusKey(act);
+  const typed = act && act.matches && act.matches('input') && act.value !== act.defaultValue ? act.value : null;
+  const scroller = document.querySelector('.pgrid-wrap'), sx = scroller ? scroller.scrollLeft : 0;
+  document.getElementById('promo-live').replaceWith(fresh);
+  applyOpen(openSet());
+  wireDialogs();
+  const sc = document.querySelector('.pgrid-wrap'); if (sc) sc.scrollLeft = sx;
+  if (key) {
+    const el = [...document.querySelectorAll('#promo-live input')].find(i => focusKey(i) === key);
+    if (el) { if (typed !== null) el.value = typed; el.focus(); if (el.select && typed === null) el.select(); }
+  }
+}
+
+async function post(url, body) {
+  const res = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify(body)});
+  let data = {};
+  try { data = await res.json(); } catch (e) {}
+  return res.ok ? data : {error: data.error || 'not saved'};
+}
+function flag(input, msg) {
+  input.classList.toggle('bad', !!msg);
+  input.title = msg || '';
+}
+
+// a grid cell: save on leaving it (change), then redraw the numbers
+document.addEventListener('change', async function (e) {
+  const inp = e.target;
+  if (inp.matches('input.gin')) {
+    inp.classList.add('saving');
+    const r = await post('/line/' + inp.dataset.line + '/set', {field: inp.dataset.field, value: inp.value});
+    inp.classList.remove('saving');
+    if (r.error) { flag(inp, r.error); return; }
+    await refreshLive();
+  } else if (inp.matches('input.pd')) {
+    const row = inp.closest('tr');
+    const val = w => row.querySelector('input.pd[data-which="' + w + '"]').value;
+    const r = await post('/promo/' + PROMO_ID + '/product_dates', {key: inp.dataset.key, start: val('start'), end: val('end')});
+    if (r.error) { flag(inp, r.error); return; }
+    if (r.warning) alert(r.warning);
+    await refreshLive();
+  }
 });
-// a 6wk avg typed over the sell-through figure is the user's own
-document.querySelectorAll('.inline-form input[name="avg_6wk"]').forEach(function (inp) {
-  inp.addEventListener('input', function () {
-    if (inp.form.avg_6wk_source && inp.value !== inp.dataset.filled) inp.form.avg_6wk_source.value = '';
-  });
+// Enter in a grid box moves down a row, like a spreadsheet
+document.addEventListener('keydown', function (e) {
+  const inp = e.target;
+  if (e.key !== 'Enter' || !inp.matches || !inp.matches('input.gin')) return;
+  e.preventDefault();
+  const td = inp.closest('td'), tr = td.closest('tr');
+  const col = [...tr.children].indexOf(td);
+  let next = tr.nextElementSibling;
+  while (next) {
+    const cell = next.children[col], box = cell && cell.querySelector('input.gin');
+    if (box && cell.colSpan === td.colSpan) { box.focus(); box.select(); return; }
+    next = next.nextElementSibling;
+  }
+  inp.blur();
 });
+
 // prefill rebate when picking a retailer to add
 document.querySelectorAll('select[name="retailer_key"]').forEach(function (sel) {
   sel.addEventListener('change', function () {
@@ -522,7 +444,6 @@ function wireSplit(form) {
   m.addEventListener('input', recalc);
   recalc();
 }
-document.querySelectorAll('form.editline').forEach(wireSplit);
 
 // promo price <-> % off (RRP less % off). Either field updates the other; changing
 // RRP keeps the % and recalculates the price. % off remains the value that's saved.
@@ -544,7 +465,6 @@ function wirePromoPrice(form) {
   rrp.addEventListener('input', priceFromPct);
   pp.addEventListener('input', pctFromPrice);
 }
-document.querySelectorAll('form.editline, .addline form').forEach(wirePromoPrice);
 
 // support basis: reveal the fields relevant to the chosen method
 //   pct_off -> funding split fieldset      margin -> target % + funding split
@@ -568,7 +488,12 @@ function wireBasis(form) {
   sel.addEventListener('change', sync);
   sync();
 }
-document.querySelectorAll('form.editline, .addline form').forEach(wireBasis);
+function wireDialogs() {
+  document.querySelectorAll('form.editline').forEach(function (f) {
+    wireSplit(f); wirePromoPrice(f); wireBasis(f);
+  });
+}
+wireDialogs();
 
 // edit-details: end date can't precede start date
 (function () {

@@ -390,3 +390,53 @@ table.grid tfoot .totrow td{border-top:2px solid var(--line);font-weight:600;
 }
 .topbar .toolnav .btn{background:rgba(255,255,255,.16);color:#fff;padding:.35rem .8rem}
 .topbar .toolnav .btn:hover{background:rgba(255,255,255,.28)}
+
+/* ---- promo grid: products x retailers (promo_detail.html / _promo_grid.html) ---- */
+.banner.ok{background:#d1e7dd;color:#0f5132;border:1px solid #badbcc}
+[data-theme="dark"] .banner.ok{background:#0f2f22;color:#a3e4c1;border-color:#1d4d37}
+details.addproducts summary{cursor:pointer;color:var(--brand);font-weight:600}
+.addprod-form{display:flex;gap:1rem;flex-wrap:wrap;margin-top:.6rem}
+.addprod-form .paste{flex:1 1 360px;display:flex;flex-direction:column;gap:.3rem;font-size:.85rem}
+.addprod-form textarea{font-family:ui-monospace,Consolas,monospace;font-size:.85rem;min-height:8rem}
+.addprod-side{display:flex;flex-direction:column;gap:.6rem;flex:0 1 380px;align-items:flex-start}
+.addprod-side fieldset{border:1px solid var(--line);border-radius:8px;padding:.4rem .7rem;display:flex;flex-wrap:wrap;gap:.3rem .9rem;align-items:center;font-size:.85rem}
+.promogrid{padding:.7rem}
+.grid-tools{display:flex;gap:.35rem;align-items:center;flex-wrap:wrap;margin:0 0 .4rem;font-size:.85rem}
+.grid-tools .hint{margin:0 0 0 .6rem}
+.pgrid-wrap{overflow:auto;max-width:100%;max-height:78vh}
+table.pgrid{width:auto;min-width:100%;font-size:.8rem;border-collapse:separate;border-spacing:0}
+table.pgrid th,table.pgrid td{padding:.25rem .4rem;white-space:nowrap}
+table.pgrid thead{position:sticky;top:0;z-index:3}
+table.pgrid tbody tr:hover td{background:#f7f9fc}
+table.pgrid .stick{position:sticky;background:var(--card);z-index:1}
+table.pgrid thead th.stick{background:#eef1f6;z-index:4}
+table.pgrid .s1{left:0;width:7.6rem;min-width:7.6rem;max-width:7.6rem;overflow:hidden;text-overflow:ellipsis}
+table.pgrid .s2{left:7.6rem;min-width:15rem;max-width:22rem;white-space:normal;box-shadow:inset -2px 0 0 var(--line)}
+table.pgrid .gstart{box-shadow:inset 3px 0 0 var(--brand)}
+table.pgrid th.ghead{text-align:left}
+table.pgrid .mini{display:none}
+table.pgrid .mini.closed{display:table-cell}
+table.pgrid .full.closed{display:none}
+.gtoggle{background:none;border:0;font:inherit;font-weight:700;color:var(--brand);cursor:pointer;padding:0;margin-right:.3rem}
+table.pgrid input.gin{width:5.6em;text-align:right;padding:.15rem .3rem;font-size:.8rem;border-radius:4px}
+table.pgrid input.gin.pct{width:4.3em}
+table.pgrid input.gin.hand{font-style:italic}
+table.pgrid input.gin.bad{border-color:var(--danger);outline:1px solid var(--danger)}
+table.pgrid input.gin.saving{opacity:.5}
+table.pgrid input.pd{font-size:.78rem;padding:.1rem .2rem;width:8.6em}
+table.pgrid td.pdate.own{background:#fff4d6}
+table.pgrid td.none{color:var(--muted);text-align:center}
+table.pgrid form{display:inline}
+table.pgrid td.rowactions{display:table-cell;white-space:nowrap}
+table.pgrid td.rowactions .link{margin:0 .15rem}
+table.pgrid tfoot td{font-weight:700;border-top:2px solid var(--line);background:#f7f9fc}
+[data-theme="dark"] table.pgrid tbody tr:hover td{background:#222b37}
+[data-theme="dark"] table.pgrid thead th.stick{background:#222b37}
+[data-theme="dark"] table.pgrid td.pdate.own{background:#3a2f05}
+[data-theme="dark"] table.pgrid tfoot td{background:#222b37}
+dialog.linedlg{border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);width:min(900px,95vw);padding:1rem 1.2rem}
+dialog.linedlg::backdrop{background:rgba(0,0,0,.45)}
+dialog.linedlg h3{margin:0 0 .6rem}
+.custhead{margin:1.2rem 0 .5rem;font-size:1.05rem}
+.custcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(440px,100%),1fr));gap:1rem;align-items:start}
+.custcards .card{margin:0}

@@ -10,6 +10,7 @@ import uuid
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, File, Request, Response, UploadFile
@@ -27,7 +28,7 @@ from .export import build_workbook
 from .models import (Attachment, CustomerClaim, LineItem, ProcessedInvoice,
                      PromoRetailer, Promotion, Retailer, User,
                      VendorRequest)
-from .service import build_promo_view
+from .service import build_promo_view, line_dates
 from .pricing_sync import sync_pricing
 from .security import (hash_password, hash_token, make_reset_token, sign,
                        unsign, verify_password)
@@ -166,7 +167,6 @@ _TOOL_PATHS = [
     ("/vendor-bills", "vendor_bills"),
     ("/promos", "promos"),
     ("/promo", "promos"),          # /promo/new, /promo/{id}, /promo/{id}/...
-    ("/api/product", "promos"),    # promo add-line lookup: buy prices + sell-through
     ("/line", "promos"),
     ("/retailer", "promos"),
     ("/claim", "promos"),
@@ -1297,17 +1297,82 @@ def _block_entry(pr):
     return entry
 
 
-def _fill_avg_6wk(pr, lines):
-    """Set avg_6wk + its source on lines from the block's sell-through. Lines the
-    retailer has no sell-through for are left alone. Raises WarehouseUnavailable."""
-    avg = promo_data.six_week_avg(_block_entry(pr), [l.product_code for l in lines],
-                                  pr.promotion.start_date)
-    if avg is None:
+HAND = "Entered by hand"          # avg_6wk_source for a figure someone typed
+
+
+def _fill_avg_6wk(pr, lines, keep_hand=False):
+    """Set avg_6wk + its source on lines from the block's sell-through, each over
+    the six weeks before its own product's start. keep_hand leaves figures typed by
+    hand alone. False when the retailer sends no sell-through (lines untouched).
+    Raises WarehouseUnavailable."""
+    entry = _block_entry(pr)
+    if entry is None or entry.st_customer_key is None:
         return False
+    promo = pr.promotion
+    by_start = defaultdict(list)
     for l in lines:
-        if l.product_code:
-            l.avg_6wk, l.avg_6wk_source = avg.get(l.product_code), avg.source
+        if l.product_code and not (keep_hand and l.avg_6wk_source == HAND):
+            by_start[line_dates(l, promo)[0]].append(l)
+    for start, group in by_start.items():
+        avg = promo_data.six_week_avg(entry, [l.product_code for l in group], start)
+        if avg is not None:
+            for l in group:
+                l.avg_6wk, l.avg_6wk_source = avg.get(l.product_code), avg.source
     return True
+
+
+def _own_dates(promo, start, end):
+    """What a line stores for a product window: None where it equals the promo's,
+    so the product keeps following the promo dates."""
+    start, end = start or promo.start_date, end or promo.end_date
+    return (None if start == promo.start_date else start,
+            None if end == promo.end_date else end)
+
+
+def _product_key(line):
+    return (line.product_code or "").strip().upper() or f"#{line.id}"
+
+
+def _set_product_dates(promo, keys, start, end):
+    """Give every line of these products the window start..end (None = promo's),
+    and re-pull the sell-through 6wk avg of lines whose start moved (hand-typed
+    figures kept). Returns False if the warehouse couldn't be reached for that."""
+    s, e = _own_dates(promo, start, end)
+    moved = defaultdict(list)
+    for pr in promo.retailers:
+        for l in pr.lines:
+            if _product_key(l) in keys:
+                before = line_dates(l, promo)[0]
+                l.start_date, l.end_date = s, e
+                if line_dates(l, promo)[0] != before:
+                    moved[pr].append(l)
+    try:
+        for pr, ls in moved.items():
+            _fill_avg_6wk(pr, ls, keep_hand=True)
+    except warehouse.WarehouseUnavailable:
+        return False
+    return True
+
+
+def _new_line(pr, info, pct, start, end):
+    """A line for one product on one retailer block, with the promo's defaults and
+    the block's buy price. The caller fills the 6wk avg."""
+    promo = pr.promotion
+    basis = promo.support_basis_default or "pct_off"
+    return LineItem(
+        promo_retailer_id=pr.id,
+        product_code=info["code"],
+        description=info["description"],
+        rrp_inc=info["rrp_inc"],
+        retailer_buy_ex=info["prices"].get(pr.price_level_id) or 0.0,
+        pct_off=(pct or 0.0) / 100.0,
+        support_basis=basis,
+        target_margin=promo.target_margin_default if basis == "margin" else None,
+        cogs_supplier_pct=promo.cogs_supplier_pct_default if basis == "cogs" else None,
+        cogs_mg_pct=promo.cogs_mg_pct_default if basis == "cogs" else None,
+        start_date=start,
+        end_date=end,
+    )
 
 
 def _validated_split(form):
@@ -1388,82 +1453,141 @@ def promo_detail(promo_id: int, request: Request, view: str = "internal",
         "all_retailers": retailers})
 
 
-# ---- product lookup (autofill) ----------------------------------------------
-@app.get("/api/product/{code}")
-def product_lookup(code: str, pr: int, db: Session = Depends(get_db)):
-    """Item, this block's buy price and the 6wk sell-through avg, for the add-line form."""
-    block = db.get(PromoRetailer, pr)
-    if not block:
-        return JSONResponse({"found": False})
-    try:
-        entry = _block_entry(block)
-        db.commit()
-        it = promo_data.item(code, block.promotion.country,
-                             entry.price_level_id if entry else None)
-        if not it:
-            return JSONResponse({"found": False})
-        avg = promo_data.six_week_avg(entry, [it["code"]], block.promotion.start_date)
-    except warehouse.WarehouseUnavailable:
-        return JSONResponse({"found": False, "error": "warehouse unavailable"})
-    return JSONResponse({"found": True, **it,
-                         "avg_6wk": avg.get(it["code"]) if avg else None,
-                         "avg_6wk_source": avg.source if avg else None})
-
-
-# ---- line items --------------------------------------------------------------
-@app.post("/retailer/{pr_id}/line")
-async def add_line(pr_id: int, request: Request, db: Session = Depends(get_db)):
+# ---- products (the promo grid) -----------------------------------------------
+@app.post("/promo/{promo_id}/products")
+async def add_products(promo_id: int, request: Request, db: Session = Depends(get_db)):
+    """Add pasted products to the ticked retailer blocks. Each line gets that
+    retailer's buy price and 6wk avg; a product already on a block keeps its line
+    (a pasted % off updates it). Codes not in NetSuite are skipped and listed."""
     form = await request.form()
-    pr = db.get(PromoRetailer, pr_id)
-    code = form.get("product_code", "").strip()
-    # Item + buy price from the warehouse; whatever the form already holds wins.
-    prod, wh_err = None, False
-    if code:
-        try:
-            entry = _block_entry(pr)
-            prod = promo_data.item(code, pr.promotion.country,
-                                   entry.price_level_id if entry else None)
-        except warehouse.WarehouseUnavailable:
-            wh_err = True
-    # support basis: form value, else the promo's default
-    promo = pr.promotion
-    basis = form.get("support_basis") or promo.support_basis_default or "pct_off"
-    tgt = _parse_float(form.get("target_margin"))
-    target_margin = (tgt / 100.0) if tgt is not None else (
-        promo.target_margin_default if basis == "margin" else None)
-    csp = _parse_float(form.get("cogs_supplier_pct"))
-    cmp = _parse_float(form.get("cogs_mg_pct"))
-    cogs_supplier_pct = (csp / 100.0) if csp is not None else (
-        promo.cogs_supplier_pct_default if basis == "cogs" else None)
-    cogs_mg_pct = (cmp / 100.0) if cmp is not None else (
-        promo.cogs_mg_pct_default if basis == "cogs" else None)
-    avg_6wk = _parse_float(form.get("avg_6wk"))
-    line = LineItem(
-        promo_retailer_id=pr_id,
-        product_code=prod["code"] if prod else code,
-        description=form.get("description", "").strip() or (prod["description"] if prod else ""),
-        rrp_inc=_parse_float(form.get("rrp_inc")) or (prod["rrp_inc"] if prod else None),
-        retailer_buy_ex=(_parse_float(form.get("retailer_buy_ex"))
-                         or (prod["retailer_buy_ex"] if prod else None) or 0.0),
-        pct_off=(_parse_float(form.get("pct_off")) or 0.0) / 100.0,
-        avg_6wk=avg_6wk,
-        # the form's avg is the sell-through figure the lookup filled in, unless edited
-        avg_6wk_source=(form.get("avg_6wk_source") or "Entered by hand") if avg_6wk is not None else None,
-        actual_sales=_parse_float(form.get("actual_sales")),
-        support_basis=basis,
-        target_margin=target_margin,
-        cogs_supplier_pct=cogs_supplier_pct,
-        cogs_mg_pct=cogs_mg_pct,
-    )
-    db.add(line)
-    if code and avg_6wk is None and not wh_err:
-        try:
-            _fill_avg_6wk(pr, [line])
-        except warehouse.WarehouseUnavailable:
-            wh_err = True
+    promo = db.get(Promotion, promo_id)
+    if not promo:
+        return RedirectResponse("/promos", status_code=303)
+    rows, bad = promo_data.parse_paste(form.get("codes", ""))
+    ticked = set(form.getlist("pr"))
+    blocks = [pr for pr in promo.retailers if str(pr.id) in ticked]
+    start, end = _parse_date(form.get("start_date")), _parse_date(form.get("end_date"))
+    if (end or promo.end_date) < (start or promo.start_date):
+        return RedirectResponse(f"/promo/{promo_id}?err=dates", status_code=303)
+    if not rows or not blocks:
+        return RedirectResponse(f"/promo/{promo_id}?err=paste", status_code=303)
+    try:
+        for pr in blocks:
+            _block_entry(pr)
+        info = promo_data.items([c for c, _ in rows], promo.country,
+                                [pr.price_level_id for pr in blocks])
+    except warehouse.WarehouseUnavailable:
+        return RedirectResponse(f"/promo/{promo_id}?err=warehouse", status_code=303)
+
+    # A product already in the promo keeps its window on the new lines.
+    known = {}
+    for pr in promo.retailers:
+        for l in pr.lines:
+            known.setdefault(_product_key(l), (l.start_date, l.end_date))
+    found = [(info[c.upper()], pct) for c, pct in rows if c.upper() in info]
+    missing = [c for c, _ in rows if c.upper() not in info]
+    added = updated = 0
+    wh_err = False
+    for pr in blocks:
+        have = {_product_key(l): l for l in pr.lines}
+        new = []
+        for it, pct in found:
+            key = it["code"].upper()
+            if key in have:
+                if pct is not None:
+                    have[key].pct_off = pct / 100.0
+                    updated += 1
+                continue
+            s, e = known.get(key, (None, None))
+            line = _new_line(pr, it, pct, s, e)
+            new.append(line)
+            have[key] = line
+        db.add_all(new)
+        added += len(new)
+        if new and not wh_err:
+            try:
+                _fill_avg_6wk(pr, new)
+            except warehouse.WarehouseUnavailable:
+                wh_err = True
+    db.flush()
+    if (start or end) and found:
+        wh_err = not _set_product_dates(promo, {it["code"].upper() for it, _ in found},
+                                        start, end) or wh_err
     db.commit()
-    return RedirectResponse(f"/promo/{pr.promo_id}" + ("?err=warehouse" if wh_err else ""),
-                            status_code=303)
+    q = {"added": added, "updated": updated}
+    if missing:
+        q["missing"] = ",".join(missing[:20]) + ("…" if len(missing) > 20 else "")
+    if bad:
+        q["bad"] = len(bad)
+    if wh_err:
+        q["err"] = "warehouse"
+    return RedirectResponse(f"/promo/{promo_id}?{urlencode(q)}", status_code=303)
+
+
+# Grid cells typed in place: field -> how the typed value is stored.
+_GRID_FIELDS = ("retailer_buy_ex", "pct_off", "avg_6wk", "actual_sales")
+
+
+@app.post("/line/{line_id}/set")
+async def set_line_field(line_id: int, request: Request, db: Session = Depends(get_db)):
+    """Save one grid cell: {"field": ..., "value": ...}. % off is a percentage."""
+    data = await request.json()
+    line = db.get(LineItem, line_id)
+    field = data.get("field")
+    if not line or field not in _GRID_FIELDS:
+        return JSONResponse({"error": "unknown line or field"}, status_code=400)
+    raw = data.get("value")
+    v = _parse_float(raw)
+    if (raw not in (None, "") and v is None) or (v is not None and v < 0):
+        return JSONResponse({"error": "enter a number, 0 or more"}, status_code=400)
+    if field == "pct_off":
+        if v is not None and v > 100:
+            return JSONResponse({"error": "% off can't be over 100"}, status_code=400)
+        line.pct_off = (v or 0.0) / 100.0
+    elif field == "retailer_buy_ex":
+        line.retailer_buy_ex = v or 0.0
+    elif field == "avg_6wk":
+        if v != line.avg_6wk:
+            line.avg_6wk_source = HAND if v is not None else None
+        line.avg_6wk = v
+    else:
+        line.actual_sales = v
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+@app.post("/promo/{promo_id}/product_dates")
+async def set_product_dates(promo_id: int, request: Request, db: Session = Depends(get_db)):
+    """Set one product's promo window across every retailer: {"key", "start", "end"};
+    blank = the promotion's date."""
+    data = await request.json()
+    promo = db.get(Promotion, promo_id)
+    if not promo:
+        return JSONResponse({"error": "no such promotion"}, status_code=404)
+    start, end = _parse_date(data.get("start")), _parse_date(data.get("end"))
+    if (end or promo.end_date) < (start or promo.start_date):
+        return JSONResponse({"error": "the end date can't be before the start date"},
+                            status_code=400)
+    ok = _set_product_dates(promo, {(data.get("key") or "").upper()}, start, end)
+    db.commit()
+    return JSONResponse({"ok": True, **({} if ok else {
+        "warning": "dates saved, but the 6wk avg couldn't be re-pulled (warehouse unreachable)"})})
+
+
+@app.post("/promo/{promo_id}/product_delete")
+async def delete_product(promo_id: int, request: Request, db: Session = Depends(get_db)):
+    """Take a product off the promo — its line on every retailer."""
+    form = await request.form()
+    promo = db.get(Promotion, promo_id)
+    if not promo:
+        return RedirectResponse("/promos", status_code=303)
+    key = (form.get("key") or "").upper()
+    for pr in promo.retailers:
+        for l in list(pr.lines):
+            if _product_key(l) == key:
+                db.delete(l)
+    db.commit()
+    return RedirectResponse(f"/promo/{promo_id}", status_code=303)
 
 
 @app.post("/retailer/{pr_id}/refresh_avg")
@@ -1479,69 +1603,6 @@ def refresh_avg(pr_id: int, db: Session = Depends(get_db)):
     db.commit()
     return RedirectResponse(f"/promo/{pr.promo_id}" + ("" if ok else "?err=no_st")
                             + f"#pr{pr.id}", status_code=303)
-
-
-@app.post("/retailer/{pr_id}/copy_from")
-async def copy_lines(pr_id: int, request: Request, db: Session = Depends(get_db)):
-    """Copy line items from another retailer block in the same promo into this one.
-
-    Carries code/description/RRP/% off and funding overrides; re-derives the buy price
-    from the target retailer's price level where available; takes the 6wk avg from the
-    target retailer's sell-through (blank if it has none). Skips SKUs already present
-    in the target block.
-    """
-    form = await request.form()
-    target = db.get(PromoRetailer, pr_id)
-    source = db.get(PromoRetailer, int(form.get("source_pr_id")))
-    if not target or not source or source.promo_id != target.promo_id:
-        return RedirectResponse(f"/promo/{target.promo_id if target else ''}", status_code=303)
-
-    existing_codes = {l.product_code for l in target.lines}
-    try:
-        entry = _block_entry(target)
-    except warehouse.WarehouseUnavailable:
-        entry, wh_err = None, True
-    else:
-        wh_err = False
-    added = []
-    for src in source.lines:
-        if src.product_code and src.product_code in existing_codes:
-            continue
-        buy = None
-        if entry and src.product_code and not wh_err:
-            try:
-                it = promo_data.item(src.product_code, target.promotion.country,
-                                     entry.price_level_id)
-                buy = it["retailer_buy_ex"] if it else None
-            except warehouse.WarehouseUnavailable:
-                wh_err = True
-        added.append(LineItem(
-            promo_retailer_id=target.id,
-            product_code=src.product_code,
-            description=src.description,
-            rrp_inc=src.rrp_inc,
-            retailer_buy_ex=buy if buy is not None else src.retailer_buy_ex,
-            pct_off=src.pct_off,
-            avg_6wk=None,
-            support_basis=src.support_basis,
-            target_margin=src.target_margin,
-            cogs_supplier_pct=src.cogs_supplier_pct,
-            cogs_mg_pct=src.cogs_mg_pct,
-            ratio_supplier=src.ratio_supplier,
-            ratio_mg=src.ratio_mg,
-            ratio_retailer=src.ratio_retailer,
-            growth=src.growth,
-        ))
-        existing_codes.add(src.product_code)
-    db.add_all(added)
-    if added and not wh_err:
-        try:
-            _fill_avg_6wk(target, added)
-        except warehouse.WarehouseUnavailable:
-            wh_err = True
-    db.commit()
-    return RedirectResponse(f"/promo/{target.promo_id}" + ("?err=warehouse" if wh_err else ""),
-                            status_code=303)
 
 
 @app.post("/line/{line_id}/edit")
@@ -1742,8 +1803,15 @@ async def update_details(promo_id: int, request: Request, db: Session = Depends(
     ed = _parse_date(form.get("end_date")) or promo.end_date
     if ed < sd:
         return RedirectResponse(f"/promo/{promo_id}?err=dates", status_code=303)
+    start_moved = sd != promo.start_date
     promo.start_date = sd
     promo.end_date = ed
+    if start_moved:                  # products on the promo's dates: new 6wk window
+        try:
+            for pr in promo.retailers:
+                _fill_avg_6wk(pr, [l for l in pr.lines if l.start_date is None], keep_hand=True)
+        except warehouse.WarehouseUnavailable:
+            pass                     # keep the old figures; "refresh 6wk avg" re-pulls later
     rate = _parse_float(form.get("aud_usd_rate"))
     if rate is not None:
         promo.aud_usd_rate = rate

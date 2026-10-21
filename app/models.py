@@ -105,6 +105,10 @@ class LineItem(Base):
     pct_off: Mapped[float] = mapped_column(Float, default=0.0)
     avg_6wk: Mapped[float | None] = mapped_column(Float, nullable=True)
     avg_6wk_source: Mapped[str | None] = mapped_column(String, nullable=True)  # where avg_6wk came from
+    # product's own promo window (null -> the promotion's dates); kept the same on
+    # every line of a code in the promo — the grid edits it per product row
+    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     actual_sales: Mapped[float | None] = mapped_column(Float, nullable=True)  # qty actually claimed
     # support basis: "pct_off" (discount, default) | "margin" (target margin) | "cogs" (% off cost)
     support_basis: Mapped[str] = mapped_column(String, default="pct_off")

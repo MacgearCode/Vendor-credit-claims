@@ -4,7 +4,8 @@ Resolves per-line funding/growth overrides against the promotion defaults, runs 
 calc engine, and rolls totals up to retailer and promotion level. Computed values are
 never stored — always derived here so they stay correct when inputs change.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import date
 
 from .calc import (LineInputs, LineResult, compute_line, country_params,
                    weeks_between)
@@ -15,6 +16,22 @@ from .models import LineItem, PromoRetailer, Promotion
 class LineView:
     line: LineItem
     result: LineResult
+    start: date                      # the product's promo window (own dates, else the promo's)
+    end: date
+    weeks: float
+
+
+@dataclass
+class ProductRow:
+    """One product across the promo's retailer blocks — a row of the promo grid."""
+    key: str                         # upper(code); "#<line id>" for a line with no code
+    code: str
+    description: str
+    rrp_inc: float | None
+    start: date
+    end: date
+    own_dates: bool                  # dates differ from the promotion's
+    cells: dict = field(default_factory=dict)   # promo_retailer id -> LineView
 
 
 @dataclass
@@ -42,6 +59,7 @@ class PromoView:
     mg_total_aud: float               # MacGear absorbs (expected)
     customer_expected_aud: float      # total expected back from customers
     supplier_total_usd: float
+    products: list[ProductRow]       # the grid: one row per product, in order added
     # actuals (based on actual sales qty)
     actual_supplier_aud: float
     actual_mg_aud: float
@@ -69,6 +87,11 @@ def _line_inputs(line: LineItem, pr: PromoRetailer, promo: Promotion) -> LineInp
     )
 
 
+def line_dates(line: LineItem, promo: Promotion) -> tuple[date, date]:
+    """A line's promo window: the product's own dates, else the promotion's."""
+    return line.start_date or promo.start_date, line.end_date or promo.end_date
+
+
 def build_promo_view(promo: Promotion) -> PromoView:
     weeks = weeks_between(promo.start_date, promo.end_date)
     gst, pct_off_on_net = country_params(promo.country)
@@ -83,9 +106,12 @@ def build_promo_view(promo: Promotion) -> PromoView:
         a_supplier = a_mg = a_support = 0.0
         has_actuals = False
         for line in pr.lines:
-            res = compute_line(_line_inputs(line, pr, promo), weeks,
+            start, end = line_dates(line, promo)
+            line_weeks = weeks_between(start, end)
+            res = compute_line(_line_inputs(line, pr, promo), line_weeks,
                                gst=gst, pct_off_on_net=pct_off_on_net)
-            line_views.append(LineView(line=line, result=res))
+            line_views.append(LineView(line=line, result=res, start=start, end=end,
+                                       weeks=line_weeks))
             r_supplier += res.supplier_claim or 0.0
             r_mg += res.mg_claim or 0.0
             r_support += (res.supplier_claim or 0.0) + (res.mg_claim or 0.0)
@@ -116,12 +142,30 @@ def build_promo_view(promo: Promotion) -> PromoView:
         a_cust_aud += a_support
         promo_has_actuals = promo_has_actuals or has_actuals
 
+    # Product rows, ordered by when the product first joined the promo.
+    rows: dict[str, ProductRow] = {}
+    all_lines = sorted(((lv.line.id or 0, rv.pr.id, lv) for rv in retailer_views
+                        for lv in rv.lines), key=lambda t: t[0])
+    for _, pr_id, lv in all_lines:
+        l = lv.line
+        key = (l.product_code or "").strip().upper() or f"#{l.id}"
+        row = rows.get(key)
+        if row is None:
+            row = rows[key] = ProductRow(
+                key=key, code=l.product_code or "", description=l.description or "",
+                rrp_inc=l.rrp_inc, start=lv.start, end=lv.end,
+                own_dates=(lv.start, lv.end) != (promo.start_date, promo.end_date))
+        elif not row.description and l.description:
+            row.description = l.description
+        row.cells.setdefault(pr_id, lv)
+
     rate = promo.aud_usd_rate or 0.0
     return PromoView(
         promo=promo, weeks=weeks, retailers=retailer_views,
         supplier_total_aud=supplier_aud, mg_total_aud=mg_aud,
         customer_expected_aud=cust_expected,
         supplier_total_usd=supplier_aud * rate,
+        products=list(rows.values()),
         actual_supplier_aud=a_supplier_aud, actual_mg_aud=a_mg_aud,
         actual_customer_aud=a_cust_aud, actual_supplier_usd=a_supplier_aud * rate,
         has_actuals=promo_has_actuals,

@@ -23,10 +23,17 @@
     <li><strong>Create the promotion.</strong> Click <em>+ New Promotion</em>. Fill in the claim #,
       name, brand, date range, the AUD→USD rate, and the default funding split. Tick the retailers
       taking part (set each one's rebate if it differs).</li>
-    <li><strong>Add line items.</strong> On the promo page, add SKUs under each retailer. Type the
-      product code and the description, RRP, the retailer's buy price (its NetSuite price level) and
-      the <em>6-week average</em> fill in. Enter the <em>% off</em>. You can copy SKUs from another
-      retailer block to save re-keying.</li>
+    <li><strong>Add products.</strong> On the promo page open <em>+ Add products</em>, paste the
+      product codes straight from Excel (one per line; a second column is the % off) and tick the
+      retailers they're for. Each line fills in the description, RRP, that retailer's buy price (its
+      NetSuite price level) and its <em>6-week average</em>. <em>+ products</em> on a retailer's
+      heading pastes for that retailer only, and <em>+ add</em> in an empty cell adds one product to
+      one retailer.</li>
+    <li><strong>Work in the grid.</strong> Products are rows; each retailer is a group of columns.
+      Click a retailer's name to collapse it to just % off and its claim, or expand it again. Type in
+      the boxes (buy ex, % off, 6wk avg, actual sales) — each saves as you leave it and the totals
+      update; Enter moves down a row. ✎ opens a line's other settings. A product with its own
+      <em>From / To</em> dates (highlighted) has its expected sales worked out over those dates.</li>
     <li><strong>Send for approval.</strong> Move the promo status through the workflow (see below) as
       the vendor approves the spend and Sales releases it to the customer.</li>
     <li><strong>Log the customer claim.</strong> After the promo runs, enter each retailer's
@@ -43,8 +50,9 @@
       the retailer's own sell-through over its last six weeks loaded before the promo starts (if its
       latest week isn't in yet, the six before it). Weeks it didn't sell count as zero. Retailers that
       don't send sell-through are left blank to enter by hand. Hover a figure to see where it came
-      from; <em>refresh 6wk avg</em> on a retailer block re-pulls them all. Used (with growth) to
-      project <em>expected sales</em> over the promo period.</li>
+      from (figures typed by hand show in italics); <em>refresh 6wk avg</em> on a customer card
+      re-pulls them all. Used (with growth) to project <em>expected sales</em> over the product's
+      promo dates.</li>
     <li><strong>Actual sales</strong> — the real units sold once known. The customer-claim summary
       shows both an <em>expected</em> figure (from 6wk avg) and an <em>actual</em> figure (from this).
       The quantity highlights <span class="ok">green</span> when actuals beat expectation and
