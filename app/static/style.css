@@ -438,5 +438,5 @@ dialog.linedlg{border:1px solid var(--line);border-radius:10px;background:var(--
 dialog.linedlg::backdrop{background:rgba(0,0,0,.45)}
 dialog.linedlg h3{margin:0 0 .6rem}
 .custhead{margin:1.2rem 0 .5rem;font-size:1.05rem}
-.custcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(440px,100%),1fr));gap:1rem;align-items:start}
+.custcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(440px,100%),1fr));gap:1rem;align-items:start;margin-bottom:1rem}
 .custcards .card{margin:0}
