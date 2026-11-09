@@ -8,8 +8,9 @@ Rules (from the Inventory Ageing project; every number on the page follows them)
     figure. The split is by LOCATION — MOVA in Melbourne / Auckland is ours.
   - AU (AUD) and NZ (NZD) are never summed; the page shows one region at a time,
     and only the aged SHARE (a %) puts both on one chart.
-  - Bands 0-90 / 91-180 / 181-370 / 370+ are mutually exclusive roll-ups of
-    NetSuite's 13 buckets. "Over 90" = the last three; "over 180" = the last two.
+  - Bands 0-90 / 91-120 / 121-180 / 181-240 / 241-370 / 370+ are mutually exclusive
+    roll-ups of NetSuite's 13 buckets, so the page can draw a line at 90, 120, 180,
+    240 or 370 days exactly: "over 120" = the last four bands, "over 240" the last two.
   - Age restarts when stock moves location (NetSuite ages from arrival at the
     current location).
   - "Aged since" = the first snapshot of the item's current unbroken run with
@@ -33,10 +34,18 @@ _SCOPE = """
     is_owned and country_code = any(%(regions)s)
     and (%(brands)s::text[] is null or brand = any(%(brands)s))"""
 
+BANDS = ("0_90", "91_120", "121_180", "181_240", "241_370", "370_plus")
+NB = len(BANDS)
+LINES = (90, 120, 180, 240, 370)        # line i: stock in band i+1 onwards is past it
+_SUMS = ", ".join(f"sum(v_{b})" for b in BANDS) + ", " + ", ".join(f"sum(u_{b})" for b in BANDS)
+
+
+def _past(i: int) -> str:
+    return " + ".join(f"u_{b}" for b in BANDS[i + 1:])
+
+
 _SERIES_SQL = f"""
-    select snapshot_date, country_code,
-           sum(v_0_90), sum(v_91_180), sum(v_181_370), sum(v_370_plus),
-           sum(u_0_90), sum(u_91_180), sum(u_181_370), sum(u_370_plus)
+    select snapshot_date, country_code, {_SUMS}
     from reporting.fact_inventory_ageing
     where {_SCOPE}
     group by 1, 2 order by 1"""
@@ -50,9 +59,7 @@ _TPL_SQL = """
 
 _LINES_SQL = f"""
     select snapshot_date, country_code, item_code, max(item_name), max(brand), location_name,
-           max(location_type),
-           sum(v_0_90), sum(v_91_180), sum(v_181_370), sum(v_370_plus),
-           sum(u_0_90), sum(u_91_180), sum(u_181_370), sum(u_370_plus)
+           max(location_type), {_SUMS}
     from reporting.fact_inventory_ageing
     where snapshot_date = any(%(dates)s) and {_SCOPE}
     group by snapshot_date, country_code, item_code, location_name"""
@@ -60,11 +67,9 @@ _LINES_SQL = f"""
 # Which items carried stock past each line on each day, for "aged since".
 _RUNS_SQL = f"""
     select snapshot_date, country_code, item_code,
-           bool_or(u_91_180 + u_181_370 + u_370_plus > 0),
-           bool_or(u_181_370 + u_370_plus > 0),
-           bool_or(u_370_plus > 0)
+           {", ".join(f"bool_or({_past(i)} > 0)" for i in range(len(LINES)))}
     from reporting.fact_inventory_ageing
-    where {_SCOPE} and u_91_180 + u_181_370 + u_370_plus > 0
+    where {_SCOPE} and {_past(0)} > 0
     group by 1, 2, 3"""
 
 
@@ -105,18 +110,19 @@ def shape(regions, series_rows, tpl_rows, line_rows, run_rows, dates: list[date]
     out = {"dates": [d.isoformat() for d in dates],
            "ref": {"latest": latest.isoformat(), "d30": d30.isoformat(), "first": first.isoformat()},
            "regions": {}, "locs": {}}
+    keys = [f"v{i}" for i in range(NB)] + [f"u{i}" for i in range(NB)]
     for rg in regions:
         z = [0.0] * len(dates)
         out["regions"][rg] = {
             "ccy": CCY[rg],
-            "series": {k: list(z) for k in ("v0", "v1", "v2", "v3", "u0", "u1", "u2", "u3")},
+            "series": {k: list(z) for k in keys},
             "tpl": {"units": list(z), "skus": 0},
             "lines": [], "skus": {},
         }
 
     for d, rg, *vals in series_rows:
         s = out["regions"][rg]["series"]
-        for k, v in zip(("v0", "v1", "v2", "v3", "u0", "u1", "u2", "u3"), vals):
+        for k, v in zip(keys, vals):
             s[k][idx[d]] = _r2(v)
     for d, rg, units, skus in tpl_rows:
         t = out["regions"][rg]["tpl"]
@@ -124,36 +130,34 @@ def shape(regions, series_rows, tpl_rows, line_rows, run_rows, dates: list[date]
         if d == latest:
             t["skus"] = skus
 
-    # item x location: [v0..v3, u0..u3] at latest; over-90 value / units at d30 and first
+    # item x location: [code, loc, v0..v5, u0..u5 at latest, v0..v5, u0..u5 at d30] - the
+    # page sums whichever bands are past the line it's showing. Lines held only on the
+    # first snapshot are listed too (zeros), so a product that has gone still has its name.
     lines: dict = {}
     for d, rg, code, name, brand, loc, ltype, *vals in line_rows:
         out["locs"][loc] = ltype
         sk = out["regions"][rg]["skus"]
         if code not in sk or d == latest:
-            sk[code] = [name, brand, None, None, None]
-        ln = lines.setdefault((rg, code, loc), {"now": [0.0] * 8, "v90_30": 0.0, "u90_30": 0.0, "v90_1": 0.0})
+            sk[code] = [name, brand] + [None] * len(LINES)
+        ln = lines.setdefault((rg, code, loc), {"now": [0.0] * 2 * NB, "d30": [0.0] * 2 * NB})
         if d == latest:
             ln["now"] = [_r2(v) for v in vals]
         if d == d30:
-            ln["v90_30"], ln["u90_30"] = _r2(sum(vals[1:4])), _r2(sum(vals[5:8]))
-        if d == first:
-            ln["v90_1"] = _r2(sum(vals[1:4]))
+            ln["d30"] = [_r2(v) for v in vals]
     for (rg, code, loc), ln in sorted(lines.items()):
-        out["regions"][rg]["lines"].append([code, loc, *ln["now"], ln["v90_30"], ln["u90_30"], ln["v90_1"]])
+        out["regions"][rg]["lines"].append([code, loc, *ln["now"], *ln["d30"]])
 
+    # skus[code] = [name, brand, aged since 90, 120, 180, 240, 370]
     runs: dict = {}
-    for d, rg, code, a90, a180, a370 in run_rows:
-        r = runs.setdefault((rg, code), (set(), set(), set()))
-        if a90:
-            r[0].add(d)
-        if a180:
-            r[1].add(d)
-        if a370:
-            r[2].add(d)
+    for d, rg, code, *past in run_rows:
+        r = runs.setdefault((rg, code), [set() for _ in LINES])
+        for s, p in zip(r, past):
+            if p:
+                s.add(d)
     for (rg, code), sets in runs.items():
         meta = out["regions"][rg]["skus"].get(code)
         if meta is not None:
-            meta[2:5] = [run_start(dates, s) for s in sets]
+            meta[2:] = [run_start(dates, s) for s in sets]
     return out
 
 

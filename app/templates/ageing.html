@@ -6,8 +6,9 @@
 {% block head %}
 <style>
   /* age bands: escalating warm colours, the same meaning in both themes */
-  :root{--ag-b1:#e0a91b;--ag-b2:#ea6c14;--ag-b3:#d63a40}
-  [data-theme="dark"]{--ag-b1:#f5c451;--ag-b2:#fb8a3c;--ag-b3:#ff5d63}
+  /* --ag-bN = band N (1 = 91–120 … 5 = 370+) */
+  :root{--ag-b1:#e3bd2b;--ag-b2:#e0901b;--ag-b3:#ea6c14;--ag-b4:#d63a40;--ag-b5:#9c1f3f}
+  [data-theme="dark"]{--ag-b1:#f7d66b;--ag-b2:#f5ab45;--ag-b3:#fb8a3c;--ag-b4:#ff5d63;--ag-b5:#d6457c}
   .ag-tw{display:inline-flex;align-items:center;gap:8px;min-width:0}
   .ag-tg{flex:none;width:20px;height:20px;border-radius:6px;border:1px solid var(--r-line-2);background:var(--r-card-2);
     color:var(--r-ink-2);font-weight:800;font-size:13px;line-height:1;cursor:pointer;padding:0}
@@ -61,7 +62,7 @@
 <div class="r-grid r-cols-2 r-sec">
   <section class="r-card">
     <div class="r-card-h">
-      <div><p class="r-eyebrow">Value past 90 days, by age band</p><h2 id="agBandsTitle">Where the aged stock sits</h2></div>
+      <div><p class="r-eyebrow" id="agBandsEyebrow">Value past 90 days, by age band</p><h2 id="agBandsTitle">Where the aged stock sits</h2></div>
       <div class="r-seg" id="agRange" role="group" aria-label="Period">
         <button type="button" data-range="30">30d</button>
         <button type="button" data-range="90">90d</button>
@@ -70,11 +71,7 @@
       </div>
     </div>
     <div class="r-chart" id="agBands"></div>
-    <div class="r-legend">
-      <span><i style="background:var(--ag-b1)"></i>91–180 days</span>
-      <span><i style="background:var(--ag-b2)"></i>181–370 days</span>
-      <span><i style="background:var(--ag-b3)"></i>370+ days</span>
-    </div>
+    <div class="r-legend" id="agBandsLegend"></div>
     <p class="ag-hint" id="agFlow"></p>
   </section>
   <section class="r-card">
@@ -83,8 +80,7 @@
     </div>
     <div class="r-chart" id="agShare"></div>
     <div class="r-legend" id="agShareLegend"></div>
-    <p class="ag-hint">Value over 90 days ÷ total stock value. Early 2026 is a handful of point snapshots (gaps are drawn as
-      straight lines); daily from 11 May.</p>
+    <p class="ag-hint" id="agShareHint"></p>
   </section>
 </div>
 
@@ -102,8 +98,10 @@
       <span class="r-seg" id="agShow" role="group" aria-label="List products">
         <button type="button" data-show="0">All stock</button>
         <button type="button" data-show="1" aria-pressed="true">Over 90</button>
-        <button type="button" data-show="2">Over 180</button>
-        <button type="button" data-show="3">Over 370</button>
+        <button type="button" data-show="2">Over 120</button>
+        <button type="button" data-show="3">Over 180</button>
+        <button type="button" data-show="4">Over 240</button>
+        <button type="button" data-show="5">Over 370</button>
       </span>
     </label>
     <label>Measure
@@ -123,8 +121,9 @@
     </table>
   </div>
   <p class="ag-hint">Brand and total rows always cover the brand's whole stock at the chosen location; "List products"
-    and Find only choose which products are listed under them. <b>Aged since</b> = the first day of the current unbroken
-    run with stock past the line being listed (90 days under "All stock").</p>
+    and Find only choose which products are listed under them. The line chosen there (90 days under "All stock") is the one
+    the whole page measures: the Over / % over / vs 30d columns, the tiles and both charts. <b>Aged since</b> = the first
+    day of the current unbroken run with stock past that line.</p>
 </section>
 
 <section class="r-card r-sec" id="agTplCard">
@@ -136,8 +135,8 @@
 
 <p class="r-note">
   <b>Source.</b> The daily NetSuite <i>Inventory Aging Report</i>: one row per item × location with 13 age buckets, rolled into
-  0–90 / 91–180 / 181–370 / 370+ with no interpolation — the edges are NetSuite's and nothing is counted twice ("over 90" is
-  the last three bands). Values at average cost, not retail.<br>
+  0–90 / 91–120 / 121–180 / 181–240 / 241–370 / 370+ with no interpolation — the edges are NetSuite's and nothing is counted
+  twice ("over 120" is the last four bands). Values at average cost, not retail.<br>
   <b>Age basis.</b> NetSuite ages stock from its arrival at its <i>current</i> location, so a transfer restarts the clock. Early-2026
   NZ stock looks young because Christchurch was emptied into Auckland; part of its rise from May is that stock ageing again.<br>
   <b>Regions.</b> AU figures are AUD, NZ figures NZD — never added together.<br>
@@ -154,10 +153,18 @@
   "use strict";
   var D = {{ data|tojson }}, ITEMS = {{ items_link|tojson }};
   var R = Object.keys(D.regions)[0];
-  var S = {show: 1, m: "v", loc: "", q: "", key: "o90", dir: -1, range: "0"};
+  var S = {show: 1, m: "v", loc: "", q: "", key: "o", dir: -1, range: "0"};
   var open = {};
-  var BANDS = ["0–90", "91–180", "181–370", "370+"];
-  var LINE = ["over 90", "over 90", "over 180", "over 370"];
+  // Six bands; "the line" is the age the page measures against. S.show 0 = all stock
+  // (measured at 90), 1..5 = over 90 / 120 / 180 / 240 / 370 - and the first band past
+  // line S.show is band S.show, so past(x) sums bands S.show..5.
+  var NB = 6, BANDS = ["0–90", "91–120", "121–180", "181–240", "241–370", "370+"];
+  var DAYS = [90, 90, 120, 180, 240, 370];
+  function lf() { return S.show || 1; }
+  function lday() { return DAYS[S.show]; }
+  function pastFrom(x, k) { var o = 0; for (var i = k; i < NB; i++) o += x[i]; return o; }
+  function past(x) { return pastFrom(x, lf()); }
+  function sum(x) { return pastFrom(x, 0); }
 
   var esc = RPT.esc, NF = new Intl.NumberFormat("en-AU");
   function num(n) { return n == null ? "—" : NF.format(Math.round(n)); }
@@ -172,35 +179,39 @@
   var IDX = {};
   D.dates.forEach(function (d, i) { IDX[d] = i; });
   function at(rg, iso) {
-    var s = D.regions[rg].series, i = IDX[iso];
-    var v = [s.v0[i], s.v1[i], s.v2[i], s.v3[i]], u = [s.u0[i], s.u1[i], s.u2[i], s.u3[i]];
-    return {v: v, u: u, tot: v[0] + v[1] + v[2] + v[3], o90: v[1] + v[2] + v[3], o180: v[2] + v[3], o370: v[3],
-            units: u[0] + u[1] + u[2] + u[3], u90: u[1] + u[2] + u[3]};
+    var s = D.regions[rg].series, i = IDX[iso], v = [], u = [];
+    for (var b = 0; b < NB; b++) { v.push(s["v" + b][i]); u.push(s["u" + b][i]); }
+    return {v: v, u: u, tot: sum(v), units: sum(u), o: past(v)};
   }
 
-  /* ---- header, lede, tiles ---- */
+  /* ---- header, lede, tiles (all measured at the selected line) ---- */
   function drawTop() {
-    var now = at(R, D.ref.latest), was = at(R, D.ref.d30);
-    var n180 = 0, sk = D.regions[R].skus, lines = D.regions[R].lines, seen = {};
-    lines.forEach(function (l) { if (l[4] + l[5] > 0 && !seen[l[0]]) { seen[l[0]] = 1; n180++; } });
+    var now = at(R, D.ref.latest), was = at(R, D.ref.d30), N = lday();
+    var nPast = 0, lines = D.regions[R].lines, seen = {};
+    lines.forEach(function (l) { if (past(l.slice(8, 14)) > 0 && !seen[l[0]]) { seen[l[0]] = 1; nPast++; } });
     document.getElementById("agAsAt").innerHTML = "As at <b>" + esc(longDate(D.ref.latest)) + "</b> · " + D.dates.length + " snapshots";
-    var reg = R === "AU" ? "Australian" : "New Zealand", d90 = now.o90 - was.o90;
+    var reg = R === "AU" ? "Australian" : "New Zealand", dO = now.o - was.o;
     document.getElementById("agLede").innerHTML =
-      "<b>" + money(now.o90) + "</b> (" + (now.tot ? (now.o90 / now.tot * 100).toFixed(1) : "0") + "%) of " + reg +
-      " stock is over 90 days — " + (Math.abs(d90) < 0.5 ? "unchanged" : (d90 > 0 ? "up " : "down ") + money(Math.abs(d90))) +
-      " on 30 days ago (" + esc(longDate(D.ref.d30)) + "). <b>" + money(now.o180) + "</b> of it is past 180 days, across " +
-      NF.format(n180) + " products.";
+      "<b>" + money(now.o) + "</b> (" + (now.tot ? (now.o / now.tot * 100).toFixed(1) : "0") + "%) of " + reg +
+      " stock is over " + N + " days — " + (Math.abs(dO) < 0.5 ? "unchanged" : (dO > 0 ? "up " : "down ") + money(Math.abs(dO))) +
+      " on 30 days ago (" + esc(longDate(D.ref.d30)) + "), across " + NF.format(nPast) + (nPast === 1 ? " product." : " products.");
     function tile(lbl, val, sub) { return '<div class="r-stat"><div class="lbl">' + lbl + '</div><div class="val">' + val + '</div><div class="sub">' + sub + "</div></div>"; }
     function vs(n, fmt) { return '<b class="' + badGood(n) + '">' + signed(n, fmt) + "</b> vs 30 days"; }
-    var share = now.tot ? now.o90 / now.tot * 100 : 0, wshare = was.tot ? was.o90 / was.tot * 100 : 0;
+    function m0(x) { return money(x, false); }
+    var share = now.tot ? now.o / now.tot * 100 : 0, wshare = was.tot ? was.o / was.tot * 100 : 0;
+    // up to two older lines beside it: 180 and 370 from the 90 / 120 lines, else what's left
+    var later = DAYS.slice(1).filter(function (d) { return d > N; });
+    if (later.length > 2) later = [180, 370];
     var tpl = D.regions[R].tpl;
     document.getElementById("agTiles").innerHTML =
       tile("Total stock <small>" + cur() + "</small>", money(now.tot, false),
-           '<b class="flat">' + signed(now.tot - was.tot, function (x) { return money(x, false); }) + "</b> vs 30 days · " + num(now.units) + " units") +
-      tile("Over 90 days", money(now.o90, false), vs(now.o90 - was.o90, function (x) { return money(x, false); })) +
-      tile("Aged share", share.toFixed(1) + "%", '<b class="' + badGood(share - wshare) + '">' + signed(share - wshare, function (x) { return x.toFixed(1); }) + " pts</b> vs 30 days") +
-      tile("Over 180 days", money(now.o180, false), vs(now.o180 - was.o180, function (x) { return money(x, false); })) +
-      tile("Over 370 days", money(now.o370, false), vs(now.o370 - was.o370, function (x) { return money(x, false); }));
+           '<b class="flat">' + signed(now.tot - was.tot, m0) + "</b> vs 30 days · " + num(now.units) + " units") +
+      tile("Over " + N + " days", money(now.o, false), vs(now.o - was.o, m0)) +
+      tile("Aged share <small>over " + N + "</small>", share.toFixed(1) + "%", '<b class="' + badGood(share - wshare) + '">' + signed(share - wshare, function (x) { return x.toFixed(1); }) + " pts</b> vs 30 days") +
+      later.map(function (d) {
+        var k = DAYS.indexOf(d), a = pastFrom(now.v, k), b = pastFrom(was.v, k);
+        return tile("Over " + d + " days", money(a, false), vs(a - b, m0));
+      }).join("");
     var tu = tpl.units[IDX[D.ref.latest]], tw = tpl.units[IDX[D.ref.d30]];
     document.getElementById("agTplCard").hidden = !tu && !tw;
     document.getElementById("agTpl").innerHTML =
@@ -229,20 +240,30 @@
   function drawCharts() {
     var cal = window_(), s = D.regions[R].series;
     var xl = function (l) { return RPT.wk(l); }, tl = function (l) { return RPT.wk(l, true); };
+    var N = lday(), bands = [];
+    for (var b = lf(); b < NB; b++) bands.push(b);
     document.getElementById("agBandsTitle").textContent = "Where the aged stock sits (" + cur() + ")";
+    document.getElementById("agBandsEyebrow").textContent = "Value past " + N + " days, by age band";
     bandsChart = RPT.chart(document.getElementById("agBands"), {
       labels: cal, xLabel: xl, tipLabel: tl,
       axis: function (v) { return RPT.compact(v); },
       fmt: function (v) { return money(v); },
-      series: [
-        {name: "91–180", type: "bar", stack: "a", values: pick(s.v1, cal), color: "var(--ag-b1)"},
-        {name: "181–370", type: "bar", stack: "a", values: pick(s.v2, cal), color: "var(--ag-b2)"},
-        {name: "370+", type: "bar", stack: "a", values: pick(s.v3, cal), color: "var(--ag-b3)"}]
+      series: bands.map(function (b) {
+        return {name: BANDS[b], type: "bar", stack: "a", values: pick(s["v" + b], cal), color: "var(--ag-b" + b + ")"};
+      })
     });
+    document.getElementById("agBandsLegend").innerHTML = bands.map(function (b) {
+      return '<span><i style="background:var(--ag-b' + b + ')"></i>' + BANDS[b] + " days</span>";
+    }).join("");
+    document.getElementById("agShareHint").textContent = "Value over " + N + " days ÷ total stock value. Early 2026 is a " +
+      "handful of point snapshots (gaps are drawn as straight lines); daily from 11 May.";
     var ser = [], leg = [], cols = {AU: "var(--r-accent)", NZ: "var(--r-amber)"};
     Object.keys(D.regions).forEach(function (rg) {
       var x = D.regions[rg].series;
-      var share = x.v0.map(function (_, i) { var t = x.v0[i] + x.v1[i] + x.v2[i] + x.v3[i]; return t ? (x.v1[i] + x.v2[i] + x.v3[i]) / t * 100 : null; });
+      var share = x.v0.map(function (_, i) {
+        var v = []; for (var b = 0; b < NB; b++) v.push(x["v" + b][i]);
+        var t = sum(v); return t ? past(v) / t * 100 : null;
+      });
       ser.push({name: rg, type: "line", values: pick(share, cal), color: cols[rg]});
       leg.push('<span><i style="background:' + cols[rg] + '"></i>' + (rg === "AU" ? "Australia" : "New Zealand") + "</span>");
     });
@@ -251,38 +272,41 @@
       axis: function (v) { return v.toFixed(0) + "%"; }, fmt: function (v) { return v.toFixed(1) + "%"; }
     });
     document.getElementById("agShareLegend").innerHTML = leg.join("");
-    // aged in vs cleared over the window: day-on-day rises and falls of value over 90
+    // aged in vs cleared over the window: day-on-day rises and falls of value over the line
     var up = 0, down = 0, prev = null;
     cal.forEach(function (d) {
       if (!(d in IDX)) return;
-      var o = s.v1[IDX[d]] + s.v2[IDX[d]] + s.v3[IDX[d]];
+      var o = 0; bands.forEach(function (b) { o += s["v" + b][IDX[d]]; });
       if (prev != null) { if (o > prev) up += o - prev; else down += prev - o; }
       prev = o;
     });
-    document.getElementById("agFlow").textContent = "Over this period " + money(up) + " aged past the 90-day line and " +
+    document.getElementById("agFlow").textContent = "Over this period " + money(up) + " aged past the " + N + "-day line and " +
       money(down) + " cleared it (sold, moved or written off) — day-on-day changes, so both directions show.";
   }
 
   /* ---- the tree ---- */
-  var COLS = [
-    {k: "name", t: "Brand / product", l: 1},
-    {k: "tot", t: "Total"}, {k: "b0", t: "0–90"}, {k: "b1", t: "91–180"}, {k: "b2", t: "181–370"}, {k: "b3", t: "370+"},
-    {k: "o90", t: "Over 90"}, {k: "pct", t: "% over 90"}, {k: "chg", t: "Over 90 vs 30d"}, {k: "since", t: "Aged since"}];
-  function blank() { return {v: [0, 0, 0, 0], u: [0, 0, 0, 0], v30: 0, u30: 0, v1st: 0}; }
+  function cols() {               // the three "over" columns follow the selected line
+    var N = lday();
+    return [{k: "name", t: "Brand / product", l: 1}, {k: "tot", t: "Total"}]
+      .concat(BANDS.map(function (b, i) { return {k: "b" + i, t: b}; }))
+      .concat([{k: "o", t: "Over " + N}, {k: "pct", t: "% over " + N}, {k: "chg", t: "Over " + N + " vs 30d"},
+               {k: "since", t: "Aged since"}]);
+  }
+  // a line's bands: l[2..7] value and l[8..13] units now, l[14..19] / l[20..25] 30 days ago
+  function zeros() { return [0, 0, 0, 0, 0, 0]; }
+  function blank() { return {v: zeros(), u: zeros(), v30: zeros(), u30: zeros()}; }
   function add(a, l) {
-    for (var i = 0; i < 4; i++) { a.v[i] += l[2 + i]; a.u[i] += l[6 + i]; }
-    a.v30 += l[10]; a.u30 += l[11]; a.v1st += l[12];
+    for (var i = 0; i < NB; i++) { a.v[i] += l[2 + i]; a.u[i] += l[8 + i]; a.v30[i] += l[14 + i]; a.u30[i] += l[20 + i]; }
   }
   function metrics(a) {
-    var x = S.m === "v" ? a.v : a.u, tot = x[0] + x[1] + x[2] + x[3], o = x[1] + x[2] + x[3];
-    return {tot: tot, b0: x[0], b1: x[1], b2: x[2], b3: x[3], o90: o,
-            pct: tot ? o / tot * 100 : 0,
-            chg: o - (S.m === "v" ? a.v30 : a.u30)};
+    var x = S.m === "v" ? a.v : a.u, tot = sum(x), o = past(x), m = {tot: tot, o: o};
+    for (var i = 0; i < NB; i++) m["b" + i] = x[i];
+    m.pct = tot ? o / tot * 100 : 0;
+    m.chg = o - past(S.m === "v" ? a.v30 : a.u30);
+    return m;
   }
   function hasPast(a, line) {      // units past the line (units catch $0-cost lines too)
-    if (line === 0) return a.u[0] + a.u[1] + a.u[2] + a.u[3] > 0;
-    for (var i = line; i < 4; i++) if (a.u[i] > 0) return true;
-    return false;
+    return (line === 0 ? sum(a.u) : pastFrom(a.u, line)) > 0;
   }
   function build() {
     var rg = D.regions[R], q = S.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -308,14 +332,14 @@
       P_since(B.list);
       // a product's locations: those holding stock now, plus any it has left since 30 days ago
       // (shown with their fall, so the location rows add up to the product's "vs 30d")
-      B.list.forEach(function (P) { P.kids = P.kids.filter(function (L) { return hasPast(L.a, 0) || L.a.v30 || L.a.u30; }); });
+      B.list.forEach(function (P) { P.kids = P.kids.filter(function (L) { return hasPast(L.a, 0) || past(L.a.v30) || past(L.a.u30); }); });
       shown += B.list.length;
       if (B.list.length) out.push(B);
     });
     return {brands: out, total: total, shown: shown};
   }
   function P_since(list) {
-    var k = S.show === 0 ? 2 : S.show + 1;      // meta[2] = since 90, [3] = 180, [4] = 370
+    var k = lf() + 1;      // meta[2..6] = since past 90, 120, 180, 240, 370
     list.forEach(function (P) { P.since = P.meta[k]; });
   }
   function sortKey(n, m) {
@@ -333,8 +357,9 @@
   function cells(m, since) {
     var f = S.m === "v" ? function (n) { return num(n); } : num;
     function z(n) { return Math.abs(n) < 0.5 ? '<span class="q0">–</span>' : f(n); }
-    return '<td>' + z(m.tot) + '</td><td>' + z(m.b0) + '</td><td>' + z(m.b1) + '</td><td>' + z(m.b2) + '</td><td>' + z(m.b3) +
-      '</td><td><b>' + z(m.o90) + '</b></td><td>' + (m.tot ? m.pct.toFixed(1) + '%<span class="ag-pctbar"><i style="width:' + Math.min(100, m.pct).toFixed(0) + '%"></i></span>' : '<span class="q0">–</span>') +
+    var bands = "";
+    for (var i = 0; i < NB; i++) bands += "<td>" + z(m["b" + i]) + "</td>";
+    return '<td>' + z(m.tot) + '</td>' + bands + '<td><b>' + z(m.o) + '</b></td><td>' + (m.tot ? m.pct.toFixed(1) + '%<span class="ag-pctbar"><i style="width:' + Math.min(100, m.pct).toFixed(0) + '%"></i></span>' : '<span class="q0">–</span>') +
       '</td><td class="' + badGood(m.chg) + '">' + (Math.abs(m.chg) < 0.5 ? "–" : signed(m.chg, f)) + '</td><td>' + (since === undefined ? "" : since ? sinceText(since) : '<span class="q0">–</span>') + "</td>";
   }
   // A run that starts on the first snapshot may be older — the history starts there.
@@ -344,9 +369,9 @@
   }
   function head() {
     var unit = S.m === "v" ? cur() : "units";
-    document.getElementById("agHead").innerHTML = COLS.map(function (c) {
+    document.getElementById("agHead").innerHTML = cols().map(function (c) {
       var arrow = S.key === c.k ? '<span class="sm">' + (S.dir < 0 ? "▼" : "▲") + "</span>" : "";
-      var sub = c.k === "tot" ? '<span class="wd">' + unit + "</span>" : c.k === "since" ? '<span class="wd">' + LINE[S.show] + "</span>" : "";
+      var sub = c.k === "tot" ? '<span class="wd">' + unit + "</span>" : c.k === "since" ? '<span class="wd">over ' + lday() + "</span>" : "";
       return '<th class="' + (c.l ? "l sticky" : "") + '" data-k="' + c.k + '" tabindex="0">' + c.t + arrow + sub + "</th>";
     }).join("");
   }
@@ -374,7 +399,7 @@
         });
       });
     });
-    if (!T.brands.length) rows.push('<tr><td class="l" colspan="' + COLS.length + '"><div class="r-empty">No products match.</div></td></tr>');
+    if (!T.brands.length) rows.push('<tr><td class="l" colspan="' + cols().length + '"><div class="r-empty">No products match.</div></td></tr>');
     document.querySelector("#agTable tbody").innerHTML = rows.join("");
     document.getElementById("agSum").textContent = NF.format(T.shown) + (T.shown === 1 ? " product" : " products") +
       " listed across " + T.brands.length + (T.brands.length === 1 ? " brand" : " brands") + " · " +
@@ -383,16 +408,16 @@
 
   /* ---- CSV of what the table lists, product × location ---- */
   function csv() {
-    var T = LAST, out = [["Region", "Brand", "Product", "Description", "Location", "Location type",
-      "Total " + cur(), "0-90 " + cur(), "91-180 " + cur(), "181-370 " + cur(), "370+ " + cur(), "Over 90 " + cur(),
-      "Over 90 " + cur() + " 30 days ago", "Units", "Units over 90", "Aged since (" + LINE[S.show] + ")"]];
+    var T = LAST, N = lday(), out = [["Region", "Brand", "Product", "Description", "Location", "Location type",
+      "Total " + cur()].concat(BANDS.map(function (b) { return b.replace("–", "-") + " " + cur(); }),
+      ["Over " + N + " " + cur(), "Over " + N + " " + cur() + " 30 days ago", "Units", "Units over " + N,
+       "Aged since (over " + N + ")"])];
     T.brands.forEach(function (B) {
       B.list.forEach(function (P) {
         P.kids.forEach(function (L) {
           var v = L.a.v, u = L.a.u;
-          out.push([R, B.name, P.name, P.desc, L.name, D.locs[L.name] || "",
-            v[0] + v[1] + v[2] + v[3], v[0], v[1], v[2], v[3], v[1] + v[2] + v[3], L.a.v30,
-            u[0] + u[1] + u[2] + u[3], u[1] + u[2] + u[3], P.since || ""]);
+          out.push([R, B.name, P.name, P.desc, L.name, D.locs[L.name] || "", sum(v)].concat(v,
+            [past(v), past(L.a.v30), sum(u), past(u), P.since || ""]));
         });
       });
     });
@@ -431,7 +456,7 @@
   }
   seg("agRegion", "data-region", function (v) { R = v; open = {}; fillLocs(); drawTop(); drawCharts(); drawTable(); });
   seg("agRange", "data-range", function (v) { S.range = v; drawCharts(); });
-  seg("agShow", "data-show", function (v) { S.show = +v; drawTable(); });
+  seg("agShow", "data-show", function (v) { S.show = +v; drawTop(); drawCharts(); drawTable(); });
   seg("agMeasure", "data-m", function (v) { S.m = v; drawTable(); });
   document.getElementById("agLoc").addEventListener("change", function (e) { S.loc = e.target.value; drawTable(); });
   var qt = null;

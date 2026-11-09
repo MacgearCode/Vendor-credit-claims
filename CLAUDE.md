@@ -329,6 +329,16 @@ browser builds the tree.
   lines AU vs NZ, then the **brand → product → location table** (user's request: sortable, brand
   level expanding to products) with List products (all / over 90 / 180 / 370), Value / Units,
   Location, Find, Expand / Collapse, CSV of what's listed; 3PL units card; method notes.
+- **Six bands + a selectable line (user, 2026-11-10):** 0–90 / 91–120 / 121–180 / 181–240 /
+  241–370 / 370+ (all NetSuite bucket edges — view columns added by `Sell Through/db/14_ageing_bands.sql`),
+  List products = all / over 90 / 120 / 180 / 240 / 370, and **the chosen line drives the whole
+  page**: Over / % over / vs 30d columns, lede, tiles (plus up to two older lines), band chart
+  (bands past the line), aged-share chart, flow text, CSV. "All stock" measures at 90. Payload
+  lines are `[code, loc, 6 value + 6 unit bands now, the same 30 days ago]`; `skus[code][2:7]` =
+  aged since 90 / 120 / 180 / 240 / 370. Checked on local 8 Nov: each line = the sum of its bands,
+  six bands = the old four on all 401,600 rows, view and summary give identical figures.
+  **The code needs db/14 on the warehouse first** (missing columns = a page error, not "not loaded")
+  — applied to the cluster 2026-11-10, so it can deploy.
 - **Brand and total rows are always the whole brand / region at the chosen location**; the
   List / Find filters only choose which products are listed. A product's location rows include any
   location it has left since 30 days ago, so they add up to the product (value, over 90, vs 30d).
@@ -450,8 +460,8 @@ is in the queries. Two layers:
   → 0.1 s, Weekly 30 → 3.7 s (vendor 3-brand 32 → 3.8 s), Sell-Through 8.6 → 2.1 s, Ageing
   5.4 → 2.2 s, leaderboards 3.1 → 1.0 s. Timings measured from a PC are inflated by
   downloading 100k+ rows over the internet; the droplet is in SYD1 with the cluster.
-  **Go-live (pending, 2026-11-09):** owner TEMP grant done and refresh tested; still needs
-  the Windmill netsuite_sync publish — see `Sell Through/CLAUDE.md`,
+  **Go-live 2026-11-09:** owner TEMP grant done, refresh tested, Windmill netsuite_sync
+  publish done, commit 3ce95b9 pushed (droplet redeploy by the user — no SSH key from the PC) — see `Sell Through/CLAUDE.md`,
   "Summary tables". Until then the sales summaries go stale at the next NetSuite load and
   the site uses the original queries.
 - Front end: GZip on responses; item links prefetch on hover/touch and the top

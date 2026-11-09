@@ -26,27 +26,43 @@ def test_run_start_is_the_current_unbroken_run():
     assert ageing.run_start(DATES, {D1, D2, D3}) is None                    # not past the line today
 
 
+def test_queries_draw_the_lines_at_whole_bands():
+    assert ageing.BANDS == ("0_90", "91_120", "121_180", "181_240", "241_370", "370_plus")
+    assert ageing._past(0) == "u_91_120 + u_121_180 + u_181_240 + u_241_370 + u_370_plus"   # over 90
+    assert ageing._past(1) == "u_121_180 + u_181_240 + u_241_370 + u_370_plus"              # over 120
+    assert ageing._past(3) == "u_241_370 + u_370_plus"                                      # over 240
+    assert ageing._past(4) == "u_370_plus"
+    assert ageing._RUNS_SQL.count("bool_or(") == 5
+
+
 def test_shape():
-    series = [(D4, "AU", 100, 20, 5, 1, 10, 2, 1, 1)]
+    # six value bands, then six unit bands
+    series = [(D4, "AU", 100, 12, 8, 3, 2, 1, 10, 1, 1, 1, 0, 1)]
     tpl = [(D4, "AU", 500, 3)]
     # item x location at latest, 30 days ago (D2) and first; a line gone since D2 still counts as a fall
-    lines = [(D4, "AU", "A1", "Item A", "MOVA", "AU2 – Melbourne Warehouse", "Warehouse", 80, 10, 5, 1, 8, 1, 1, 1),
-             (D2, "AU", "A1", "Item A old name", "MOVA", "AU2 – Melbourne Warehouse", "Warehouse", 0, 30, 0, 0, 0, 3, 0, 0),
-             (D2, "AU", "B1", "Item B", "BONELK", "QA Melb", "QA", 0, 7, 0, 0, 0, 2, 0, 0),
-             (D1, "AU", "A1", "Item A", "MOVA", "AU2 – Melbourne Warehouse", "Warehouse", 0, 4, 0, 0, 0, 1, 0, 0)]
-    runs = [(D3, "AU", "A1", True, True, False), (D4, "AU", "A1", True, True, True)]
+    W = "AU2 – Melbourne Warehouse"
+    lines = [(D4, "AU", "A1", "Item A", "MOVA", W, "Warehouse", 80, 6, 4, 3, 2, 1, 8, 1, 0, 1, 0, 1),
+             (D2, "AU", "A1", "Item A old name", "MOVA", W, "Warehouse", 0, 30, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0),
+             (D2, "AU", "B1", "Item B", "BONELK", "QA Melb", "QA", 0, 0, 7, 0, 0, 0, 0, 0, 2, 0, 0, 0),
+             (D1, "AU", "A1", "Item A", "MOVA", W, "Warehouse", 0, 4, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0)]
+    # past 90, 120, 180, 240, 370
+    runs = [(D3, "AU", "A1", True, True, True, False, False),
+            (D4, "AU", "A1", True, True, True, True, True)]
     out = ageing.shape(["AU"], series, tpl, lines, runs, DATES)
 
     assert out["ref"] == {"latest": "2026-10-22", "d30": "2026-09-22", "first": "2026-01-22"}
     au = out["regions"]["AU"]
     assert au["ccy"] == "AUD"
-    assert au["series"]["v1"] == [0, 0, 0, 20.0] and au["tpl"] == {"units": [0, 0, 0, 500.0], "skus": 3}
+    assert au["series"]["v1"] == [0, 0, 0, 12.0] and au["series"]["u5"] == [0, 0, 0, 1.0]
+    assert au["tpl"] == {"units": [0, 0, 0, 500.0], "skus": 3}
     by = {(l[0], l[1]): l for l in au["lines"]}
-    assert by[("A1", "AU2 – Melbourne Warehouse")] == ["A1", "AU2 – Melbourne Warehouse",
-                                                       80, 10, 5, 1, 8, 1, 1, 1, 30, 3, 4]
-    assert by[("B1", "QA Melb")][2:] == [0] * 8 + [7, 2, 0]
-    assert au["skus"]["A1"] == ["Item A", "MOVA", "2026-10-21", "2026-10-21", "2026-10-22"]   # latest name wins
-    assert au["skus"]["B1"][2:] == [None, None, None]
+    # [code, loc, 6 value + 6 unit bands now, 6 value + 6 unit bands 30 days ago]
+    assert by[("A1", W)] == ["A1", W, 80, 6, 4, 3, 2, 1, 8, 1, 0, 1, 0, 1,
+                             0, 30, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0]
+    assert by[("B1", "QA Melb")][2:] == [0] * 12 + [0, 0, 7, 0, 0, 0, 0, 0, 2, 0, 0, 0]
+    assert au["skus"]["A1"] == ["Item A", "MOVA", "2026-10-21", "2026-10-21", "2026-10-21",
+                                "2026-10-22", "2026-10-22"]                    # latest name wins
+    assert au["skus"]["B1"][2:] == [None] * 5
     assert out["locs"]["QA Melb"] == "QA"
 
 
