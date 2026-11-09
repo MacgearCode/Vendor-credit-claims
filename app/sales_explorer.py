@@ -92,7 +92,12 @@ def _monthly(region: str) -> Cube:
     rk = warehouse.region_key(region)
     # No rep column: the account manager is a property of the customer (see top), so
     # it's looked up per customer at slice time. Dropping it also shrinks the summary.
-    rows = warehouse.query("""
+    rows = warehouse.query_summary("agg_sales_month", """
+        select s.month_key, s.customer_id, s.brand_id, null::int,
+               sum(s.net_sales), sum(s.net_sales_est_cost), sum(s.net_sales_qty)
+        from reporting.agg_sales_month s
+        where s.region_key = %(rk)s and s.n_net > 0
+        group by 1, 2, 3 order by 1""", """
         select s.date_key / 100, s.customer_id, s.brand_id, null::int,
                sum(s.net_sales), sum(s.net_sales_est_cost), sum(s.net_sales_qty)
         from reporting.fact_sales_line s
@@ -112,7 +117,13 @@ def daily_window(today: date) -> tuple[date, date, date, date]:
 def _daily(region: str, today: date) -> Cube:
     rk = warehouse.region_key(region)
     lo, hi, ly_lo, ly_hi = daily_window(today)
-    rows = warehouse.query("""
+    rows = warehouse.query_summary("agg_sales_day", """
+        select s.date_key, s.customer_id, s.brand_id, null::int,
+               sum(s.net_sales), sum(s.net_sales_est_cost), sum(s.net_sales_qty)
+        from reporting.agg_sales_day s
+        where s.region_key = %(rk)s and s.n_net > 0
+          and (s.date_key between %(lo)s and %(hi)s or s.date_key between %(llo)s and %(lhi)s)
+        group by 1, 2, 3 order by 1""", """
         select s.date_key, s.customer_id, s.brand_id, null::int,
                sum(s.net_sales), sum(s.net_sales_est_cost), sum(s.net_sales_qty)
         from reporting.fact_sales_line s
@@ -193,13 +204,91 @@ def period(code: str, fy: int, today: date) -> dict:
         a, b = fy0, date(fy, 3, 31)
         label = f"FY{fy % 100:02d}"
     if a > today:
-        return {"label": label, "a": a, "b": a - timedelta(days=1), "future": True}
+        return {"label": label, "a": a, "b": a - timedelta(days=1), "end": b, "future": True}
     partial = b > today
-    b = min(b, today)
+    end, b = b, min(b, today)
     return {"label": label + (" (to date)" if partial and code not in
                               ("mtd", "qtd", "ytd", "week", "today") else ""),
-            "a": a, "b": b, "ly_a": sales.last_year(a), "ly_b": sales.last_year(b),
+            "a": a, "b": b, "end": end, "ly_a": sales.last_year(a), "ly_b": sales.last_year(b),
             "future": False}
+
+
+# ---- targets ------------------------------------------------------------------------
+# The official targets committed in the Targets tool (sales.target_lines), set per
+# country x brand x retailer x month. A retailer's target belongs to its ACCOUNT MANAGER
+# in NetSuite (retailer_ams: the manager on the customer records, user 2026-10-23 —
+# NetSuite is the source of truth, not a manager typed on the target), so targets sit on
+# Retailer, Brand, Month and Account manager rows and follow the manager filter; only
+# Account and Item rows have no target. A month the period covers only part of counts
+# in proportion to its weekdays — the home page's pace rule — so "to date" compares
+# like with like.
+TARGET_DIMS = ("retailer", "brand", "month", "rep")
+
+
+def _target_frac(ms: date, a: date, b: date) -> float:
+    me = _month_end(ms.year, ms.month)
+    lo, hi = max(a, ms), min(b, me)
+    if lo > hi:
+        return 0.0
+    if lo == ms and hi == me:
+        return 1.0
+    return sales.weekdays(lo, hi) / (sales.weekdays(ms, me) or 1)
+
+
+def target_lines() -> dict:
+    return warehouse.cached(("sales_targets_lines",), sales.target_lines)
+
+
+def retailer_ams(region: str, today: date) -> dict:
+    """{retailer: account manager id} from NetSuite's customer records. Where a retailer's
+    accounts have different managers (NZ JB HIFI), the one with the most sales over this
+    and last FY wins; a retailer with no sales then, the manager on most of its accounts."""
+    def build():
+        nm = names()
+        m, _ = cubes(region, today)
+        since = (sales.fy_start(today).year - 1) * 100 + 4
+        by: dict = {}
+        for i in range(bisect_left(m.k, since), len(m)):
+            t = nm["cust"].get(m.c[i])
+            if t and t[2] is not None:
+                g = by.setdefault(t[1], {})
+                g[t[2]] = g.get(t[2], 0.0) + m.v[i]
+        out = {g: max(v, key=v.get) for g, v in by.items()}
+        count: dict = {}
+        for _, g, am in nm["cust"].values():
+            if am is not None and g not in out:
+                c = count.setdefault(g, {})
+                c[am] = c.get(am, 0) + 1
+        out.update({g: max(c, key=c.get) for g, c in count.items()})
+        return out
+    return warehouse.cached(("sx_ram", region, today), build, ttl=MONTHLY_TTL)
+
+
+def targets(region: str, a: date, b: date, dims: list, f: dict, nm: dict, ams: dict):
+    """(total, {row key: target}) for [a, b], or None when no targets apply here. The
+    row dict is None when the rows use a dimension targets aren't set by. ams =
+    retailer_ams()."""
+    lines = target_lines().get(region)
+    if not lines:
+        return None
+    brand = nm["brand"].get(f["brand"]) if f.get("brand") is not None else None
+    by_row = {} if all(d in TARGET_DIMS for d in dims) else None
+    total = 0.0
+    for ms, bn, cust, amt in lines:
+        if (brand is not None and bn != brand) or (f.get("retailer") and cust != f["retailer"]):
+            continue
+        if f.get("rep") is not None and ams.get(cust) != f["rep"]:
+            continue
+        fr = _target_frac(ms, a, b)
+        if not fr:
+            continue
+        total += amt * fr
+        if by_row is not None:
+            key = tuple({"retailer": cust, "brand": bn, "month": f"{ms.year}-{ms.month:02d}",
+                         "rep": nm["rep"].get(ams.get(cust)) or "(no account manager)"}[d]
+                        for d in dims)
+            by_row[key] = by_row.get(key, 0.0) + amt * fr
+    return total, by_row
 
 
 # ---- slicing ------------------------------------------------------------------------
@@ -359,7 +448,26 @@ def explore(region: str, code: str, fy: int, today: date, dims: list, f: dict,
             if margin:
                 row["gp"] = round(cur[0] - cur[1], 2)
             out["rows"].append(row)
+    # targets: to date for the dates shown, and for the whole period
+    ams = retailer_ams(region, today)
+    tg = targets(region, p["a"], p["b"], dims, f, nm, ams)
+    full = targets(region, p["a"], p["end"], [], f, nm, ams)
+    out["targets"] = {"has": tg is not None or full is not None,
+                      "rows": bool(tg and tg[1] is not None),
+                      "full": round(full[0]) if full else None}
+    if tg and tg[1] is not None:
+        idx = {tuple(r["k"]): r for r in out["rows"]}
+        for key, t in tg[1].items():
+            r = idx.get(key)
+            if r is None:                     # a target with no sales (yet)
+                r = idx[key] = {"k": list(key), "v": 0.0, "ly": 0.0, "q": 0, "lq": 0}
+                if margin:
+                    r["gp"] = 0.0
+                out["rows"].append(r)
+            r["t"] = round(t, 2)
     out["kpis"] = _kpis(out["rows"], margin)
+    out["kpis"]["t"] = round(tg[0]) if tg else None
+    out["kpis"]["to_t"] = (out["kpis"]["v"] / tg[0] * 100) if tg and tg[0] > 0 else None
     out["quick"] = quick(region, today, f, nm, m, d)
     out["trend"] = trend(region, fy, today, f, nm, m, d)
     return out
@@ -407,13 +515,17 @@ def trend(region, fy, today, f, nm, m, d) -> dict:
         if f and not _filter_ok(f, m.c[i], m.b[i], m.r[i], nm):
             continue
         by[k[i]] = by.get(k[i], 0.0) + m.v[i]
-    cur, prev = [], []
+    ams = retailer_ams(region, today)
+    cur, prev, tgt = [], [], []
     for i in range(12):
         mo = (i + 3) % 12 + 1
         y = fy - 1 + (1 if mo < 4 else 0)
         cur.append(None if date(y, mo, 1) > today else round(by.get(y * 100 + mo, 0.0)))
         prev.append(round(by.get((y - 1) * 100 + mo, 0.0)))
+        t = targets(region, date(y, mo, 1), _month_end(y, mo), [], f, nm, ams)
+        tgt.append(round(t[0]) if t and t[0] else None)
     return {"labels": list(FY_MONTHS), "cur": cur, "prev": prev,
+            "target": tgt if any(tgt) else None,
             "fy": f"FY{fy % 100:02d}", "prev_fy": f"FY{(fy - 1) % 100:02d}"}
 
 
@@ -457,6 +569,9 @@ def to_xlsx(data: dict, title: str, filters: str) -> bytes:
     hdr = list(data["dim_labels"]) + ["Revenue", "LY", "YoY $", "YoY %", "Units", "LY units"]
     if margin:
         hdr += ["Est. GP", "GP %"]
+    tgt = (data.get("targets") or {}).get("rows")
+    if tgt:
+        hdr += ["Target", "% of target"]
     ws.cell(row=1, column=1, value=f"{title} — {filters}").font = Font(bold=True)
     fill = PatternFill("solid", fgColor="1F4E79")
     for j, h in enumerate(hdr, 1):
@@ -473,11 +588,15 @@ def to_xlsx(data: dict, title: str, filters: str) -> bytes:
         vals = list(r["k"]) + [r["v"], r["ly"], yoy, (yoy / r["ly"]) if r["ly"] > 0 else None, r["q"], r["lq"]]
         if margin:
             vals += [r["gp"], (r["gp"] / r["v"]) if r["v"] else None]
+        if tgt:
+            t = r.get("t")
+            vals += [t, (r["v"] / t) if t else None]
+        tj = len(hdr) - 1                     # the Target column, when there is one
         for j, val in enumerate(vals, 1):
             c = ws.cell(row=i, column=j, value=val)
-            if j in (nd + 1, nd + 2, nd + 3) or (margin and j == nd + 7):
+            if j in (nd + 1, nd + 2, nd + 3) or (margin and j == nd + 7) or (tgt and j == tj):
                 c.number_format = money
-            elif j == nd + 4 or (margin and j == nd + 8):
+            elif j == nd + 4 or (margin and j == nd + 8) or (tgt and j == tj + 1):
                 c.number_format = "0.0%"
             elif j > nd:
                 c.number_format = "#,##0"

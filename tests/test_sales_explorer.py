@@ -57,6 +57,8 @@ def _cube_fixture(monkeypatch):
         (20251002, 2, 11, 9, 4.0, 1.0, 1)]))
     monkeypatch.setattr(sx, "names", lambda: nm)
     monkeypatch.setattr(sx, "cubes", lambda region, today: (monthly, daily))
+    monkeypatch.setattr(sx, "target_lines", lambda: {})
+    monkeypatch.setattr(sx.warehouse, "cached", lambda key, build, ttl=0: build())
 
 
 def test_explore_sums_months_and_days_and_compares_same_dates_ly(monkeypatch):
@@ -80,6 +82,60 @@ def test_month_rows_line_up_ly_on_this_years_label(monkeypatch):
     r = sx.explore("AU", "ytd", 2027, TODAY, ["month"], {}, False)
     got = {x["k"][0]: (x["v"], x["ly"]) for x in r["rows"]}
     assert got["2026-04"] == (100.0, 40.0)
+
+
+# ---- targets (committed in Tools -> Targets, by retailer x brand x month) ----------
+def _targets(monkeypatch):
+    lines = {"AU": [(date(2026, 4, 1), "MOVA", "JB HIFI", 200.0),
+                    (date(2026, 10, 1), "MOVA", "JB HIFI", 230.0),      # 22 weekdays in Oct 2026
+                    (date(2026, 11, 1), "MOVA", "JB HIFI", 999.0),      # after the period
+                    (date(2026, 4, 1), "EUFY", "Officeworks", 30.0)]}  # a target with no sales
+    monkeypatch.setattr(sx, "target_lines", lambda: lines)
+
+
+def test_targets_sit_on_retailer_brand_rows_and_part_months_count_by_weekdays(monkeypatch):
+    _cube_fixture(monkeypatch); _targets(monkeypatch)
+    r = sx.explore("AU", "fy", 2027, TODAY, ["retailer", "brand"], {}, False)    # FY27, to date
+    got = {tuple(x["k"]): x.get("t") for x in r["rows"]}
+    # Oct 1-15 2026 = 11 of 22 weekdays
+    assert got[("JB HIFI", "MOVA")] == round(200 + 230 * 11 / 22, 2)
+    assert got[("Officeworks", "EUFY")] == 30.0 and got[("Harvey Norman", "EUFY")] is None
+    assert r["kpis"]["t"] == round(200 + 230 * 11 / 22 + 30)
+    assert r["targets"]["full"] == 200 + 230 + 999 + 30        # the whole FY
+    assert r["targets"]["rows"] is True
+
+
+def test_targets_follow_filters_but_not_account_rows(monkeypatch):
+    _cube_fixture(monkeypatch); _targets(monkeypatch)
+    r = sx.explore("AU", "q1", 2027, TODAY, ["month"], {"brand": 11}, False)
+    assert r["kpis"]["t"] == 30 and {tuple(x["k"]): x.get("t") for x in r["rows"]}[("2026-04",)] == 30.0
+    r = sx.explore("AU", "q1", 2027, TODAY, ["account"], {}, False)
+    assert r["targets"]["rows"] is False and r["kpis"]["t"] == 230
+    assert sx.explore("AU", "q1", 2027, TODAY, ["retailer"], {"rep": 8}, False)["kpis"]["t"] == 0
+    assert sx.explore("NZ", "q1", 2027, TODAY, ["retailer"], {}, False)["targets"]["has"] is False
+
+
+def test_targets_belong_to_the_retailers_netsuite_account_manager(monkeypatch):
+    _cube_fixture(monkeypatch); _targets(monkeypatch)
+    # JB HIFI's accounts are Chris's (id 7); Officeworks has no NetSuite customer
+    r = sx.explore("AU", "q1", 2027, TODAY, ["rep", "retailer"], {}, False)
+    got = {tuple(x["k"]): x.get("t") for x in r["rows"]}
+    assert got[("Chris", "JB HIFI")] == 200.0 and got[("(no account manager)", "Officeworks")] == 30.0
+    r = sx.explore("AU", "q1", 2027, TODAY, ["brand"], {"rep": 7}, False)
+    assert r["kpis"]["t"] == 200 and r["kpis"]["to_t"] == 100 / 200 * 100
+
+
+def test_split_retailer_goes_to_the_manager_with_most_sales(monkeypatch):
+    _cube_fixture(monkeypatch)
+    nm = sx.names()
+    nm["cust"][3] = ("JB Hi-Fi old account", "JB HIFI", 8)        # same retailer, other manager
+    assert sx.retailer_ams("AU", TODAY)["JB HIFI"] == 7
+
+
+def test_trend_has_a_target_line(monkeypatch):
+    _cube_fixture(monkeypatch); _targets(monkeypatch)
+    t = sx.explore("AU", "ytd", 2027, TODAY, ["retailer"], {}, False)["trend"]["target"]
+    assert t[0] == 230 and t[6] == 230 and t[7] == 999 and t[1] is None
 
 
 # ---- access ----------------------------------------------------------------------

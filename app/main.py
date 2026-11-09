@@ -32,7 +32,7 @@ from .service import build_promo_view, line_dates
 from .pricing_sync import sync_pricing
 from .security import (hash_password, hash_token, make_reset_token, sign,
                        unsign, verify_password)
-from . import (bill_export, bill_service, field, items, notify, perms, promo_data, receipts, sales,
+from . import (ageing, bill_export, bill_service, field, items, notify, perms, promo_data, receipts, sales,
                sales_explorer, sell_through, st_table, st_weekly, updates, warehouse, workflow)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -46,6 +46,9 @@ app = FastAPI(title="Macgear Reporting", lifespan=lambda a: _lifespan(a))
 # gzip cuts that ~8x over the wire once deployed.
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.mount("/static", StaticFiles(directory=os.path.join(HERE, "static")), name="static")
+# Targets tool's JSON API (/targets/api/...); the page is the /targets route below
+from .targets import routes as targets_routes          # noqa: E402
+app.include_router(targets_routes.router)
 templates = Jinja2Templates(directory=os.path.join(HERE, "templates"))
 
 
@@ -164,7 +167,9 @@ _TOOL_PATHS = [
     ("/reports/table", "st_table"),
     ("/reports/weekly", "st_weekly"),
     ("/reports/field", "field"),
+    ("/reports/ageing", "ageing"),
     ("/vendor-bills", "vendor_bills"),
+    ("/targets", "targets"),
     ("/promos", "promos"),
     ("/promo", "promos"),          # /promo/new, /promo/{id}, /promo/{id}/...
     ("/line", "promos"),
@@ -472,12 +477,16 @@ REPORTS = [
      "blurb": "Weekly units, retail value, stock and cover by retailer and product."},
     {"key": "field", "href": "/reports/field", "title": "Field Activity", "icon": "⚑",
      "blurb": "Mova reps: visits, schedule, photos and display compliance (Harvey Norman core range)."},
+    {"key": "ageing", "href": "/reports/ageing", "title": "Inventory Ageing", "icon": "◷",
+     "blurb": "How old Macgear's stock is, day by day — by brand, product and location, at cost."},
 ]
 TOOLS = [
     {"key": "promos", "href": "/promos", "title": "Vendor Promos", "icon": "%",
      "blurb": "Promotional credit claims — customer claims in, vendor credits out."},
     {"key": "vendor_bills", "href": "/vendor-bills", "title": "PDF Bill Upload", "icon": "⇪",
      "blurb": "Amazon Advertising invoices → NetSuite vendor bill import CSV."},
+    {"key": "targets", "href": "/targets", "title": "Targets", "icon": "◎",
+     "blurb": "Prepare sales targets from last year's actuals, then commit the official set."},
 ]
 
 
@@ -588,6 +597,11 @@ def sales_today() -> date:
     return datetime.now(ZoneInfo("Australia/Sydney")).date()
 
 
+@app.get("/targets", response_class=HTMLResponse)
+def targets_page(request: Request):
+    return templates.TemplateResponse(request, "targets.html", {})
+
+
 @app.get("/tools", response_class=HTMLResponse)
 def tools_home(request: Request):
     return templates.TemplateResponse(request, "tools.html", {"tools": nav_tools(request)})
@@ -646,6 +660,24 @@ def report_weekly_stores(request: Request, region: str = "", retailer: str = "",
         return JSONResponse({"error": _warehouse_error(e)}, status_code=503)
 
 
+@app.get("/reports/ageing", response_class=HTMLResponse)
+def report_ageing(request: Request):
+    """Inventory ageing at cost — staff only (not in VENDOR_AREAS): it is
+    Macgear's own stock valuation. Scoped by brand and region in SQL."""
+    brands, regions = _scope(request)
+    data, error = None, ""
+    try:
+        data = ageing.for_user(brands, regions)
+    except ageing.NotLoaded:
+        error = ("Inventory ageing isn't in the reporting warehouse yet. The daily NetSuite ageing report "
+                 "has to be loaded there first (Sell Through/ageing_intake.py).")
+    except warehouse.WarehouseUnavailable as e:
+        error = _warehouse_error(e)
+    return templates.TemplateResponse(request, "ageing.html", {
+        "data": data, "error": error, "regions": regions,
+        "items_link": "items" in _allowed(request)})
+
+
 def _caps(request: Request) -> set:
     user = current_user(request)
     return set(perms.CAP_KEYS) if user is None else perms.effective_caps(user)
@@ -689,28 +721,59 @@ templates.env.filters["datefmt"] = lambda iso: f"{date.fromisoformat(iso).day} {
 
 
 # ---- cache warm-up --------------------------------------------------------------
-def _warm_reports():
-    """Build the views most people open first, for the all-brands scope, so the
-    first visit of the day is instant. Vendor and brand-limited scopes stay warm
-    once used (warehouse.refresh_due)."""
-    items._units_by_item()
-    sales.summary(sales_today(), True)
-    for region in perms.REGIONS:
-        sales_explorer.cubes(region, sales_today())
-        sales_explorer.options(region, sales_today())
-    receipts.status(None, list(perms.REGIONS), sales_today())
-    sell_through.for_user(None, list(perms.REGIONS))
-    st_weekly.for_user(None, list(perms.REGIONS), True)
-    for region in perms.REGIONS:
-        items.leaderboard_for(None, region)
+def _warm_tasks() -> list:
+    """The views most people open first, for the all-brands scope, in the order
+    they're wanted — each a callable built on its own."""
+    t, regions = sales_today(), list(perms.REGIONS)
+
+    def st_table_latest(region):
         opts = st_table.options(None, region)
         if opts["weeks"]:
             st_table.build_for(None, region, "retailer", date.fromisoformat(opts["weeks"][0]),
                                12, "", "")
-    # Weekly Sell-Through's store data last: the slowest (~10-20 s per retailer)
-    for region in perms.REGIONS:
+
+    def field_dashboard():
+        for load in (field.display_rows, field.visits, field.schedule, field.photos,
+                     field.stores, field.unmapped_questions):
+            load()
+
+    def weekly_stores(region):
         for retailer in st_weekly.store_retailers(None, region):
             st_weekly.stores_for(None, region, retailer)
+
+    tasks = [lambda: sales.summary(t, True)]
+    tasks += [lambda r=r: sales_explorer.cubes(r, t) for r in perms.REGIONS]
+    tasks += [lambda: st_weekly.for_user(None, regions, True),
+              lambda: ageing.for_user(None, regions),
+              lambda: sell_through.for_user(None, regions),
+              items._units_by_item,
+              lambda: receipts.status(None, regions, t),
+              field_dashboard]
+    tasks += [lambda r=r: sales_explorer.options(r, t) for r in perms.REGIONS]
+    tasks += [lambda r=r: items.leaderboard_for(None, r) for r in perms.REGIONS]
+    tasks += [lambda r=r: st_table_latest(r) for r in perms.REGIONS]
+    # Weekly Sell-Through's store data last: the slowest (~10-20 s per retailer)
+    tasks += [lambda r=r: weekly_stores(r) for r in perms.REGIONS]
+    return tasks
+
+
+def _warm_reports():
+    """Build the views most people open first so the first visit after a restart is
+    instant. A few at a time (it took several minutes one by one, and anyone opening
+    a page not yet built waited the whole cold build), leaving one warehouse slot for
+    people's own requests. One view failing doesn't stop the rest. Vendor and
+    brand-limited scopes stay warm once used (warehouse.refresh_due)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def run(task):
+        try:
+            task()
+        except Exception as e:
+            warehouse.log.warning("warm-up step failed: %s", e)
+
+    with ThreadPoolExecutor(max_workers=max(1, min(3, warehouse.MAX_CONNECTIONS - 1)),
+                            thread_name_prefix="warm") as pool:
+        list(pool.map(run, _warm_tasks()))
 
 
 def deployment_problems(public_base_url: str, secret: str, shared_password: str,
@@ -953,7 +1016,7 @@ def report_sales(request: Request, region: str = "", p: str = "ytd", fy: int = 0
     return templates.TemplateResponse(request, "sales_explorer.html", {
         "data": data, "opts": opts, "a": {k: v for k, v in a.items() if k != "today"},
         "regions": a["regions"], "dims_all": sales_explorer.DIMS,
-        "fy_months": sales_explorer.FY_MONTHS, "has_targets": False})
+        "fy_months": sales_explorer.FY_MONTHS})
 
 
 @app.get("/reports/sales/data")

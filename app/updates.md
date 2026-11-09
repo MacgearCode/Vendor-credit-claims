@@ -4,10 +4,35 @@ How to add an update (shown at /updates, newest first):
     - one line per change, in plain words for the people using the site
 
 Area keys limit who sees an entry: the report/tool keys in perms.py (sales,
-st_weekly, field, items, st_table, sell_through, promos, vendor_bills) or
+st_weekly, field, ageing, items, st_table, sell_through, promos, vendor_bills) or
 "admin". No keys = everyone, vendors included - so say nothing internal there.
 Add an entry with every commit people would notice. Everything above the first
 "##" is ignored.
+
+## 2026-11-09 | Faster loading
+- Sales Explorer, Weekly Sell-Through, Sell-Through, Inventory Ageing and the home page now read from pre-summed tables, so a page that has to be built fresh (the first visit after an update, or a brand-limited view) is several times quicker.
+- After the site is updated, its pages are ready about twice as soon, and Inventory Ageing and Field Activity are now prepared in advance too.
+
+## 2026-10-23 | New: Inventory Ageing | ageing
+- How old Macgear's stock is, from NetSuite's daily ageing report since January: totals, what's past 90 / 180 / 370 days, and how that has moved.
+- One table by brand: open a brand to see its products, and a product to see its locations. Sort by any column, switch between value and units, pick a location, or list only stock past 90, 180 or 370 days.
+- "Aged since" shows when a product's stock first crossed the line and has stayed there. Download what the table lists as a CSV.
+- Third-party (3PL) and consignment stock are kept out of the figures; 3PL units are shown on their own.
+
+## 2026-10-23 | Sales Explorer shows targets | sales
+- Sales Explorer now shows the official targets: a Target card (with % of target), a target line on the by-month chart, and Target / % of target columns in the table and the Excel.
+- Account managers can see their own target progress: pick yourself under Account manager, or build the table by Account manager. A retailer's target counts towards the account manager NetSuite has on that retailer.
+- Targets are set by retailer, brand and month, so the table doesn't show them by store/account or item (the totals still do).
+- For a period still running, the target is counted to date (a part month by its share of weekdays), so it compares like with like.
+
+## 2026-10-22 | New: Targets | targets
+- The Targets planner now lives here under Tools: build next year's targets on NetSuite sales (any financial year, or this year to date) with growth %, monthly pacing and new lines. No spreadsheets to upload.
+- New "Commit" button: when a scenario is final, commit it as the official targets for that financial year. Earlier commits stay in the history ("Committed"), each with a CSV.
+- The home page measures sales against the latest committed targets.
+- New scenarios start from what you're planning: the year, the months (e.g. Q4), and where to start — last year's sales, this year so far, or the current official targets (and growth % works on top of official targets).
+- A part-year scenario shows just its months, next to last year's same months, the official targets and this year's trend.
+- Commit shows exactly what will change, month by month, and can be done for one country only.
+- A scenario can plan just part of the year — a half, a quarter or chosen months. Committing it replaces only those months, so you can set Q4 without touching the H1 and Q3 targets already released.
 
 ## 2026-10-22 | Every page's header follows your colour palette
 - The bar across the top of every page is now the colour of the palette you picked (Blue, Teal or Violet) - reports included, not just the tools.

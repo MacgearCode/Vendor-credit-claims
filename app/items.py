@@ -42,7 +42,9 @@ def _units_by_item() -> dict:
     """Lifetime sell-through units per item_key — ranks search results so items
     that sell come before dummy packs and displays (which retailers still report
     as stock lines). One grouped query, cached; a per-row subquery cost ~2 s."""
-    return warehouse.cached(("units_by_item",), lambda: dict(warehouse.query(
+    return warehouse.cached(("units_by_item",), lambda: dict(warehouse.query_summary(
+        "agg_sell_through_week",
+        "select item_key, sum(qty_sold) from reporting.agg_sell_through_week group by 1",
         "select item_key, sum(qty_sold) from reporting.fact_sell_through group by 1")),
         ttl=60 * 60)
 
@@ -83,7 +85,9 @@ def leaderboard(brands, region: str, weeks_n: int = LEADER_WEEKS) -> dict:
     # Fact first on its indexed keys, names after: ~0.3 s against ~1.3 s through
     # the dimension joins. Item codes are unique in dim_item, so grouping by
     # item_key is grouping by code.
-    rows = warehouse.query(f"""
+    # The store-less weekly summary (Sell Through/db/13_summaries.sql) when it's fresh:
+    # same sums. Both ordered, so items come out in the same order either way.
+    sql = f"""
         with f as (
             select f.item_key, f.date_key, sum(f.qty_sold) as u,
                    sum(f.qty_sold * f.rrp) as v, sum(f.soh) as s
@@ -93,7 +97,11 @@ def leaderboard(brands, region: str, weeks_n: int = LEADER_WEEKS) -> dict:
         select i.macgear_code, i.description, i.brand, i.category,
                to_date(f.date_key::text, 'YYYYMMDD'), f.u, f.v, f.s
         from f join reporting.dim_item i on i.item_key = f.item_key
-        where i.brand is not null and {_scope_sql()}""",
+        where i.brand is not null and {_scope_sql()}
+        order by 1, 5"""
+    fast = (sql.replace("from reporting.fact_sell_through f", "from reporting.agg_sell_through_week f")
+               .replace("sum(f.qty_sold * f.rrp) as v", "sum(f.sales_value_rrp) as v"))
+    rows = warehouse.query_summary("agg_sell_through_week", fast, sql,
         {"rk": warehouse.region_key(region), "brands": brands,
          "keys": [int(w.strftime("%Y%m%d")) for w in weeks]})
     wi = {w: k for k, w in enumerate(weeks)}

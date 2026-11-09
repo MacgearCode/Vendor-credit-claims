@@ -44,7 +44,16 @@ _FACT_SQL = """
     where d.full_date = any(%(weeks)s)
       and r.country_code = any(%(regions)s)
       and (%(brands)s::text[] is null or i.brand = any(%(brands)s::text[]))
-    group by 1, 2, 3, 4, 5, 6"""
+    group by 1, 2, 3, 4, 5, 6
+    order by 1, 2, 3, 6"""
+
+# The same, from the store-less weekly summary (Sell Through/db/13_summaries.sql) when
+# it's fresh: its rows are already summed per week x item x customer, so these sums
+# and max(rrp) come out identical. Both ORDER BY'd: products that tie in the page's
+# ranking keep arrival order, which mustn't depend on which table answered.
+_FACT_SQL_FAST = (_FACT_SQL.replace("from reporting.fact_sell_through f",
+                                    "from reporting.agg_sell_through_week f")
+                  .replace("sum(f.qty_sold * f.rrp) as v", "sum(f.sales_value_rrp) as v"))
 
 
 def _num(x):
@@ -145,7 +154,8 @@ def build(brands: list[str] | None, regions: list[str],
         weeks = warehouse.recent_weeks(weeks_n)
         rows = []
         if weeks and regions and (brands is None or brands):
-            cur.execute(_FACT_SQL, {"weeks": weeks, "regions": list(regions), "brands": brands})
+            sql = _FACT_SQL_FAST if "agg_sell_through_week" in warehouse.fresh_summaries(cur) else _FACT_SQL
+            cur.execute(sql, {"weeks": weeks, "regions": list(regions), "brands": brands})
             cols = [d.name for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
 

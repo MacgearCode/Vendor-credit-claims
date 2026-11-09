@@ -14,8 +14,8 @@ Definitions (shared with the warehouse — see Sell Through/CLAUDE.md):
   pace    = month-to-date ÷ weekdays elapsed × weekdays in the month — a
             simple run-rate, not a forecast.
 
-Targets: read from reporting.sales_target if that table exists (see
-`targets()`); until then the page says "no target loaded".
+Targets: the official targets committed in the Targets tool (targets.sales_target, see
+`targets()`); until something is committed the page says "no target loaded".
 """
 import calendar
 from datetime import date, timedelta
@@ -75,7 +75,12 @@ def _from_key(k: int) -> date:
 def daily(start: date) -> dict:
     """{region: {date: [revenue, est_cost, units]}} from `start` to today."""
     rk = {v: k for k, v in ((c, warehouse.region_key(c)) for c in REGIONS)}
-    rows = warehouse.query("""
+    rows = warehouse.query_summary("agg_sales_day", """
+        select s.region_key, s.date_key, sum(s.net_sales), sum(s.net_sales_est_cost),
+               sum(s.net_sales_qty)
+        from reporting.agg_sales_day s
+        where s.date_key >= %(start)s and s.n_net > 0
+        group by 1, 2""", """
         select s.region_key, s.date_key, sum(s.net_sales), sum(s.net_sales_est_cost),
                sum(s.net_sales_qty)
         from reporting.fact_sales_line s
@@ -123,7 +128,13 @@ def tops(start: date, end: date) -> dict:
     }
     out = {r: {} for r in REGIONS}
     with warehouse.connect() as conn, conn.cursor() as cur:
+        # customers / brands / reps from the day summary when it's fresh (same sums;
+        # n_net > 0 = the lines with a net_sales value); items need the line facts
+        fast = "agg_sales_day" in warehouse.fresh_summaries(cur)
         for name, sql in q.items():
+            if fast and name != "items":
+                sql = (sql.replace("from reporting.fact_sales_line s", "from reporting.agg_sales_day s")
+                          .replace("s.net_sales is not null", "s.n_net > 0"))
             cur.execute(sql, p)
             per = {r: [] for r in REGIONS}
             for row in cur.fetchall():
@@ -150,7 +161,8 @@ def data_version():
 
 # Everything built from NetSuite sales or stock: rebuilt as soon as a new load lands.
 SALES_CACHE_PREFIXES = ("sales_daily", "sales_tops", "sales_fresh", "sales_ic",
-                        "sx_day", "sx_month", "sx_items", "sx_opts", "item", "st_weekly")
+                        "sx_day", "sx_month", "sx_items", "sx_opts", "sx_ram", "item", "st_weekly",
+                        "targets_actuals", "targets_years")
 
 
 def intercompany(start: date, end: date) -> dict:
@@ -158,7 +170,11 @@ def intercompany(start: date, end: date) -> dict:
     revenue (warehouse rule), shown beside it so the tile reconciles to a NetSuite
     search that includes it."""
     rk = {warehouse.region_key(c): c for c in REGIONS}
-    rows = warehouse.query("""
+    rows = warehouse.query_summary("agg_sales_day", """
+        select s.region_key, sum(s.intercompany_amount) from reporting.agg_sales_day s
+        where s.intercompany_amount is not null
+          and s.date_key between %(lo)s and %(hi)s
+        group by 1""", """
         select s.region_key, sum(s.amount) from reporting.fact_sales_line s
         where s.account_id = 54 and s.is_intercompany
           and s.date_key between %(lo)s and %(hi)s
@@ -167,20 +183,42 @@ def intercompany(start: date, end: date) -> dict:
 
 
 def targets() -> dict:
-    """{region: {month_start: amount}} from reporting.sales_target, or {} while it
-    doesn't exist. Expected shape (one row per country x month; finer rows —
-    brand, customer — are summed):
-        country_code text ('AU'|'NZ'), month_start date, amount numeric (ex-GST)
-    """
+    """{region: {month_start: amount}} — the official (committed) targets from the
+    Targets tool: targets.sales_target, the newest commit per financial year
+    (app/targets), read through the Targets connection (TARGETS_DB_URL) — where they
+    were committed. {} until something is committed or when Targets isn't configured.
+    Finer rows (brand, customer) are summed."""
+    from .targets import db as tdb
     try:
-        rows = warehouse.query("""
-            select country_code, month_start, sum(amount)
-            from reporting.sales_target group by 1, 2""")
+        with tdb.connect() as conn:
+            rows = [(r["country_code"], r["month_start"], r["amount"]) for r in conn.execute(
+                "select country_code, month_start, sum(amount) as amount "
+                "from sales_target group by 1, 2")]
     except Exception:
         return {}
     out: dict = {}
     for cc, m, amt in rows:
         out.setdefault(cc, {})[m] = float(amt or 0)
+    return out
+
+
+def target_lines() -> dict:
+    """{region: [(month_start, brand, retailer, amount)]} — the same official targets at
+    the grain they were set, for Sales Explorer. Brand and retailer are NetSuite's names
+    (dim_brand, and the retailer label coalesce(customer_group, parent_name,
+    customer_name)), so they line up with the explorer's rows. {} as for targets()."""
+    from .targets import db as tdb
+    try:
+        with tdb.connect() as conn:
+            rows = [(r["country_code"], r["month_start"], r["brand"], r["customer"], r["amount"])
+                    for r in conn.execute(
+                        "select country_code, month_start, brand, customer, sum(amount) as amount "
+                        "from sales_target group by 1, 2, 3, 4")]
+    except Exception:
+        return {}
+    out: dict = {}
+    for cc, m, b, c, amt in rows:
+        out.setdefault(cc, []).append((m, b, c, float(amt or 0)))
     return out
 
 

@@ -1,0 +1,174 @@
+{% extends "_rpt_base.html" %}
+{# Targets tool (moved in from the standalone Targets app, 2026-10-22): prepare sales
+   targets from an actuals dataset, then commit the official set. API: app/targets/
+   routes.py under /targets/api; front end static/targets.js + targets.css. #}
+{% block title %}Targets · Macgear Reporting{% endblock %}
+{% block pagename %}Targets{% endblock %}
+{% block bodyclass %}tgt{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/targets.css?v={{ asset_ver }}">{% endblock %}
+{% block content %}
+
+  <div class="tg-bar">
+    <div class="scenario-controls">
+      <select id="scenarioSelect" title="Scenario"></select>
+      <div class="tg-menu">
+        <button type="button" class="btn" data-menu>Scenario ▾</button>
+        <div class="tg-menu-pop" hidden>
+          <button id="newBtn" type="button">＋ New scenario…</button>
+          <button id="renameBtn" type="button">Rename…</button>
+          <button id="dupBtn" type="button">⧉ Duplicate…</button>
+          <button id="delBtn" type="button" class="danger">🗑 Delete…</button>
+        </div>
+      </div>
+      <button id="periodBtn" class="btn" title="Which months this scenario plans and commits">Period: Full year</button>
+      <span class="tg-sep"></span>
+      <label class="growth-global">Growth
+        <span class="pct-wrap"><input id="globalGrowth" type="number" step="0.5" value="0">%</span>
+      </label>
+      <button id="globalPacingBtn" class="btn" title="How the year spreads across the months">Pacing…</button>
+      <button id="addBrandBtn" class="btn">＋ Add brand</button>
+      <span class="tg-spacer"></span>
+      <span id="statusChip" class="tg-status" title="Has this scenario been committed?"></span>
+      <div class="tg-menu">
+        <button type="button" class="btn" data-menu>More ▾</button>
+        <div class="tg-menu-pop right" hidden>
+          <button id="commitsBtn" type="button">Commit history…</button>
+          <button id="projectionBtn" type="button" class="hidden">🔮 Projection settings…</button>
+          <button id="actualsBtn" type="button">📁 NetSuite years…</button>
+          <hr>
+          <button id="removeZeroBtn" type="button">⊘ Hide brands with no sales…</button>
+          <button id="excludedBtn" type="button" class="hidden">Hidden brands <span id="exclCount">0</span>…</button>
+          <button id="dupesBtn" type="button">⚑ Possible duplicate retailers…</button>
+          <hr>
+          <button id="exportBtn" type="button">⬇ Export CSV (all months)</button>
+          <button id="exportH1Btn" type="button">⬇ Export H1 (Apr–Sep)</button>
+        </div>
+      </div>
+      <button id="commitBtn" class="btn btn-primary" title="Make this scenario's period the official targets">✔ Commit…</button>
+    </div>
+  </div>
+
+  <div id="banner" class="banner hidden"></div>
+
+  <section class="totals-strip" id="totalsStrip"></section>
+
+  <div class="tabs-row">
+    <nav class="tabs" id="countryTabs"></nav>
+    <button id="fullYearToggle" class="btn tg-fulltoggle hidden" type="button" title="Also show the months outside this scenario's period">Show full year</button>
+    <div class="period-toggle" id="periodToggle" title="Period columns">
+      <button data-view="monthly">Monthly</button>
+      <button data-view="quarterly">Quarterly</button>
+      <button data-view="half">Half-year</button>
+    </div>
+  </div>
+
+  <div class="grid-wrap">
+    <table class="grid" id="grid">
+      <thead id="gridHead"></thead>
+      <tbody id="gridBody"></tbody>
+    </table>
+  </div>
+
+  <!-- Pacing editor modal -->
+  <div id="pacingModal" class="modal hidden">
+    <div class="modal-card">
+      <h3 id="pacingTitle">Monthly pacing</h3>
+      <p class="hint">Set the % each month contributes to the annual total. Must sum to 100%.
+        The annual target is unchanged — only its monthly shape.</p>
+      <div class="pacing-grid" id="pacingInputs"></div>
+      <div class="pacing-sum">Sum: <b id="pacingSum">100.0</b>%
+        <span id="pacingWarn" class="warn hidden">⚠ must equal 100%</span></div>
+      <div class="modal-actions">
+        <button id="pacingReset" class="btn">Reset to FY26 seasonality</button>
+        <button id="pacingGlobalShape" class="btn hidden">Use global shape</button>
+        <button id="pacingNormalize" class="btn">Normalize to 100%</button>
+        <span class="spacer"></span>
+        <button id="pacingCancel" class="btn">Cancel</button>
+        <button id="pacingSave" class="btn btn-primary">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Monthly amount editor (manual lines) -->
+  <div id="monthsModal" class="modal hidden">
+    <div class="modal-card">
+      <h3 id="monthsTitle">Monthly amounts</h3>
+      <p class="hint">Enter the $ target for each month — e.g. leave Apr–Jun at $0 for a July launch.
+        The annual total is the sum of these months. Use “Even split” to clear the override and
+        spread the annual evenly by pacing instead.</p>
+      <div class="pacing-grid" id="monthsInputs"></div>
+      <div class="pacing-sum">Annual total: <b id="monthsSum">$0</b></div>
+      <div class="modal-actions">
+        <button id="monthsEven" class="btn">Even split (clear override)</button>
+        <span class="spacer"></span>
+        <button id="monthsCancel" class="btn">Cancel</button>
+        <button id="monthsSave" class="btn btn-primary">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Excluded brands modal -->
+  <div id="excludedModal" class="modal hidden">
+    <div class="modal-card">
+      <h3>Excluded brands — <span id="excludedCountry"></span></h3>
+      <p class="hint">These brands are hidden from this scenario (baseline data is untouched). Restore any of them below.</p>
+      <div id="excludedContent"></div>
+      <div class="modal-actions">
+        <button id="restoreAllBtn" class="btn">Restore all</button>
+        <span class="spacer"></span>
+        <button id="excludedClose" class="btn btn-primary">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Duplicates modal -->
+  <div id="dupesModal" class="modal hidden">
+    <div class="modal-card">
+      <h3>Flagged customer names</h3>
+      <p class="hint">Kept as-is for v1. Review these likely duplicates / junk buckets for a future cleanup.</p>
+      <div id="dupesContent"></div>
+      <div class="modal-actions">
+        <span class="spacer"></span>
+        <button id="dupesClose" class="btn btn-primary">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Actuals datasets modal -->
+  <div id="actualsModal" class="modal hidden">
+    <div class="modal-card modal-wide">
+      <h3>Actuals — NetSuite sales</h3>
+      <p class="hint">Actuals are Macgear's NetSuite sales from the reporting database — net sales
+        ex-GST in each country's own currency (intercompany excluded), by brand and retailer — one
+        financial year (April–March) each. The current year counts complete months only. Pick a year
+        when you create a scenario; nothing to upload.</p>
+
+
+      <div id="actualsList" class="actuals-list"></div>
+
+      <div class="modal-actions">
+        <span class="spacer"></span>
+        <button id="actualsClose" class="btn btn-primary">Close</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Committed targets (official sets) -->
+  <div id="commitsModal" class="modal hidden">
+    <div class="modal-card modal-wide">
+      <h3>Committed targets</h3>
+      <p class="hint">Each commit is a frozen copy of a scenario's targets. The newest commit for each
+        financial year is the official one — the home page measures sales against it.</p>
+      <div id="commitsList" class="actuals-list"></div>
+      <div class="modal-actions">
+        <span class="spacer"></span>
+        <button id="commitsClose" class="btn btn-primary">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Generic dialog host (alert / confirm / form) — populated by app.js -->
+  <div id="dialogHost"></div>
+{% endblock %}
+{% block scripts %}<script src="/static/targets.js?v={{ asset_ver }}"></script>{% endblock %}

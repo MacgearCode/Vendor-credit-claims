@@ -31,9 +31,11 @@ warehouse host in the droplet `.env` broke the warm-up — compare the host, not
 | `/reports/sell-through` | Sell-Through Dashboard (from `Sell Through/prototype/`) | staff, vendors |
 | `/reports/weekly` | Weekly Sell-Through — the consolidated weekly report, full screen | staff only |
 | `/reports/field` | Field Activity — Mova reps from Repsly: dashboard, display compliance, feed, schedule, visits, reps, photos | staff only |
+| `/reports/ageing` | Inventory Ageing — NetSuite ageing report history; brand → product → location tree (LOCAL only so far) | staff only |
 | `/updates` | What's new — the site's update log (`app/updates.md`) | everyone, filtered by area |
 | `/tools` | Tools landing (tools are also listed in the side menu) | staff |
 | `/promos` | Vendor Promos — promotional credit claims | sales, finance |
+| `/targets` | Targets — build sales targets on NetSuite actuals, commit the official set (Postgres `targets` schema) | staff with the area |
 | `/vendor-bills` | PDF Bill Upload — Amazon Advertising → NetSuite CSV | accounts |
 | `/admin/users` | User management | admins |
 
@@ -211,6 +213,21 @@ area AND `sell_in_value` (route-checked; not listed in menus without it); never 
   which matched ~94%). The summary therefore has no rep column; the manager is looked
   up per customer. The home page "Account managers" list uses the same rule.
   Checked: FY27 YTD per manager = SQL grouped by `dim_ns_customer.account_rep` exactly.
+- **Targets (2026-10-23):** the official committed targets (`sales.target_lines()` →
+  `targets.sales_target`, cache key `sales_targets_lines`, dropped on every commit by the
+  `sales_targets` prefix). Set per country × brand × retailer × month. **A retailer's
+  target belongs to its NetSuite account manager** (user, 2026-10-23: NetSuite/the
+  database is the source of truth — NOT Power BI's "Sales Rep Cust" on each target row,
+  which split some retailers by brand, e.g. NZ JB HIFI/HN Dale vs Catherine, Amazon
+  Kristy vs Mike). `retailer_ams()`: the manager on the retailer's customer records; where
+  they differ, the one with most sales this + last FY (cache `sx_ram`). So Target / % of
+  target columns show on Retailer, Brand, Month and Account manager rows and follow the
+  manager filter; Account and Item rows show the total only. Target retailers with no
+  NetSuite customer (the PBI file's "Other" catch-all, ~$2.6M AU FY27) land under
+  "(no account manager)". A month the period covers partly counts by its
+  share of weekdays (home page pace rule). KPI card: target for the dates shown + the
+  whole period's; trend: a target line; Excel: Target + % of target. A target with no
+  sales still gets a row.
 - **Speed:** per-click warehouse queries took ~6 s, so each region's sales live in memory
   as a sorted columnar summary — monthly (month × customer × brand, all history,
   AU ~183k rows) + daily (this & last month and the same span LY). A range is answered
@@ -297,6 +314,35 @@ works, a Full screen button (F).
 - Local preview without sign-in: launch config `reporting-site-preview` (port 8032, live
   warehouse via `.env`, throwaway SQLite in %TEMP%).
 
+**Inventory Ageing** (`app/ageing.py`, `templates/ageing.html`, `tests/test_ageing.py`; built
+2026-10-23, **local only** — not committed or deployed). Replaces the `Inventory Ageing/` HTML
+dashboard + claude.ai artifact. Data = `reporting.fact_inventory_ageing` (`Sell Through/db/
+12_inventory_ageing.sql`, loaded by `Sell Through/ageing_intake.py` from the daily NetSuite report
+CSVs; rules in both files' docstrings: owned stock only — 3PL apart in units, consignment nowhere,
+split by LOCATION; AU / NZ never summed; mutually exclusive bands). Area key `ageing`, **staff
+only** (Macgear's stock at cost; not in `VENDOR_AREAS`); brand / region scope in SQL. One cached
+payload per scope (~1.4 s, ~630 KB JSON for both regions): series per day, every item × location
+line at the latest snapshot + 30 days earlier + the first snapshot, "aged since" runs; the
+browser builds the tree.
+- Page: region switch (one region at a time), lede + tiles vs 30 days, stacked 91–180 / 181–370 /
+  370+ bars (one slot per calendar day, so the sparse Jan–Apr points sit to scale), aged-share
+  lines AU vs NZ, then the **brand → product → location table** (user's request: sortable, brand
+  level expanding to products) with List products (all / over 90 / 180 / 370), Value / Units,
+  Location, Find, Expand / Collapse, CSV of what's listed; 3PL units card; method notes.
+- **Brand and total rows are always the whole brand / region at the chosen location**; the
+  List / Find filters only choose which products are listed. A product's location rows include any
+  location it has left since 30 days ago, so they add up to the product (value, over 90, vs 30d).
+- Checked 2026-10-23 on the local copy (22 Oct snapshot): AU A$19,831,895 / over 90 A$3,108,910 /
+  vs 30d −A$544,607, NZ NZ$3,935,427 / NZ$683,688 / +NZ$135,672, AU units 264,381, brands (MOVA
+  A$1,912,598, BONELK A$599,091 …), aged-in / cleared flows = the old dashboard; QA Melb and BONELK
+  370+ = independent SQL; brand rows sum to the total and location rows to each product.
+- Missing table (the live warehouse today) → the page says it isn't loaded; nothing else breaks.
+- **Before going live** (not done): apply `12_inventory_ageing.sql` to the cluster as the owner,
+  run `ageing_intake.py` (cluster) to load the history, deploy. Then a daily feed: today the CSVs
+  come from Outlook by hand (`Inventory Ageing/run.ps1`); a Zone export of the same saved search
+  to S3 + a loader in `netsuite_intake.py` would make it automatic. Local preview: launch config
+  `reporting-site-localdb-2` (port 8033 — 8031 was in use by another session).
+
 **Receipt strip** (`app/receipts.py`, `templates/_st_status.html`, 2026-10-15) —
 "who have we received" for sell-through, a one-line collapsible bar at the top
 of home, Item Explorer (landing + item), the table and the dashboard: "w/e 11 Oct
@@ -374,6 +420,40 @@ is in the queries. Two layers:
   used in the last 2 h just before it goes stale — vendor scopes included.
   Measured over HTTP after warm-up: landing pages 36–141 ms; a never-seen item
   ~0.7 s then 5 ms; an unusual table filter ~2.8 s the first time, then ~40 ms.
+- *Where cold time goes (measured 2026-11-09):* 90–97% is the warehouse executing
+  (home 3–6 s, Sales Explorer AU cubes 12–16 s, Ageing 7–14 s, Sell-Through 7–12 s,
+  Weekly 20–33 s, varying with cluster load); Python ≤ 2 s, round trip 7 ms. The cluster
+  has ~391 MB shared_buffers for a 1.6 GB DB, so big scans read from disk; more
+  work_mem didn't help. **A bigger droplet won't speed fresh loads** — the fixes are
+  summary tables in the warehouse (planned) and the app-side ones below.
+- *Quick fixes (2026-11-09):* `jit=off` on the site's warehouse connections (JIT
+  compile cost more than it saved, e.g. 0.5 s of 3.3 s); `_warm_tasks()` lists the
+  warm-up in priority order (home, Sales cubes, Weekly, Ageing, Sell-Through, …, Field
+  added, store data last) and `_warm_reports` builds 3 at a time (MAX_CONNECTIONS − 1,
+  leaving a slot for users), a failed step no longer stopping the rest. Warm-up 232 s →
+  98 s; Ageing ready at 33 s instead of 122 s.
+- *Summary tables (2026-11-09)* — `Sell Through/db/13_summaries.sql`: `reporting.agg_sales_day`,
+  `agg_sales_month`, `agg_sell_in_week`, `agg_sell_through_week`, `agg_inventory_ageing`
+  (materialized, refreshed by the ETL). Builds read one ONLY when
+  `warehouse.fresh_summaries(cur)` lists it (asked per build on the build's connection,
+  never cached) — otherwise the original query runs, so a missed refresh is slower, never
+  wrong. `warehouse.query_summary(name, fast, slow, params)` for single queries; Weekly,
+  Sell-Through, tops and Ageing check `fresh_summaries` and swap SQL. Switched: home sales
+  (daily, tops minus items, intercompany), item leaderboard + units-by-item, Sales
+  Explorer cubes (monthly/daily), Targets actuals + years, Weekly (sell-through + sell-in),
+  Sell-Through, Ageing. NOT switched (per-item / store-level / small): item page, store
+  data, receipts, promo, Field. `REPORTING_SUMMARIES=0` turns them off. Verified: every
+  switched builder's output JSON identical summary vs source, local and cluster (Weekly
+  and Sell-Through needed ORDER BY on both versions — they list items in arrival order;
+  sell-through counts are stored `integer` so sums return bigint like the fact). DB time
+  per cold build, cluster: home sales 2.4 → 0.4 s, Sales Explorer 15.3 → 0.7 s, Targets 3.8
+  → 0.1 s, Weekly 30 → 3.7 s (vendor 3-brand 32 → 3.8 s), Sell-Through 8.6 → 2.1 s, Ageing
+  5.4 → 2.2 s, leaderboards 3.1 → 1.0 s. Timings measured from a PC are inflated by
+  downloading 100k+ rows over the internet; the droplet is in SYD1 with the cluster.
+  **Go-live (pending, 2026-11-09):** owner TEMP grant done and refresh tested; still needs
+  the Windmill netsuite_sync publish — see `Sell Through/CLAUDE.md`,
+  "Summary tables". Until then the sales summaries go stale at the next NetSuite load and
+  the site uses the original queries.
 - Front end: GZip on responses; item links prefetch on hover/touch and the top
   search hit is prefetched as results appear; a thin progress bar shows while a
   page loads.
@@ -439,6 +519,7 @@ Shared shell:
 | `app/receipts.py` | Which retailers' sell-through is in for the latest week (the strip) |
 | `app/sales.py` | Home page internal sales (FY periods, pace, targets hook) |
 | `app/field.py` | Field Activity (Repsly): loads + the display-compliance rules |
+| `app/ageing.py` | Inventory Ageing: scoped warehouse queries → the page's JSON |
 | `app/security.py` | PBKDF2 hashing, cookie signing, set-password tokens |
 | `app/db.py` | Engine, session, additive column migrations |
 | `app/models.py` | SQLAlchemy models for both tools, plus `User` |
@@ -518,6 +599,89 @@ Promo pages extend `promo_base.html` (which supplies the promo nav), not
 `base.html` directly. Everything else extends `base.html` and fills
 `{% block nav %}` — don't add a "Users" link there, the side menu already has it
 for admins.
+
+## Targets — the parts worth knowing (rebuilt on Postgres 2026-10-22, LOCAL ONLY so far)
+
+The standalone `Targets/` app moved in as a tool and was then **rebuilt so everything lives in the
+database** (user, 2026-10-22: Power BI is being deprecated, the site is the one front end, no
+per-app SQLite). Area key `targets`, staff only. `/targets` (page in `main.py`,
+`templates/targets.html` on `_rpt_base`) + `/targets/api/...` (`app/targets/routes.py`). The
+planning engine `app/targets/calc.py` is the old app's (growth cascade, pacing, annualize,
+projection, manual lines — see memory `project_targets_budget`); front end `static/targets.js` /
+`targets.css` = the old app's with its own title / theme button removed (site shell provides them).
+- **Actuals = NetSuite sales from the warehouse** (`app/targets/actuals.py`), no uploads: home-page
+  revenue (`fact_sales_line.net_sales`, account 54, intercompany out, ex-GST, own currency) by
+  country (Australia / New Zealand) × brand (`dim_brand`, none = "(no brand)") × retailer
+  (`coalesce(customer_group, parent_name, customer_name)` — Sales Explorer's Retailer) × fiscal
+  month. A scenario's "dataset" = one FY by its **end year** (2026 = FY26). The open year loads
+  **complete months only** (the current month waits until it closes); projection fills the rest
+  from a reference year. Cached 30 min per year, expired by the sales watch. FY26 = AU $66,455,126
+  / NZ $15,498,069 (the old xlsx said AU $68.5M — different extract).
+- **Storage: the `targets` schema** (`app/targets/db.py`: scenario, growth_override,
+  pacing_override, brand_exclusion, annualize, manual_line, target_commit, committed_target +
+  view **`targets.sales_target`**). Connection **`TARGETS_DB_URL`** (a role that can write that
+  schema — `reporting_read` can't); search_path = `TARGETS_SCHEMA` (default `targets`), so SQL
+  is unqualified. Tables/view are created on the first connection (`CREATE … IF NOT EXISTS`) and
+  `reporting_read` is granted USAGE + SELECT on the view. Unset URL → API 503 "isn't configured".
+- **Commit** freezes a scenario's computed grid (exactly what's on screen) into `committed_target`
+  (country × brand × customer × calendar `month_start`); never edited; **the newest commit per
+  target FY is official** = `targets.sales_target` (country_code AU/NZ, month_start, brand,
+  customer, amount). The home page's `sales.targets()` reads that view through the
+  Targets connection (`TARGETS_DB_URL` — where the commits are; locally the 8030 site reads the
+  live warehouse but keeps Targets in the local Postgres); a commit drops the `sales_targets` cache so it shows at once. The old
+  `reporting.sales_target` placeholder idea (Power BI era) is gone.
+- **Periods (2026-10-22):** a scenario plans a span of fiscal months (`scenario.period_start/end`,
+  0 = Apr … 11 = Mar: full year, H1/H2, Q1–Q4 or custom; set at creation or with the "Period"
+  button). The grid fades other months and adds a period-total column; **a commit writes only its
+  period's months** (`target_commit.period_start/end`) and `sales_target` takes, per FY and month,
+  the newest commit covering that month — so a Q4 commit replaces Jan–Mar and H1/Q3 stay as they
+  were. "Committed" shows which months each commit is still official for. Use case (user): H1 done,
+  Q3 released, Q4 to be set/updated mid-year.
+- **Planning-first redesign (2026-10-23, after the user found it unintuitive):** "New scenario" asks
+  the YEAR being planned (target_fy, chosen — no longer base year + 1), the PERIOD, and a STARTING
+  POINT (`scenario.start_from`, `base_kind`, `base_label`; `app/targets/base.py`): **last_year**
+  (T-1 sales; while T-1 runs its unfinished months come from T-2, `actuals.cells_filled`),
+  **this_year** (T so far + the rest projected from T-1, flat or tracking — the old Projection),
+  **official** (a frozen copy of T's official targets in `base_line`; growth applies on top),
+  **blank**; imports are `start_from='import'` snapshots too. The grid shows only the period's
+  months ("Show full year" toggle) then Plan · last year same months · vs LY · Official now ·
+  this year's trend (finished months vs the same months LY), from `payload.compare` / row `cmp`;
+  cards are per country for the period (AU and NZ never summed — the old grand total is gone).
+  **Commits are per country** (`target_commit.countries`; `sales_target` picks the newest commit
+  per FY × month × country) and the Commit dialog shows a now → after preview
+  (`/commit-preview`) with a warning before a country's official targets go to $0. Toolbar =
+  Scenario menu (New, Rename, Duplicate, Delete), Period, Growth, Pacing, Add brand, status chip
+  ("Draft" / "Committed Q4 · date" / "changed since", from `payload.status`), More menu, Commit.
+  Re-imported 2026-10-23 as "FY27 released targets (PBI_TARGETS 13 Oct)" (snapshot, Apr–Dec) in
+  the LOCAL Postgres; the earlier manual-lines import ("FY27 current targets…", which the user
+  had switched to Q4) is left for the user to delete. 2026-10-23: re-seeded from the user's updated file
+  (`OneDrive - MacGearGroup/PBI_TARGETS.xlsx`, saved 22 Oct; NZ now full year, AU still Apr–Dec) as
+  "FY27 targets (PBI_TARGETS 22 Oct)", full-year period: AU $120,854,796 / NZ $41,085,533 (= file
+  less $1,219,091 intercompany). The importer now merges spelling variants NetSuite has no sales
+  for (Rivacase/RIVACASE) and, where NetSuite itself has two spellings of a customer group
+  (MWAVE/Mwave), maps to the one with the most sales — before, that pick was random between runs. User manual: the Claude Docs doc
+  "Targets tool — how to use".
+- **Blank scenarios** (no actuals base; manual lines only) and **`app/targets/importer.py`** — seeds a
+  blank scenario from a targets workbook (the PBI_TARGETS.xlsx layout): drops AU→NZ intercompany,
+  matches brand / retailer spellings to NetSuite's (warehouse actuals), sums duplicates; every
+  retailer × brand becomes a manual line with fixed months. Run 2026-10-22 against the LOCAL
+  Postgres: "FY27 current targets (PBI_TARGETS 13 Oct)", period Apr–Dec, 660 lines, AU
+  $120,854,796 (Apr–Dec) / NZ $11,752,106 (Apr–Sep; the file has no NZ Q3) = the file less
+  $1,218,887 intercompany. Not committed — the user decides.
+- New scenarios target the year after their actuals (FY26 → "FY27"); `target_fy` must look like
+  FYnn for a commit (fiscal month 0 = April of the year before: FY27 → Apr 2026).
+- **Local:** `run.ps1` (8030) takes `TARGETS_DB_URL` from `.env` = the local Postgres (added
+  2026-10-22; reports still read the live warehouse, so actuals are live). Launch config
+  `reporting-site-localdb` (port 8031) sets REPORTING_DB_URL and TARGETS_DB_URL to the local Postgres (`SELLTHROUGH_LOCAL_DB_URL`, superuser), whose sales run
+  to 2026-10-14. The local `targets` schema was left empty after checking (2026-10-22).
+- **Before going live** (not done): on the cluster, as doadmin — `CREATE ROLE reporting_app LOGIN
+  PASSWORD …; CREATE SCHEMA targets AUTHORIZATION reporting_app;` (or GRANT CREATE on the
+  database), put its URL in the droplet's `deploy/.env` as `TARGETS_DB_URL`, redeploy; the app
+  creates the tables and grants `reporting_read` the view. Nothing on the droplet's disk to copy.
+- Tests: `tests/test_targets.py` — run against the LOCAL Postgres in a throwaway schema
+  (dropped after), actuals faked; skipped if that database isn't reachable.
+- The old `Targets/` folder + `targets.db` are untouched and now unused by the site; the user
+  will recreate FY27 in the tool.
 
 ## Vendor Bill Importer — the parts worth knowing
 

@@ -1,0 +1,470 @@
+{% extends "_rpt_base.html" %}
+{% block title %}Inventory Ageing · Macgear Reporting{% endblock %}
+{% block pagename %}Inventory Ageing{% endblock %}
+{% block home_href %}/reports/ageing{% endblock %}
+
+{% block head %}
+<style>
+  /* age bands: escalating warm colours, the same meaning in both themes */
+  :root{--ag-b1:#e0a91b;--ag-b2:#ea6c14;--ag-b3:#d63a40}
+  [data-theme="dark"]{--ag-b1:#f5c451;--ag-b2:#fb8a3c;--ag-b3:#ff5d63}
+  .ag-tw{display:inline-flex;align-items:center;gap:8px;min-width:0}
+  .ag-tg{flex:none;width:20px;height:20px;border-radius:6px;border:1px solid var(--r-line-2);background:var(--r-card-2);
+    color:var(--r-ink-2);font-weight:800;font-size:13px;line-height:1;cursor:pointer;padding:0}
+  .ag-tg:hover{border-color:var(--r-accent);color:var(--r-accent)}
+  .ag-sp{display:inline-block;width:20px;flex:none}
+  .r-table tr.lv0 td{font-weight:700}
+  .r-table tr.lv0 td.sticky{background:var(--r-card)}
+  .r-table tr.lv1 td.l{padding-left:40px}
+  .r-table tr.lv2 td{color:var(--r-ink-2);font-size:12.5px}
+  .r-table tr.lv2 td.l{padding-left:72px}
+  .r-table tr.tot td{position:sticky;top:37px;z-index:2}
+  .ag-nm{display:block;font-size:11.5px;color:var(--r-muted);font-weight:400;max-width:380px;overflow:hidden;text-overflow:ellipsis}
+  .ag-cnt{font-size:11.5px;color:var(--r-muted);font-weight:600}
+  .ag-type{font-size:10.5px;font-weight:700;letter-spacing:.04em;padding:1px 6px;border-radius:999px;
+    background:var(--r-card-2);border:1px solid var(--r-line);color:var(--r-muted);margin-left:6px}
+  .ag-bad{color:var(--r-neg)} .ag-good{color:var(--r-pos)}
+  .ag-pctbar{display:inline-block;width:42px;height:6px;border-radius:3px;background:var(--r-card-2);overflow:hidden;vertical-align:1px;margin-left:8px}
+  .ag-pctbar i{display:block;height:100%;background:var(--r-warn)}
+  .ag-hint{font-size:12px;color:var(--r-faint);margin:8px 0 0}
+  .ag-lede{font-size:15px;color:var(--r-ink-2);max-width:95ch;margin:12px 0 0}
+  .ag-lede b{color:var(--r-ink)}
+  .r-stat .sub b{font-weight:700}
+  #agTable th:first-child{min-width:300px;text-align:left}
+</style>
+{% endblock %}
+
+{% block content %}
+{% if error %}
+<div class="r-card"><p class="r-eyebrow">Inventory ageing</p><h2 style="margin:0 0 8px">Not available</h2>
+  <p class="r-muted">{{ error }}</p></div>
+{% else %}
+<section class="r-card">
+  <div class="r-card-h" style="margin-bottom:4px">
+    <div>
+      <p class="r-eyebrow">NetSuite Inventory Aging Report · at average cost</p>
+      <h2>Inventory Ageing</h2>
+    </div>
+    <div class="r-filters">
+      {% if regions|length > 1 %}
+      <div class="r-seg" id="agRegion" role="group" aria-label="Region">
+        {% for r in regions %}<button type="button" data-region="{{ r }}" aria-pressed="{{ 'true' if loop.first else 'false' }}">{{ 'Australia' if r == 'AU' else 'New Zealand' }}</button>{% endfor %}
+      </div>
+      {% endif %}
+      <span class="r-chip" id="agAsAt"></span>
+    </div>
+  </div>
+  <p class="ag-lede" id="agLede"></p>
+  <div class="r-stats" id="agTiles"></div>
+</section>
+
+<div class="r-grid r-cols-2 r-sec">
+  <section class="r-card">
+    <div class="r-card-h">
+      <div><p class="r-eyebrow">Value past 90 days, by age band</p><h2 id="agBandsTitle">Where the aged stock sits</h2></div>
+      <div class="r-seg" id="agRange" role="group" aria-label="Period">
+        <button type="button" data-range="30">30d</button>
+        <button type="button" data-range="90">90d</button>
+        <button type="button" data-range="daily">Since May</button>
+        <button type="button" data-range="0" aria-pressed="true">All</button>
+      </div>
+    </div>
+    <div class="r-chart" id="agBands"></div>
+    <div class="r-legend">
+      <span><i style="background:var(--ag-b1)"></i>91–180 days</span>
+      <span><i style="background:var(--ag-b2)"></i>181–370 days</span>
+      <span><i style="background:var(--ag-b3)"></i>370+ days</span>
+    </div>
+    <p class="ag-hint" id="agFlow"></p>
+  </section>
+  <section class="r-card">
+    <div class="r-card-h">
+      <div><p class="r-eyebrow">Currency-free, so regions share an axis</p><h2>Aged share of stock</h2></div>
+    </div>
+    <div class="r-chart" id="agShare"></div>
+    <div class="r-legend" id="agShareLegend"></div>
+    <p class="ag-hint">Value over 90 days ÷ total stock value. Early 2026 is a handful of point snapshots (gaps are drawn as
+      straight lines); daily from 11 May.</p>
+  </section>
+</div>
+
+<section class="r-card r-sec">
+  <div class="r-card-h">
+    <div><p class="r-eyebrow">Brand, then product, then location</p><h2>Stock by age</h2></div>
+    <div class="r-filters">
+      <button type="button" class="r-btn ghost" id="agExpand">Expand all</button>
+      <button type="button" class="r-btn ghost" id="agCollapse">Collapse</button>
+      <button type="button" class="r-btn" id="agCsv">⬇ Download CSV</button>
+    </div>
+  </div>
+  <div class="r-filters">
+    <label>List products
+      <span class="r-seg" id="agShow" role="group" aria-label="List products">
+        <button type="button" data-show="0">All stock</button>
+        <button type="button" data-show="1" aria-pressed="true">Over 90</button>
+        <button type="button" data-show="2">Over 180</button>
+        <button type="button" data-show="3">Over 370</button>
+      </span>
+    </label>
+    <label>Measure
+      <span class="r-seg" id="agMeasure" role="group" aria-label="Measure">
+        <button type="button" data-m="v" aria-pressed="true">Value</button>
+        <button type="button" data-m="u">Units</button>
+      </span>
+    </label>
+    <label>Location<select class="r-select" id="agLoc"></select></label>
+    <label style="flex:1 1 220px">Find<input class="r-input" id="agQ" type="search" placeholder="Brand, code or product name" autocomplete="off"></label>
+  </div>
+  <p class="ag-hint" id="agSum"></p>
+  <div class="r-tablewrap" style="margin-top:10px">
+    <table class="r-table" id="agTable">
+      <thead><tr id="agHead"></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <p class="ag-hint">Brand and total rows always cover the brand's whole stock at the chosen location; "List products"
+    and Find only choose which products are listed under them. <b>Aged since</b> = the first day of the current unbroken
+    run with stock past the line being listed (90 days under "All stock").</p>
+</section>
+
+<section class="r-card r-sec" id="agTplCard">
+  <div class="r-card-h"><div><p class="r-eyebrow">Not Macgear stock — in no figure above</p><h2>Third-party (3PL) stock</h2></div></div>
+  <div class="r-stats" id="agTpl" style="margin-top:0"></div>
+  <p class="ag-hint">Location <code>warehouse 3PL</code> holds goods Macgear stores for others. NetSuite carries it at $0, so it is
+    counted in units only.</p>
+</section>
+
+<p class="r-note">
+  <b>Source.</b> The daily NetSuite <i>Inventory Aging Report</i>: one row per item × location with 13 age buckets, rolled into
+  0–90 / 91–180 / 181–370 / 370+ with no interpolation — the edges are NetSuite's and nothing is counted twice ("over 90" is
+  the last three bands). Values at average cost, not retail.<br>
+  <b>Age basis.</b> NetSuite ages stock from its arrival at its <i>current</i> location, so a transfer restarts the clock. Early-2026
+  NZ stock looks young because Christchurch was emptied into Auckland; part of its rise from May is that stock ageing again.<br>
+  <b>Regions.</b> AU figures are AUD, NZ figures NZD — never added together.<br>
+  <b>Excluded.</b> Warehouse 3PL (third-party, shown separately in units) and consignment locations (AU6 Big W, Consignment NZ)
+  are in no figure. MOVA in the Melbourne and Auckland warehouses is Macgear's and is included.
+</p>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if not error %}
+<script>
+(function () {
+  "use strict";
+  var D = {{ data|tojson }}, ITEMS = {{ items_link|tojson }};
+  var R = Object.keys(D.regions)[0];
+  var S = {show: 1, m: "v", loc: "", q: "", key: "o90", dir: -1, range: "0"};
+  var open = {};
+  var BANDS = ["0–90", "91–180", "181–370", "370+"];
+  var LINE = ["over 90", "over 90", "over 180", "over 370"];
+
+  var esc = RPT.esc, NF = new Intl.NumberFormat("en-AU");
+  function num(n) { return n == null ? "—" : NF.format(Math.round(n)); }
+  function cur() { return D.regions[R].ccy; }
+  function money(n, full) { return RPT.money(n, cur(), full !== false); }
+  function longDate(iso) { return RPT.wk(iso, true); }
+  function signed(n, fmt) { return (n > 0 ? "+" : n < 0 ? "−" : "") + fmt(Math.abs(n)); }
+  // For aged stock, more is worse.
+  function badGood(n) { return Math.abs(n) < 0.5 ? "flat" : n > 0 ? "ag-bad" : "ag-good"; }
+
+  /* ---- reference points from the series ---- */
+  var IDX = {};
+  D.dates.forEach(function (d, i) { IDX[d] = i; });
+  function at(rg, iso) {
+    var s = D.regions[rg].series, i = IDX[iso];
+    var v = [s.v0[i], s.v1[i], s.v2[i], s.v3[i]], u = [s.u0[i], s.u1[i], s.u2[i], s.u3[i]];
+    return {v: v, u: u, tot: v[0] + v[1] + v[2] + v[3], o90: v[1] + v[2] + v[3], o180: v[2] + v[3], o370: v[3],
+            units: u[0] + u[1] + u[2] + u[3], u90: u[1] + u[2] + u[3]};
+  }
+
+  /* ---- header, lede, tiles ---- */
+  function drawTop() {
+    var now = at(R, D.ref.latest), was = at(R, D.ref.d30);
+    var n180 = 0, sk = D.regions[R].skus, lines = D.regions[R].lines, seen = {};
+    lines.forEach(function (l) { if (l[4] + l[5] > 0 && !seen[l[0]]) { seen[l[0]] = 1; n180++; } });
+    document.getElementById("agAsAt").innerHTML = "As at <b>" + esc(longDate(D.ref.latest)) + "</b> · " + D.dates.length + " snapshots";
+    var reg = R === "AU" ? "Australian" : "New Zealand", d90 = now.o90 - was.o90;
+    document.getElementById("agLede").innerHTML =
+      "<b>" + money(now.o90) + "</b> (" + (now.tot ? (now.o90 / now.tot * 100).toFixed(1) : "0") + "%) of " + reg +
+      " stock is over 90 days — " + (Math.abs(d90) < 0.5 ? "unchanged" : (d90 > 0 ? "up " : "down ") + money(Math.abs(d90))) +
+      " on 30 days ago (" + esc(longDate(D.ref.d30)) + "). <b>" + money(now.o180) + "</b> of it is past 180 days, across " +
+      NF.format(n180) + " products.";
+    function tile(lbl, val, sub) { return '<div class="r-stat"><div class="lbl">' + lbl + '</div><div class="val">' + val + '</div><div class="sub">' + sub + "</div></div>"; }
+    function vs(n, fmt) { return '<b class="' + badGood(n) + '">' + signed(n, fmt) + "</b> vs 30 days"; }
+    var share = now.tot ? now.o90 / now.tot * 100 : 0, wshare = was.tot ? was.o90 / was.tot * 100 : 0;
+    var tpl = D.regions[R].tpl;
+    document.getElementById("agTiles").innerHTML =
+      tile("Total stock <small>" + cur() + "</small>", money(now.tot, false),
+           '<b class="flat">' + signed(now.tot - was.tot, function (x) { return money(x, false); }) + "</b> vs 30 days · " + num(now.units) + " units") +
+      tile("Over 90 days", money(now.o90, false), vs(now.o90 - was.o90, function (x) { return money(x, false); })) +
+      tile("Aged share", share.toFixed(1) + "%", '<b class="' + badGood(share - wshare) + '">' + signed(share - wshare, function (x) { return x.toFixed(1); }) + " pts</b> vs 30 days") +
+      tile("Over 180 days", money(now.o180, false), vs(now.o180 - was.o180, function (x) { return money(x, false); })) +
+      tile("Over 370 days", money(now.o370, false), vs(now.o370 - was.o370, function (x) { return money(x, false); }));
+    var tu = tpl.units[IDX[D.ref.latest]], tw = tpl.units[IDX[D.ref.d30]];
+    document.getElementById("agTplCard").hidden = !tu && !tw;
+    document.getElementById("agTpl").innerHTML =
+      tile("Units on hand", num(tu), signed(tu - tw, num) + " vs 30 days") + tile("Products", num(tpl.skus), "with stock at the location");
+  }
+
+  /* ---- charts: one slot per calendar day, so time is to scale ---- */
+  var CAL = (function () {
+    var out = [], d = new Date(D.dates[0] + "T00:00:00Z"), end = new Date(D.dates[D.dates.length - 1] + "T00:00:00Z");
+    for (; d <= end; d.setUTCDate(d.getUTCDate() + 1)) out.push(d.toISOString().slice(0, 10));
+    return out;
+  })();
+  var FIRST_DAILY = (function () {        // start of the unbroken daily run that ends at the latest snapshot
+    var i = D.dates.length - 1;
+    while (i > 0 && (new Date(D.dates[i]) - new Date(D.dates[i - 1])) <= 864e5) i--;
+    return D.dates[i];
+  })();
+  function window_() {
+    var from = 0;
+    if (S.range === "daily") from = CAL.indexOf(FIRST_DAILY);
+    else if (+S.range) from = Math.max(0, CAL.length - +S.range);
+    return CAL.slice(from);
+  }
+  function pick(arr, cal) { return cal.map(function (d) { return d in IDX ? arr[IDX[d]] : null; }); }
+  var bandsChart = null, shareChart = null;
+  function drawCharts() {
+    var cal = window_(), s = D.regions[R].series;
+    var xl = function (l) { return RPT.wk(l); }, tl = function (l) { return RPT.wk(l, true); };
+    document.getElementById("agBandsTitle").textContent = "Where the aged stock sits (" + cur() + ")";
+    bandsChart = RPT.chart(document.getElementById("agBands"), {
+      labels: cal, xLabel: xl, tipLabel: tl,
+      axis: function (v) { return RPT.compact(v); },
+      fmt: function (v) { return money(v); },
+      series: [
+        {name: "91–180", type: "bar", stack: "a", values: pick(s.v1, cal), color: "var(--ag-b1)"},
+        {name: "181–370", type: "bar", stack: "a", values: pick(s.v2, cal), color: "var(--ag-b2)"},
+        {name: "370+", type: "bar", stack: "a", values: pick(s.v3, cal), color: "var(--ag-b3)"}]
+    });
+    var ser = [], leg = [], cols = {AU: "var(--r-accent)", NZ: "var(--r-amber)"};
+    Object.keys(D.regions).forEach(function (rg) {
+      var x = D.regions[rg].series;
+      var share = x.v0.map(function (_, i) { var t = x.v0[i] + x.v1[i] + x.v2[i] + x.v3[i]; return t ? (x.v1[i] + x.v2[i] + x.v3[i]) / t * 100 : null; });
+      ser.push({name: rg, type: "line", values: pick(share, cal), color: cols[rg]});
+      leg.push('<span><i style="background:' + cols[rg] + '"></i>' + (rg === "AU" ? "Australia" : "New Zealand") + "</span>");
+    });
+    shareChart = RPT.chart(document.getElementById("agShare"), {
+      labels: cal, xLabel: xl, tipLabel: tl, series: ser,
+      axis: function (v) { return v.toFixed(0) + "%"; }, fmt: function (v) { return v.toFixed(1) + "%"; }
+    });
+    document.getElementById("agShareLegend").innerHTML = leg.join("");
+    // aged in vs cleared over the window: day-on-day rises and falls of value over 90
+    var up = 0, down = 0, prev = null;
+    cal.forEach(function (d) {
+      if (!(d in IDX)) return;
+      var o = s.v1[IDX[d]] + s.v2[IDX[d]] + s.v3[IDX[d]];
+      if (prev != null) { if (o > prev) up += o - prev; else down += prev - o; }
+      prev = o;
+    });
+    document.getElementById("agFlow").textContent = "Over this period " + money(up) + " aged past the 90-day line and " +
+      money(down) + " cleared it (sold, moved or written off) — day-on-day changes, so both directions show.";
+  }
+
+  /* ---- the tree ---- */
+  var COLS = [
+    {k: "name", t: "Brand / product", l: 1},
+    {k: "tot", t: "Total"}, {k: "b0", t: "0–90"}, {k: "b1", t: "91–180"}, {k: "b2", t: "181–370"}, {k: "b3", t: "370+"},
+    {k: "o90", t: "Over 90"}, {k: "pct", t: "% over 90"}, {k: "chg", t: "Over 90 vs 30d"}, {k: "since", t: "Aged since"}];
+  function blank() { return {v: [0, 0, 0, 0], u: [0, 0, 0, 0], v30: 0, u30: 0, v1st: 0}; }
+  function add(a, l) {
+    for (var i = 0; i < 4; i++) { a.v[i] += l[2 + i]; a.u[i] += l[6 + i]; }
+    a.v30 += l[10]; a.u30 += l[11]; a.v1st += l[12];
+  }
+  function metrics(a) {
+    var x = S.m === "v" ? a.v : a.u, tot = x[0] + x[1] + x[2] + x[3], o = x[1] + x[2] + x[3];
+    return {tot: tot, b0: x[0], b1: x[1], b2: x[2], b3: x[3], o90: o,
+            pct: tot ? o / tot * 100 : 0,
+            chg: o - (S.m === "v" ? a.v30 : a.u30)};
+  }
+  function hasPast(a, line) {      // units past the line (units catch $0-cost lines too)
+    if (line === 0) return a.u[0] + a.u[1] + a.u[2] + a.u[3] > 0;
+    for (var i = line; i < 4; i++) if (a.u[i] > 0) return true;
+    return false;
+  }
+  function build() {
+    var rg = D.regions[R], q = S.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    var brands = {}, total = blank();
+    rg.lines.forEach(function (l) {
+      if (S.loc && l[1] !== S.loc) return;
+      var meta = rg.skus[l[0]] || ["", "(unclassed)"], b = meta[1];
+      var B = brands[b] || (brands[b] = {name: b, a: blank(), kids: {}});
+      var P = B.kids[l[0]] || (B.kids[l[0]] = {name: l[0], desc: meta[0], meta: meta, a: blank(), kids: []});
+      var L = {name: l[1], a: blank()};
+      add(L.a, l); add(P.a, l); add(B.a, l); add(total, l);
+      P.kids.push(L);
+    });
+    var out = [], shown = 0;
+    Object.keys(brands).forEach(function (b) {
+      var B = brands[b];
+      B.list = Object.keys(B.kids).map(function (c) { return B.kids[c]; }).filter(function (P) {
+        if (!hasPast(P.a, S.show)) return false;
+        if (!q.length) return true;
+        var hay = (b + " " + P.name + " " + P.desc).toLowerCase();
+        return q.every(function (w) { return hay.indexOf(w) >= 0; });
+      });
+      P_since(B.list);
+      // a product's locations: those holding stock now, plus any it has left since 30 days ago
+      // (shown with their fall, so the location rows add up to the product's "vs 30d")
+      B.list.forEach(function (P) { P.kids = P.kids.filter(function (L) { return hasPast(L.a, 0) || L.a.v30 || L.a.u30; }); });
+      shown += B.list.length;
+      if (B.list.length) out.push(B);
+    });
+    return {brands: out, total: total, shown: shown};
+  }
+  function P_since(list) {
+    var k = S.show === 0 ? 2 : S.show + 1;      // meta[2] = since 90, [3] = 180, [4] = 370
+    list.forEach(function (P) { P.since = P.meta[k]; });
+  }
+  function sortKey(n, m) {
+    if (S.key === "name") return n.name.toLowerCase();
+    if (S.key === "since") return n.since || "~";
+    return m[S.key];
+  }
+  function sorted(arr) {
+    return arr.map(function (n) { return {n: n, m: metrics(n.a)}; }).sort(function (x, y) {
+      var a = sortKey(x.n, x.m), b = sortKey(y.n, y.m);
+      if (typeof a === "string") return a < b ? -S.dir : a > b ? S.dir : 0;
+      return (a - b) * S.dir;
+    });
+  }
+  function cells(m, since) {
+    var f = S.m === "v" ? function (n) { return num(n); } : num;
+    function z(n) { return Math.abs(n) < 0.5 ? '<span class="q0">–</span>' : f(n); }
+    return '<td>' + z(m.tot) + '</td><td>' + z(m.b0) + '</td><td>' + z(m.b1) + '</td><td>' + z(m.b2) + '</td><td>' + z(m.b3) +
+      '</td><td><b>' + z(m.o90) + '</b></td><td>' + (m.tot ? m.pct.toFixed(1) + '%<span class="ag-pctbar"><i style="width:' + Math.min(100, m.pct).toFixed(0) + '%"></i></span>' : '<span class="q0">–</span>') +
+      '</td><td class="' + badGood(m.chg) + '">' + (Math.abs(m.chg) < 0.5 ? "–" : signed(m.chg, f)) + '</td><td>' + (since === undefined ? "" : since ? sinceText(since) : '<span class="q0">–</span>') + "</td>";
+  }
+  // A run that starts on the first snapshot may be older — the history starts there.
+  function sinceText(iso) {
+    return iso === D.ref.first ? '<span title="Already past the line on the first snapshot">by ' + esc(RPT.wk(iso, true)) + "</span>"
+                               : esc(RPT.wk(iso, true));
+  }
+  function head() {
+    var unit = S.m === "v" ? cur() : "units";
+    document.getElementById("agHead").innerHTML = COLS.map(function (c) {
+      var arrow = S.key === c.k ? '<span class="sm">' + (S.dir < 0 ? "▼" : "▲") + "</span>" : "";
+      var sub = c.k === "tot" ? '<span class="wd">' + unit + "</span>" : c.k === "since" ? '<span class="wd">' + LINE[S.show] + "</span>" : "";
+      return '<th class="' + (c.l ? "l sticky" : "") + '" data-k="' + c.k + '" tabindex="0">' + c.t + arrow + sub + "</th>";
+    }).join("");
+  }
+  var LAST = null;
+  function drawTable() {
+    head();
+    var T = build(), rows = [];
+    LAST = T;
+    var tm = metrics(T.total);
+    rows.push('<tr class="tot"><td class="l sticky">All brands' + (S.loc ? " · " + esc(S.loc) : "") + "</td>" + cells(tm) + "</tr>");
+    sorted(T.brands).forEach(function (bx) {
+      var B = bx.n, id = "b" + B.name, isOpen = !!open[id];
+      rows.push('<tr class="lv0"><td class="l sticky"><span class="ag-tw"><button type="button" class="ag-tg" data-open="' + esc(id) + '" aria-expanded="' + isOpen + '">' +
+        (isOpen ? "−" : "+") + "</button>" + esc(B.name) + ' <span class="ag-cnt">' + B.list.length + (B.list.length === 1 ? " product" : " products") + "</span></span></td>" + cells(bx.m) + "</tr>");
+      if (!isOpen) return;
+      sorted(B.list).forEach(function (px) {
+        var P = px.n, pid = id + "\u0001" + P.name, multi = P.kids.length > 1, pOpen = multi && !!open[pid];
+        var label = ITEMS ? '<a href="' + esc(RPT.itemUrl(P.name, R)) + '"><span class="pn">' + esc(P.name) + "</span></a>" : esc(P.name);
+        var where = multi ? '<span class="ag-cnt">' + P.kids.length + " locations</span>" : '<span class="ag-cnt">' + esc(P.kids[0] ? P.kids[0].name : "") + "</span>";
+        rows.push('<tr class="lv1"><td class="l sticky"><span class="ag-tw">' +
+          (multi ? '<button type="button" class="ag-tg" data-open="' + esc(pid) + '" aria-expanded="' + pOpen + '">' + (pOpen ? "−" : "+") + "</button>" : '<span class="ag-sp"></span>') +
+          "<span>" + label + " " + where + '<span class="ag-nm" title="' + esc(P.desc) + '">' + esc(P.desc) + "</span></span></span></td>" + cells(px.m, P.since) + "</tr>");
+        if (pOpen) sorted(P.kids).forEach(function (lx) {
+          rows.push('<tr class="lv2"><td class="l sticky">' + esc(lx.n.name) + '<span class="ag-type">' + esc(D.locs[lx.n.name] || "") + "</span></td>" + cells(lx.m) + "</tr>");
+        });
+      });
+    });
+    if (!T.brands.length) rows.push('<tr><td class="l" colspan="' + COLS.length + '"><div class="r-empty">No products match.</div></td></tr>');
+    document.querySelector("#agTable tbody").innerHTML = rows.join("");
+    document.getElementById("agSum").textContent = NF.format(T.shown) + (T.shown === 1 ? " product" : " products") +
+      " listed across " + T.brands.length + (T.brands.length === 1 ? " brand" : " brands") + " · " +
+      (S.m === "v" ? cur() + " at average cost" : "units");
+  }
+
+  /* ---- CSV of what the table lists, product × location ---- */
+  function csv() {
+    var T = LAST, out = [["Region", "Brand", "Product", "Description", "Location", "Location type",
+      "Total " + cur(), "0-90 " + cur(), "91-180 " + cur(), "181-370 " + cur(), "370+ " + cur(), "Over 90 " + cur(),
+      "Over 90 " + cur() + " 30 days ago", "Units", "Units over 90", "Aged since (" + LINE[S.show] + ")"]];
+    T.brands.forEach(function (B) {
+      B.list.forEach(function (P) {
+        P.kids.forEach(function (L) {
+          var v = L.a.v, u = L.a.u;
+          out.push([R, B.name, P.name, P.desc, L.name, D.locs[L.name] || "",
+            v[0] + v[1] + v[2] + v[3], v[0], v[1], v[2], v[3], v[1] + v[2] + v[3], L.a.v30,
+            u[0] + u[1] + u[2] + u[3], u[1] + u[2] + u[3], P.since || ""]);
+        });
+      });
+    });
+    var text = out.map(function (r) {
+      return r.map(function (c) { var s = typeof c === "number" ? String(Math.round(c * 100) / 100) : String(c); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(",");
+    }).join("\r\n");
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob(["﻿" + text], {type: "text/csv"}));
+    a.download = "inventory_ageing_" + R + "_" + D.ref.latest + ".csv";
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  /* ---- controls ---- */
+  function fillLocs() {
+    var seen = {};
+    D.regions[R].lines.forEach(function (l) { seen[l[1]] = 1; });
+    var names = Object.keys(seen).sort(function (a, b) {
+      var ta = D.locs[a] === "Warehouse" ? 0 : 1, tb = D.locs[b] === "Warehouse" ? 0 : 1;
+      return ta - tb || a.localeCompare(b);
+    });
+    var sel = document.getElementById("agLoc");
+    sel.innerHTML = '<option value="">All locations</option>' + names.map(function (n) {
+      return '<option value="' + esc(n) + '">' + esc(n) + " (" + esc(D.locs[n] || "") + ")</option>";
+    }).join("");
+    if (!seen[S.loc]) S.loc = "";
+    sel.value = S.loc;
+  }
+  function seg(id, attr, fn) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener("click", function (e) {
+      var b = e.target.closest("button"); if (!b) return;
+      [].forEach.call(el.querySelectorAll("button"), function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+      fn(b.getAttribute(attr));
+    });
+  }
+  seg("agRegion", "data-region", function (v) { R = v; open = {}; fillLocs(); drawTop(); drawCharts(); drawTable(); });
+  seg("agRange", "data-range", function (v) { S.range = v; drawCharts(); });
+  seg("agShow", "data-show", function (v) { S.show = +v; drawTable(); });
+  seg("agMeasure", "data-m", function (v) { S.m = v; drawTable(); });
+  document.getElementById("agLoc").addEventListener("change", function (e) { S.loc = e.target.value; drawTable(); });
+  var qt = null;
+  document.getElementById("agQ").addEventListener("input", function (e) {
+    clearTimeout(qt); qt = setTimeout(function () {
+      S.q = e.target.value;
+      // a search opens the brands it finds products in
+      if (S.q.trim()) build().brands.forEach(function (B) { open["b" + B.name] = true; });
+      drawTable();
+    }, 150);
+  });
+  document.getElementById("agTable").addEventListener("click", function (e) {
+    var t = e.target.closest("[data-open]");
+    if (t) { var id = t.getAttribute("data-open"); open[id] = !open[id]; drawTable(); return; }
+    var th = e.target.closest("th[data-k]");
+    if (th) {
+      var k = th.getAttribute("data-k");
+      S.dir = S.key === k ? -S.dir : (k === "name" || k === "since" ? 1 : -1);
+      S.key = k; drawTable();
+    }
+  });
+  document.getElementById("agTable").addEventListener("keydown", function (e) {
+    var th = e.target.closest("th[data-k]");
+    if (th && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); th.click(); }
+  });
+  document.getElementById("agExpand").addEventListener("click", function () {
+    (LAST ? LAST.brands : []).forEach(function (B) { open["b" + B.name] = true; }); drawTable();
+  });
+  document.getElementById("agCollapse").addEventListener("click", function () { open = {}; drawTable(); });
+  document.getElementById("agCsv").addEventListener("click", csv);
+
+  fillLocs(); drawTop(); drawCharts(); drawTable();
+})();
+</script>
+{% endif %}
+{% endblock %}

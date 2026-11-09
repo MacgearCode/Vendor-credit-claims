@@ -59,8 +59,11 @@ class _Connection:
         try:
             # No query may run longer than this: one pathological plan once held a
             # connection for minutes. The caller sees WarehouseUnavailable.
+            # JIT off: compiling the big aggregations cost more than it saved (0.5 s of
+            # the home page's 3.3 s sales query; cold builds 10-40% faster without it,
+            # 2026-11-09). This connection only - the cluster setting is untouched.
             self.conn = psycopg.connect(url, connect_timeout=10,
-                                        options=f"-c statement_timeout={STATEMENT_TIMEOUT_MS}")
+                                        options=f"-c statement_timeout={STATEMENT_TIMEOUT_MS} -c jit=off")
         except psycopg.OperationalError as e:
             _slots.release()
             raise WarehouseUnavailable(str(e).splitlines()[0]) from e
@@ -80,6 +83,38 @@ def connect():
 
 def query(sql: str, params=None) -> list[tuple]:
     with connect() as conn, conn.cursor() as cur:
+        try:
+            cur.execute(sql, params)
+        except psycopg.errors.QueryCanceled as e:
+            raise WarehouseUnavailable("the query took too long and was stopped") from e
+        return cur.fetchall()
+
+
+# ---- summary tables ------------------------------------------------------------
+# Sell Through/db/13_summaries.sql keeps pre-summed copies of the big facts
+# (reporting.agg_*), rebuilt by the ETL after each load. A cold build reads a summary
+# only when reporting.fresh_summaries() lists it - built, and nothing under it changed
+# since - and otherwise runs its original query on the source view, so a late or
+# failed refresh makes a page slower to build, never wrong. Checked per build, on the
+# build's own connection (never cached: a load could land in between).
+# REPORTING_SUMMARIES=0 turns them off (comparisons, or if one ever misbehaves).
+def fresh_summaries(cur) -> set:
+    if os.environ.get("REPORTING_SUMMARIES", "1") == "0":
+        return set()
+    try:
+        cur.execute("select * from reporting.fresh_summaries()")
+        return {r[0] for r in cur.fetchall()}
+    except (psycopg.errors.UndefinedFunction, psycopg.errors.UndefinedTable,
+            psycopg.errors.InsufficientPrivilege):
+        cur.connection.rollback()            # not in this warehouse (yet): source views
+        return set()
+
+
+def query_summary(summary: str, fast: str, slow: str, params=None) -> list[tuple]:
+    """query(), reading `fast` (on reporting.<summary>) when that summary is fresh, else
+    `slow` (the original query on the source view). Both must return the same rows."""
+    with connect() as conn, conn.cursor() as cur:
+        sql = fast if summary in fresh_summaries(cur) else slow
         try:
             cur.execute(sql, params)
         except psycopg.errors.QueryCanceled as e:
@@ -190,6 +225,17 @@ def expire(prefixes: tuple) -> int:
                 e.built = 0.0
                 n += 1
     return n
+
+
+def drop(prefixes: tuple) -> int:
+    """Forget matching entries outright, so the next use rebuilds before answering
+    (expire() would serve the old value once more). For data the site itself just
+    changed, e.g. a Targets commit."""
+    with _lock:
+        keys = [k for k in _cache if k and isinstance(k[0], str) and k[0].startswith(prefixes)]
+        for k in keys:
+            del _cache[k]
+    return len(keys)
 
 
 def check_watches() -> list:

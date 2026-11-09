@@ -55,7 +55,8 @@ _ST_SQL = """
     from f
     join reporting.dim_item     i on i.item_key     = f.item_key
     join reporting.dim_customer c on c.customer_key = f.customer_key
-    where (%(brands)s::text[] is null or i.brand = any(%(brands)s::text[]))"""
+    where (%(brands)s::text[] is null or i.brand = any(%(brands)s::text[]))
+    order by f.region_key, f.item_key, f.customer_key, f.date_key"""
 
 # Brand is filtered in Python for sell-in: filtering fact_sales_line on brand in
 # SQL has sent the planner down an 80-second path (Reporting Site/CLAUDE.md).
@@ -75,7 +76,8 @@ _SI_SQL = """
     join reporting.dim_item i on i.item_key = s.item_key
     left join reporting.dim_customer c on c.customer_key = s.customer_key
     left join reporting.dim_ns_customer nc on nc.customer_id = s.customer_id
-    group by 1, 2, 3, 4, 5, 6, 7"""
+    group by 1, 2, 3, 4, 5, 6, 7
+    order by 1, 2, 5, 6, 7"""
 
 _MG_SQL = """
     select f.region_key, i.macgear_code, sum(f.on_hand), sum(f.available), sum(f.on_order),
@@ -90,6 +92,26 @@ _ETA_SQL = """
     select p.region_key, p.item_code, p.po_number, p.eta, p.inbound_status, p.open_qty, p.loaded_at
     from reporting.fact_open_po p
     where p.region_key = any(%(rks)s) and p.open_qty > 0"""
+
+# The same two queries on the summary tables (Sell Through/db/13_summaries.sql), used
+# when they're fresh. Sell-through: the store-less weekly summary is already one row
+# per region x item x customer x week, so the sums are identical. Sell-in: the weekly
+# summary holds exactly _SI_SQL's lines (units <> 0, matched item) summed per week x
+# item x customer x customer group; the weeks are whole Mon-Sun weeks either way.
+# All four are ORDER BY'd alike: the page lists items and customers in the order rows
+# arrive, so the order must not depend on which table answered.
+_ST_SQL_FAST = (_ST_SQL.replace("from reporting.fact_sell_through f", "from reporting.agg_sell_through_week f")
+                .replace("sum(f.qty_sold * f.rrp) filter", "sum(f.sales_value_rrp) filter"))
+
+_SI_SQL_FAST = """
+    select s.region_key, i.macgear_code, i.description, i.brand, c.customer_name,
+           s.customer_group, s.wk, sum(s.net_sales_qty)
+    from reporting.agg_sell_in_week s
+    join reporting.dim_item i on i.item_key = s.item_key
+    left join reporting.dim_customer c on c.customer_key = s.customer_key
+    where s.region_key = any(%(rks)s) and s.wk between %(wk_lo)s and %(wk_hi)s
+    group by 1, 2, 3, 4, 5, 6, 7
+    order by 1, 2, 5, 6, 7"""
 
 _NAME_DROP = re.compile(r"\(nz\)|\blimited\b|\bltd\b|\bcomputers\b|[^a-z0-9]")
 
@@ -242,10 +264,15 @@ def build(brands: list[str] | None, regions: list[str], sell_in: bool) -> dict:
     si_rows = mg_rows = eta_rows = None
     eta_loaded = False
     with warehouse.connect() as conn, conn.cursor() as cur:
-        cur.execute(_ST_SQL, p)
+        fresh = warehouse.fresh_summaries(cur)
+        cur.execute(_ST_SQL_FAST if "agg_sell_through_week" in fresh else _ST_SQL, p)
         st_rows = cur.fetchall()
         if sell_in:
-            cur.execute(_SI_SQL, {**p, "lo": _dk(weeks[0] - timedelta(days=6))})
+            # the summary's weeks are Mon-Sun, so only when the last week ends on a Sunday
+            if "agg_sell_in_week" in fresh and weeks[-1].weekday() == 6:
+                cur.execute(_SI_SQL_FAST, {**p, "wk_lo": weeks[0], "wk_hi": weeks[-1]})
+            else:
+                cur.execute(_SI_SQL, {**p, "lo": _dk(weeks[0] - timedelta(days=6))})
             si_rows = [r for r in cur.fetchall() if brands is None or r[3] in brands]
             cur.execute(_MG_SQL, p)
             mg_rows = cur.fetchall()

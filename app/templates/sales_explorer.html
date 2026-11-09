@@ -123,7 +123,7 @@
 <p class="r-note">Revenue = Macgear's NetSuite sales (sales account, ex-GST, net of credits; AU → NZ intercompany excluded), each country in its own
   currency. Periods follow the financial year (April–March). "LY" = the same dates a year earlier; a period still running compares to-date with to-date.
   Account manager = the account manager on the customer record today, applied to all past sales — their whole portfolio, not the rep on each invoice. {% if a.margin %}GP uses NetSuite's estimated cost, not posted COGS.{% endif %}
-  {% if not has_targets %}Targets aren't loaded yet — the Target columns appear once they are.{% endif %}</p>
+  <span id="tgtNote"></span></p>
 {% endblock %}
 
 {% block scripts %}
@@ -226,7 +226,11 @@
   function renderKpis() {
     var K = D.kpis, P = D.period;
     var html = '<p class="r-eyebrow">' + RPT.esc(P.label) + " · " + D.region + "</p>";
-    if (P.future) { document.getElementById("kpiCard").innerHTML = html + '<p class="r-muted">That period hasn\'t started yet.</p>'; return; }
+    if (P.future) {
+      document.getElementById("kpiCard").innerHTML = html + '<p class="r-muted">That period hasn\'t started yet.</p>' +
+        (D.targets.full ? '<div class="r-stats" style="margin-top:14px">' + stat("Target", money(D.targets.full), "for the whole period") + "</div>" : "");
+      return;
+    }
     html += '<div class="sx-big">' + money(K.v, true) + "</div>" +
       '<div class="r-meta">' + '<span class="r-chip ' + (K.growth >= 0 ? "pos" : "neg") + '">' + RPT.delta(K.growth).arrow + " " + gtxt(K.growth) + " vs LY</span>" +
       '<span class="r-chip">LY <b>&nbsp;' + money(K.ly) + "</b></span>" +
@@ -234,9 +238,18 @@
       '<div class="r-stats" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-top:14px">' +
       stat("Units", RPT.int(K.q), "") +
       (D.margin ? stat("Est. GP", money(K.gp), K.gp_pct == null ? "—" : K.gp_pct.toFixed(1) + "% margin") : "") +
-      stat("Target", "—", "not loaded yet") + "</div>" +
+      targetStat() + "</div>" +
       '<p class="r-muted" style="font-size:12px;margin:12px 0 0">' + fmtDate(P.from) + " – " + fmtDate(P.to) + " vs " + fmtDate(P.ly_from) + " – " + fmtDate(P.ly_to) + "</p>";
     document.getElementById("kpiCard").innerHTML = html;
+  }
+  // Targets = the official ones committed in Tools → Targets, set by retailer × brand × month;
+  // a retailer's target is its NetSuite account manager's.
+  function targetStat() {
+    var K = D.kpis, T = D.targets;
+    if (!T.has) return stat("Target", "—", "none committed");
+    var sub = K.to_t == null ? "" : '<span class="' + (K.to_t >= 100 ? "up" : "down") + '">' + K.to_t.toFixed(0) + "% of target</span>";
+    if (T.full != null && Math.abs(T.full - K.t) > 1) sub += (sub ? " · " : "") + "period " + money(T.full);
+    return stat("Target" + (T.full != null && Math.abs(T.full - K.t) > 1 ? " to date" : ""), money(K.t), sub);
   }
   function stat(l, v, s) { return '<div class="r-stat" style="box-shadow:none;padding:12px 14px"><div class="lbl">' + l + '</div><div class="val" style="font-size:22px">' + v + '</div><div class="sub">' + s + "</div></div>"; }
   function fmtDate(iso) { return iso ? RPT.wk(iso, true) : ""; }
@@ -246,6 +259,7 @@
     var labels = T.labels.map(function (m, i) { var mo = (i + 3) % 12, y = S.fy - 1 + (mo < 3 ? 1 : 0); return y + "-" + (mo < 9 ? "0" : "") + (mo + 1) + "-01"; });
     document.getElementById("trendEyebrow").textContent = "By month · " + T.fy + " vs " + T.prev_fy;
     var series = [{name: T.fy, values: T.cur, color: col.acc, type: "bar"}, {name: T.prev_fy, values: T.prev, color: col.amb, type: "line", dash: true}];
+    if (T.target) series.push({name: T.fy + " target", values: T.target, color: col.pos, type: "line"});
     RPT.chart(document.getElementById("trend"), {labels: labels, series: series,
       fmt: function (v) { return money(v, true); }, axis: function (v) { return money(v); },
       xLabel: function (l, i) { return T.labels[i]; },
@@ -285,8 +299,8 @@
       var node = root;
       r.k.forEach(function (name) {
         var n = node.kids[name];
-        if (!n) n = node.kids[name] = {name: name, v: 0, ly: 0, q: 0, lq: 0, gp: 0, kids: {}};
-        n.v += r.v; n.ly += r.ly; n.q += r.q; n.lq += r.lq; n.gp += (r.gp || 0);
+        if (!n) n = node.kids[name] = {name: name, v: 0, ly: 0, q: 0, lq: 0, gp: 0, t: 0, kids: {}};
+        n.v += r.v; n.ly += r.ly; n.q += r.q; n.lq += r.lq; n.gp += (r.gp || 0); n.t += (r.t || 0);
         node = n;
       });
     });
@@ -302,14 +316,22 @@
       if (k === "yoy") { x = a.v - a.ly; y = b.v - b.ly; }
       else if (k === "yoyp") { x = a.ly > 0 ? (a.v - a.ly) / a.ly : -1e9; y = b.ly > 0 ? (b.v - b.ly) / b.ly : -1e9; }
       else if (k === "gpp") { x = a.v ? a.gp / a.v : -1e9; y = b.v ? b.gp / b.v : -1e9; }
+      else if (k === "tp") { x = a.t ? a.v / a.t : -1e9; y = b.t ? b.v / b.t : -1e9; }
       else { x = a[k]; y = b[k]; }
       return (x - y) * d;
     });
+  }
+  function tcells(v, t) {
+    if (!t) return '<td><span class="r-faint">—</span></td><td></td>';
+    var pc = v / t * 100;
+    return "<td>" + money(t, true) + '</td><td class="' + (pc >= 100 ? "up" : "down") + '">' + pc.toFixed(0) + "%</td>";
   }
   function renderTable() {
     var t = tree(), total = D.kpis.v || 0, nd = S.dims.length;
     var cols = [["name", D.dim_labels.join(" › "), "l"], ["v", "Revenue"], ["ly", "LY"], ["yoy", "YoY $"], ["yoyp", "YoY %"], ["share", "Share"], ["q", "Units"]];
     if (D.margin) cols.push(["gp", "Est. GP"], ["gpp", "GP %"]);
+    var TR = D.targets.rows;
+    if (TR) cols.push(["t", "Target"], ["tp", "% of target"]);
     var head = "<thead><tr>" + cols.map(function (c) {
       return '<th class="' + (c[2] || "") + '" data-s="' + c[0] + '">' + c[1] + (sort.key === c[0] ? '<span class="sm">' + (sort.dir > 0 ? "▲" : "▼") + "</span>" : "") + "</th>";
     }).join("") + "</tr></thead>";
@@ -324,7 +346,8 @@
         "<td>" + (yp == null ? '<span class="r-faint">' + (n.ly < 0 ? "n/a" : "new") + "</span>" : growth(yp)) + "</td>" +
         '<td><div class="r-sharebar" title="' + sh.toFixed(1) + '%"><i style="width:' + Math.min(100, sh).toFixed(1) + '%"></i></div></td>' +
         "<td>" + RPT.int(n.q) + "</td>" +
-        (D.margin ? "<td>" + money(n.gp, true) + "</td><td>" + (n.v ? (n.gp / n.v * 100).toFixed(1) + "%" : "—") + "</td>" : "");
+        (D.margin ? "<td>" + money(n.gp, true) + "</td><td>" + (n.v ? (n.gp / n.v * 100).toFixed(1) + "%" : "—") + "</td>" : "") +
+        (TR ? tcells(n.v, n.t) : "");
       rows.push('<tr class="lv' + lvl + '">' + cells + "</tr>");
       if (hasKids && isOpen) sorted(n.kids).forEach(function (k) { line(k, lvl + 1, path.concat([k.name])); });
     }
@@ -334,7 +357,8 @@
     var K = D.kpis;
     var tot = '<tr class="tot"><td class="l">Total</td><td>' + money(K.v, true) + "</td><td>" + money(K.ly, true) + '</td><td class="' + (K.v >= K.ly ? "up" : "down") + '">' +
       (K.v >= K.ly ? "+" : "−") + money(Math.abs(K.v - K.ly), true) + "</td><td>" + (K.growth == null ? "—" : growth(K.growth)) + "</td><td>100%</td><td>" + RPT.int(K.q) + "</td>" +
-      (D.margin ? "<td>" + money(K.gp, true) + "</td><td>" + (K.gp_pct == null ? "—" : K.gp_pct.toFixed(1) + "%") + "</td>" : "") + "</tr>";
+      (D.margin ? "<td>" + money(K.gp, true) + "</td><td>" + (K.gp_pct == null ? "—" : K.gp_pct.toFixed(1) + "%") + "</td>" : "") +
+      (TR ? tcells(K.v, K.t || 0) : "") + "</tr>";
     document.getElementById("tbl").innerHTML = head + "<tbody>" + (D.period.future ? "" : tot) + rows.join("") + "</tbody>";
     document.getElementById("tblTitle").textContent = "By " + D.dim_labels.join(" › ");
     document.getElementById("tblNote").textContent = D.period.future ? "" :
@@ -356,7 +380,14 @@
   });
   document.getElementById("collapseAll").addEventListener("click", function () { open = {}; renderTable(); });
 
-  function render() { renderQuick(); renderKpis(); renderTrend(); renderTable(); }
+  function renderTgtNote() {
+    var T = D.targets, n = document.getElementById("tgtNote");
+    n.textContent = !T.has ? "No targets committed for this year yet — commit them in Tools → Targets." :
+      "Target = the official targets committed in Tools → Targets; a retailer's target belongs to its account manager in NetSuite. " +
+      "A month the period only partly covers counts by its share of weekdays." +
+      (T.rows ? "" : " Targets are set by retailer, brand and month, so the table doesn't show them by store/account or item.");
+  }
+  function render() { renderQuick(); renderKpis(); renderTrend(); renderTable(); renderTgtNote(); }
   paintPeriods(); renderBuilder(); render();
   document.getElementById("xlsx").href = "/reports/sales/export.xlsx?" + qs();
 })();
