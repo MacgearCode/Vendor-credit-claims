@@ -127,10 +127,11 @@
 </section>
 
 <section class="r-card r-sec" id="agTplCard">
-  <div class="r-card-h"><div><p class="r-eyebrow">Not Macgear stock — in no figure above</p><h2>Third-party (3PL) stock</h2></div></div>
+  <div class="r-card-h"><div><p class="r-eyebrow">In no figure above · units only</p><h2>3PL and consignment stock</h2></div></div>
   <div class="r-stats" id="agTpl" style="margin-top:0"></div>
-  <p class="ag-hint">Location <code>warehouse 3PL</code> holds goods Macgear stores for others. NetSuite carries it at $0, so it is
-    counted in units only.</p>
+  <p class="ag-hint"><b>3PL</b>: location <code>warehouse 3PL</code>, goods Macgear stores for others. <b>Consignment</b>:
+    AU6 Big W and Consignment NZ, stock held at the customer. NetSuite's ageing report carries both at $0, so they are
+    counted in units only, by region; they don't follow the region switch above.</p>
 </section>
 
 <p class="r-note">
@@ -140,8 +141,8 @@
   <b>Age basis.</b> NetSuite ages stock from its arrival at its <i>current</i> location, so a transfer restarts the clock. Early-2026
   NZ stock looks young because Christchurch was emptied into Auckland; part of its rise from May is that stock ageing again.<br>
   <b>Regions.</b> AU figures are AUD, NZ figures NZD — never added together.<br>
-  <b>Excluded.</b> Warehouse 3PL (third-party, shown separately in units) and consignment locations (AU6 Big W, Consignment NZ)
-  are in no figure. MOVA in the Melbourne and Auckland warehouses is Macgear's and is included.
+  <b>Excluded.</b> Warehouse 3PL (third-party) and consignment locations (AU6 Big W, Consignment NZ) are in no figure; both
+  are shown separately, in units. MOVA in the Melbourne and Auckland warehouses is Macgear's and is included.
 </p>
 {% endif %}
 {% endblock %}
@@ -202,8 +203,7 @@
     // up to two older lines beside it: 180 and 370 from the 90 / 120 lines, else what's left
     var later = DAYS.slice(1).filter(function (d) { return d > N; });
     if (later.length > 2) later = [180, 370];
-    var tpl = D.regions[R].tpl;
-    document.getElementById("agTiles").innerHTML =
+        document.getElementById("agTiles").innerHTML =
       tile("Total stock <small>" + cur() + "</small>", money(now.tot, false),
            '<b class="flat">' + signed(now.tot - was.tot, m0) + "</b> vs 30 days · " + num(now.units) + " units") +
       tile("Over " + N + " days", money(now.o, false), vs(now.o - was.o, m0)) +
@@ -212,10 +212,17 @@
         var k = DAYS.indexOf(d), a = pastFrom(now.v, k), b = pastFrom(was.v, k);
         return tile("Over " + d + " days", money(a, false), vs(a - b, m0));
       }).join("");
-    var tu = tpl.units[IDX[D.ref.latest]], tw = tpl.units[IDX[D.ref.d30]];
-    document.getElementById("agTplCard").hidden = !tu && !tw;
-    document.getElementById("agTpl").innerHTML =
-      tile("Units on hand", num(tu), signed(tu - tw, num) + " vs 30 days") + tile("Products", num(tpl.skus), "with stock at the location");
+    // 3PL and consignment, every region side by side (units, so no currency mixing)
+    var held = [];
+    Object.keys(D.regions).forEach(function (rg) {
+      [["tpl", "3PL"], ["con", "Consignment"]].forEach(function (k) {
+        var x = D.regions[rg][k[0]], u = x.units[IDX[D.ref.latest]], w = x.units[IDX[D.ref.d30]];
+        if (u || w) held.push(tile(rg + " · " + k[1] + " <small>units</small>", num(u),
+          signed(u - w, num) + " vs 30 days · " + num(x.skus) + (x.skus === 1 ? " product" : " products")));
+      });
+    });
+    document.getElementById("agTplCard").hidden = !held.length;
+    document.getElementById("agTpl").innerHTML = held.join("");
   }
 
   /* ---- charts: one slot per calendar day, so time is to scale ---- */

@@ -38,7 +38,7 @@ def test_queries_draw_the_lines_at_whole_bands():
 def test_shape():
     # six value bands, then six unit bands
     series = [(D4, "AU", 100, 12, 8, 3, 2, 1, 10, 1, 1, 1, 0, 1)]
-    tpl = [(D4, "AU", 500, 3)]
+    tpl = [(D4, "AU", True, 500, 3), (D4, "AU", False, 40, 2)]
     # item x location at latest, 30 days ago (D2) and first; a line gone since D2 still counts as a fall
     W = "AU2 – Melbourne Warehouse"
     lines = [(D4, "AU", "A1", "Item A", "MOVA", W, "Warehouse", 80, 6, 4, 3, 2, 1, 8, 1, 0, 1, 0, 1),
@@ -55,6 +55,7 @@ def test_shape():
     assert au["ccy"] == "AUD"
     assert au["series"]["v1"] == [0, 0, 0, 12.0] and au["series"]["u5"] == [0, 0, 0, 1.0]
     assert au["tpl"] == {"units": [0, 0, 0, 500.0], "skus": 3}
+    assert au["con"] == {"units": [0, 0, 0, 40.0], "skus": 2}
     by = {(l[0], l[1]): l for l in au["lines"]}
     # [code, loc, 6 value + 6 unit bands now, 6 value + 6 unit bands 30 days ago]
     assert by[("A1", W)] == ["A1", W, 80, 6, 4, 3, 2, 1, 8, 1, 0, 1, 0, 1,

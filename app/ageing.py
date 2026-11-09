@@ -3,9 +3,10 @@ history, from reporting.fact_inventory_ageing (Sell Through/db/12_inventory_agei
 loaded by Sell Through/ageing_intake.py).
 
 Rules (from the Inventory Ageing project; every number on the page follows them):
-  - Owned stock only (`is_owned`): warehouse 3PL is third-party stock at $0 and
-    is reported apart in units; consignment (AU6 Big W, Consignment NZ) is in no
-    figure. The split is by LOCATION — MOVA in Melbourne / Auckland is ours.
+  - Owned stock only (`is_owned`): warehouse 3PL (third-party stock) and
+    consignment (AU6 Big W, Consignment NZ) are in no figure - NetSuite carries both
+    at $0 here - and are reported apart, in units, per region.
+    The split is by LOCATION — MOVA in Melbourne / Auckland is ours.
   - AU (AUD) and NZ (NZD) are never summed; the page shows one region at a time,
     and only the aged SHARE (a %) puts both on one chart.
   - Bands 0-90 / 91-120 / 121-180 / 181-240 / 241-370 / 370+ are mutually exclusive
@@ -50,12 +51,15 @@ _SERIES_SQL = f"""
     where {_SCOPE}
     group by 1, 2 order by 1"""
 
+# Stock in no figure: 3PL (is_third_party) and consignment (neither owned nor 3PL). NetSuite
+# carries both at $0 on this report, so units only.
 _TPL_SQL = """
-    select snapshot_date, country_code, sum(on_hand), count(distinct item_code) filter (where on_hand <> 0)
+    select snapshot_date, country_code, is_third_party, sum(on_hand),
+           count(distinct item_code) filter (where on_hand <> 0)
     from reporting.fact_inventory_ageing
-    where is_third_party and country_code = any(%(regions)s)
+    where not is_owned and country_code = any(%(regions)s)
       and (%(brands)s::text[] is null or brand = any(%(brands)s))
-    group by 1, 2"""
+    group by 1, 2, 3"""
 
 _LINES_SQL = f"""
     select snapshot_date, country_code, item_code, max(item_name), max(brand), location_name,
@@ -116,7 +120,8 @@ def shape(regions, series_rows, tpl_rows, line_rows, run_rows, dates: list[date]
         out["regions"][rg] = {
             "ccy": CCY[rg],
             "series": {k: list(z) for k in keys},
-            "tpl": {"units": list(z), "skus": 0},
+            "tpl": {"units": list(z), "skus": 0},      # warehouse 3PL
+            "con": {"units": list(z), "skus": 0},      # consignment
             "lines": [], "skus": {},
         }
 
@@ -124,8 +129,8 @@ def shape(regions, series_rows, tpl_rows, line_rows, run_rows, dates: list[date]
         s = out["regions"][rg]["series"]
         for k, v in zip(keys, vals):
             s[k][idx[d]] = _r2(v)
-    for d, rg, units, skus in tpl_rows:
-        t = out["regions"][rg]["tpl"]
+    for d, rg, third_party, units, skus in tpl_rows:
+        t = out["regions"][rg]["tpl" if third_party else "con"]
         t["units"][idx[d]] = _r2(units)
         if d == latest:
             t["skus"] = skus

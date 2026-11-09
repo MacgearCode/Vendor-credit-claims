@@ -13,6 +13,7 @@ Add an entry with every commit people would notice. Everything above the first
 - Two new lines under "List products": Over 120 and Over 240, alongside Over 90, 180 and 370.
 - The line you pick now drives the whole page: the Over / % over / vs 30d columns, the tiles, the band chart and the aged-share chart all switch to it (All stock measures at 90 days).
 - The table has six age bands: 0–90, 91–120, 121–180, 181–240, 241–370 and 370+. They're NetSuite's own bucket edges, so nothing is estimated.
+- The 3PL box at the bottom now also shows consignment stock (AU6 Big W and Consignment NZ), in units, split AU and NZ.
 
 ## 2026-11-09 | Faster loading
 - Sales Explorer, Weekly Sell-Through, Sell-Through, Inventory Ageing and the home page now read from pre-summed tables, so a page that has to be built fresh (the first visit after an update, or a brand-limited view) is several times quicker.

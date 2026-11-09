@@ -328,7 +328,9 @@ browser builds the tree.
   370+ bars (one slot per calendar day, so the sparse Jan–Apr points sit to scale), aged-share
   lines AU vs NZ, then the **brand → product → location table** (user's request: sortable, brand
   level expanding to products) with List products (all / over 90 / 180 / 370), Value / Units,
-  Location, Find, Expand / Collapse, CSV of what's listed; 3PL units card; method notes.
+  Location, Find, Expand / Collapse, CSV of what's listed; 3PL + consignment units card (every
+  region side by side, not following the region switch — user 2026-11-10; consignment is $0 on the
+  NetSuite report too, so units only); method notes.
 - **Six bands + a selectable line (user, 2026-11-10):** 0–90 / 91–120 / 121–180 / 181–240 /
   241–370 / 370+ (all NetSuite bucket edges — view columns added by `Sell Through/db/14_ageing_bands.sql`),
   List products = all / over 90 / 120 / 180 / 240 / 370, and **the chosen line drives the whole
