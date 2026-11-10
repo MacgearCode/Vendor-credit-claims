@@ -597,7 +597,7 @@ user and sign-out. The light / dark switch is a sun/moon button at the top right
 family in each stylesheet (`--r-accent*`, `style.css --brand`, the dashboard's `--accent*`,
 `--sn-*`) — defined once at the end of `sidenav.css`, never the up/down / warning / sell-in
 colours. Saved per browser (`localStorage.palette`), applied pre-paint in each shell's head;
-`RPT.chart` redraws on a theme or palette change. **Every page's top bar is the solid `--hdr-bg` colour** (Blue #2f5496 / Teal / Violet, set in `sidenav.css`; user 2026-10-22) with a white logo pill and white buttons — report pages, tool pages and the dashboard alike. A new colour should use the accent tokens,
+`RPT.chart` redraws on a theme or palette change. **Glass look (experimental, 2026-11-10, user's request):** a third top-bar button (`_theme_btn.html`) opens a popover — on/off, panel opacity, blur, glow, shine, five backgrounds. `static/glass.js` (loaded without defer in each shell's head, so it applies pre-paint) keeps `localStorage.glass` JSON and sets `html[data-glass=<bg>]` + CSS variables; `static/glass.css` restyles `base.html`, `_rpt_base.html` and the sell-through dashboard. Off by default. **Every page's top bar is the solid `--hdr-bg` colour** (Blue #2f5496 / Teal / Violet, set in `sidenav.css`; user 2026-10-22) with a white logo pill and white buttons — report pages, tool pages and the dashboard alike. A new colour should use the accent tokens,
 not a hard-coded blue, or it won't follow the palette. `base.html` includes the drawer and also shows the
 current tool's `{% block nav %}` links in the top bar on screens wider than
 760px; the self-styled report pages include the same partial. The drawer lists

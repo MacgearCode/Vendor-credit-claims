@@ -11,6 +11,26 @@
     <button type="button" role="menuitemradio" data-palette="teal" aria-checked="false"><i style="background:#0d9488"></i>Teal</button>
     <button type="button" role="menuitemradio" data-palette="violet" aria-checked="false"><i style="background:#7c3aed"></i>Violet</button>
   </div>
+  {# EXPERIMENTAL glass look (2026-11-10, off by default): static/glass.js + glass.css #}
+  <button type="button" class="tm-btn{{ ' on-light' if tm_on_light }}" data-glass-open aria-haspopup="true" aria-expanded="false" aria-pressed="false" aria-label="Glass look (experimental)" title="Glass look (experimental)">
+    <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><rect x="3.5" y="5" width="13" height="13" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.8" opacity=".55"/><rect x="7.5" y="7.5" width="13" height="13" rx="3.5" fill="currentColor" fill-opacity=".28" stroke="currentColor" stroke-width="1.8"/><path d="M10.5 11.2c.6-.9 1.5-1.3 2.6-1.3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <div class="tm-pop gl-pop" role="dialog" aria-label="Glass look" hidden>
+    <div class="gl-row"><b>Glass look</b><button type="button" class="gl-switch" role="switch" aria-checked="false" data-glass-on aria-label="Glass look on / off"></button></div>
+    <label><span>Panel opacity <output data-gl-out="op"></output></span><input type="range" min="8" max="90" step="1" data-gl="op"></label>
+    <label><span>Blur <output data-gl-out="blur"></output></span><input type="range" min="0" max="40" step="1" data-gl="blur"></label>
+    <label><span>Glow <output data-gl-out="glow"></output></span><input type="range" min="0" max="100" step="1" data-gl="glow"></label>
+    <label><span>Shine <output data-gl-out="shine"></output></span><input type="range" min="0" max="100" step="1" data-gl="shine"></label>
+    <span class="gl-lbl">Background</span>
+    <div class="gl-bgs" role="radiogroup" aria-label="Background">
+      <button type="button" role="radio" data-gl-bg="accent" aria-checked="true" title="Palette colours" style="background:linear-gradient(135deg,#3b82f6,#22d3ee 55%,#a78bfa)"></button>
+      <button type="button" role="radio" data-gl-bg="lime" aria-checked="false" title="Lime glow" style="background:linear-gradient(135deg,#c4f135,#1fae6a 55%,#ff8a3d)"></button>
+      <button type="button" role="radio" data-gl-bg="sunset" aria-checked="false" title="Sunset" style="background:linear-gradient(135deg,#ff5f6d,#ffb347 55%,#a855f7)"></button>
+      <button type="button" role="radio" data-gl-bg="ocean" aria-checked="false" title="Ocean" style="background:linear-gradient(135deg,#0ea5e9,#14b8a6 55%,#1e3a8a)"></button>
+      <button type="button" role="radio" data-gl-bg="mono" aria-checked="false" title="Neutral" style="background:linear-gradient(135deg,#94a3b8,#cbd5e1 55%,#64748b)"></button>
+    </div>
+    <p class="gl-note">Experimental · saved in this browser only</p>
+  </div>
   <button type="button" class="tm-btn{{ ' on-light' if tm_on_light }}" data-theme-toggle aria-label="Switch to dark mode" title="Light / dark mode">
     <svg class="tm-moon" viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7z" fill="currentColor"/></svg>
     <svg class="tm-sun" viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></g></svg>

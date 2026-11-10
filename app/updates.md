@@ -9,6 +9,10 @@ st_weekly, field, ageing, items, st_table, sell_through, promos, vendor_bills) o
 Add an entry with every commit people would notice. Everything above the first
 "##" is ignored.
 
+## 2026-11-10 | Try the glass look
+- A new button in the top bar, beside the colour and light / dark buttons, switches the site to a frosted "glass" look. It's off unless you turn it on.
+- Its menu has sliders for panel opacity, blur, glow and shine, and five backgrounds. Your choice is remembered in this browser only.
+
 ## 2026-11-10 | Inventory Ageing: over 120 and over 240 | ageing
 - Two new lines under "List products": Over 120 and Over 240, alongside Over 90, 180 and 370.
 - The line you pick now drives the whole page: the Over / % over / vs 30d columns, the tiles, the band chart and the aged-share chart all switch to it (All stock measures at 90 days).

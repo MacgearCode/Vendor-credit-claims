@@ -1,0 +1,223 @@
+/* EXPERIMENTAL "liquid glass" look (2026-11-10, off by default).
+   Switched on by the glass button beside the palette picker (_theme_btn.html,
+   static/glass.js), which sets html[data-glass="<background>"] plus three
+   variables on <html>: --gl-op (panel opacity 0-1), --gl-blur (px), --gl-glow
+   (background glow 0-1). Saved per browser in localStorage "glass".
+
+   Every rule hangs off html[data-glass], so with the switch off this file does
+   nothing. It restyles the three shells by overriding their surface tokens
+   (report.css --r-card*, style.css --card, the dashboard's --surface*) and a few
+   hard-coded white surfaces; accent / up-down / warning colours are untouched,
+   so palettes and charts keep their meaning. Sticky table cells, dropdowns and
+   inputs stay near-opaque so scrolled content never shows through them. */
+
+html[data-glass]{
+  --gl-op:.42; --gl-blur:18px; --gl-glow:.8;     /* defaults; glass.js overrides inline */
+  --gl-a:var(--gl-op);
+  /* light glass */
+  --gl-tint:255 255 255;
+  --gl-base:#e8edf4;
+  --gl-inner:rgb(255 255 255 / .38);
+  --gl-edge:rgb(255 255 255 / .7);
+  --gl-hl:rgb(255 255 255 / .85);
+  --gl-drop:0 10px 34px rgb(30 40 60 / .12);
+  --gl-opaque:rgb(250 251 253 / .96);
+  --gl-field:rgb(255 255 255 / .72);
+  /* background colours: "accent" follows the palette (Blue default) */
+  --gl-c1:#3b82f6; --gl-c2:#22d3ee; --gl-c3:#a78bfa;
+}
+html[data-glass][data-theme="dark"]{
+  --gl-tint:28 32 42;
+  --gl-base:#06080c;
+  --gl-inner:rgb(255 255 255 / .045);
+  --gl-edge:rgb(255 255 255 / .11);
+  --gl-hl:rgb(255 255 255 / .09);
+  --gl-drop:0 14px 40px rgb(0 0 0 / .45);
+  --gl-opaque:rgb(22 25 33 / .97);
+  --gl-field:rgb(255 255 255 / .06);
+}
+html[data-glass][data-palette="teal"]{--gl-c1:#14b8a6; --gl-c2:#22c55e; --gl-c3:#38bdf8}
+html[data-glass][data-palette="violet"]{--gl-c1:#8b5cf6; --gl-c2:#ec4899; --gl-c3:#6366f1}
+html[data-glass="lime"]{--gl-c1:#c4f135; --gl-c2:#1fae6a; --gl-c3:#ff8a3d}
+html[data-glass="sunset"]{--gl-c1:#ff5f6d; --gl-c2:#ffb347; --gl-c3:#a855f7}
+html[data-glass="ocean"]{--gl-c1:#0ea5e9; --gl-c2:#14b8a6; --gl-c3:#1e3a8a}
+html[data-glass="mono"]{--gl-c1:#94a3b8; --gl-c2:#cbd5e1; --gl-c3:#64748b}
+
+/* no backdrop-filter (old browsers, some Linux setups): near-solid panels so text
+   never sits on raw blobs */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  html[data-glass]{--gl-a:.9}
+}
+
+/* ---- the ground: base colour on <html>, glow blobs on a fixed layer ---- */
+html[data-glass]{background:var(--gl-base) !important}
+html[data-glass] body{background:transparent !important}
+html[data-glass] body::before{
+  content:""; position:fixed; inset:-15vmax; z-index:-1; pointer-events:none;
+  opacity:var(--gl-glow);
+  background:
+    radial-gradient(38vmax 34vmax at 14% 18%, color-mix(in srgb,var(--gl-c1) 85%,transparent), transparent 70%),
+    radial-gradient(34vmax 30vmax at 86% 22%, color-mix(in srgb,var(--gl-c2) 70%,transparent), transparent 70%),
+    radial-gradient(42vmax 36vmax at 62% 92%, color-mix(in srgb,var(--gl-c3) 70%,transparent), transparent 72%),
+    radial-gradient(26vmax 22vmax at 6% 88%, color-mix(in srgb,var(--gl-c2) 35%,transparent), transparent 70%),
+    radial-gradient(30vmax 22vmax at 40% 48%, color-mix(in srgb,var(--gl-c1) 28%,transparent), transparent 70%),
+    radial-gradient(28vmax 24vmax at 74% 58%, color-mix(in srgb,var(--gl-c3) 26%,transparent), transparent 70%);
+  filter:blur(28px) saturate(1.15);
+}
+html[data-glass][data-theme="dark"] body::before{filter:blur(36px) saturate(1.2)}
+
+/* ---- the shared glass skin ----
+   "Shine" (--gl-shine 0-1, the popover slider) scales every highlight: a bright
+   rim top-left and a softer one bottom-right (light catching the edge), a soft
+   inner glow under the top edge, and a faint diagonal sheen across the face.
+   All box-shadow / background layers - no pseudo-elements, which some panels
+   (.tile::before) already use. */
+html[data-glass]{
+  --gl-shine:.6;
+  --gl-rim:inset 1px 1px 0 0 rgb(255 255 255 / calc(.5 * var(--gl-shine))),
+           inset -1px -1px 0 0 rgb(255 255 255 / calc(.16 * var(--gl-shine))),
+           inset 0 22px 32px -22px rgb(255 255 255 / calc(.22 * var(--gl-shine))),
+           inset 0 -16px 26px -22px rgb(255 255 255 / calc(.12 * var(--gl-shine)));
+  --gl-sheen:linear-gradient(150deg, rgb(255 255 255 / calc(.13 * var(--gl-shine))) 0%,
+           rgb(255 255 255 / calc(.04 * var(--gl-shine))) 32%, transparent 55%,
+           rgb(255 255 255 / calc(.05 * var(--gl-shine))) 100%);
+  --gl-border:rgb(255 255 255 / calc(.5 + .3 * var(--gl-shine)));
+  /* small controls (pills, inputs, buttons) */
+  --gl-ctl:rgb(255 255 255 / .5);
+  --gl-ctl-line:rgb(255 255 255 / .75);
+  --gl-ctl-rim:inset 0 1px 0 rgb(255 255 255 / calc(.4 + .5 * var(--gl-shine))), inset 0 -1px 0 rgb(0 0 0 / .05);
+}
+html[data-glass][data-theme="dark"]{
+  --gl-border:rgb(255 255 255 / calc(.06 + .12 * var(--gl-shine)));
+  --gl-ctl:rgb(255 255 255 / calc(.035 + .05 * var(--gl-shine)));
+  --gl-ctl-line:rgb(255 255 255 / calc(.08 + .12 * var(--gl-shine)));
+  --gl-ctl-rim:inset 0 1px 0 rgb(255 255 255 / calc(.22 * var(--gl-shine))), inset 0 -1px 0 rgb(0 0 0 / .2);
+}
+html[data-glass] .r-card, html[data-glass] .r-stat, html[data-glass] .r-item,
+html[data-glass] main > .card, html[data-glass] .card, html[data-glass] .tile,
+html[data-glass] .filterbar, html[data-glass] .toolcard, html[data-glass] .totals > .kpi,
+html[data-glass] .hero{
+  background:var(--gl-sheen), rgb(var(--gl-tint) / var(--gl-a));
+  border:1px solid var(--gl-border);
+  box-shadow:var(--gl-rim), var(--gl-drop);
+  -webkit-backdrop-filter:blur(var(--gl-blur)) saturate(1.9);
+  backdrop-filter:blur(var(--gl-blur)) saturate(1.9);
+}
+/* panels inside a panel: rim only, no second blur */
+html[data-glass] .hero .kpi, html[data-glass] .mover, html[data-glass] .r-ins,
+html[data-glass] .r-card .r-stat{
+  background:var(--gl-ctl); border-color:var(--gl-ctl-line);
+  box-shadow:var(--gl-ctl-rim);
+  -webkit-backdrop-filter:none; backdrop-filter:none;
+}
+
+/* ---- glassy controls: pills, tabs, chips, inputs, ghost buttons ---- */
+html[data-glass] :is(.r-seg, .r-chip, .r-btn.ghost, .r-select, .r-input, .r-search input,
+  .seg, .field select, .field input, .btn.ghost),
+html[data-glass] :is(.r-tab, .tab):not(.on):not(.active):not([aria-pressed="true"]){
+  background:var(--gl-ctl); border-color:var(--gl-ctl-line); box-shadow:var(--gl-ctl-rim);
+}
+html[data-glass] :is(.r-seg .on, .r-seg [aria-pressed="true"], .seg button[aria-pressed="true"]){
+  box-shadow:inset 0 1px 0 rgb(255 255 255 / .55), 0 2px 10px rgb(0 0 0 / .22);
+}
+html[data-glass] :is(.r-tab.on, .r-tab[aria-pressed="true"], .r-btn:not(.ghost), .tab.active, .btn:not(.ghost)){
+  box-shadow:inset 0 1px 0 rgb(255 255 255 / calc(.15 + .3 * var(--gl-shine))), 0 4px 14px rgb(0 0 0 / .16);
+}
+
+/* report shell (report.css) */
+html[data-glass]{
+  --r-card:rgb(var(--gl-tint) / var(--gl-a));
+  --r-card-2:var(--gl-inner);
+  --r-radius:22px;
+}
+html[data-glass] .r-table th, html[data-glass] .r-table td.sticky,
+html[data-glass] .r-table tr.grp-b td.sticky, html[data-glass] .stw-t thead th,
+html[data-glass] .r-results{background:var(--gl-opaque)}
+html[data-glass] .r-table tr.grp-b td.sticky, html[data-glass] .r-table tr.tot td{
+  background:linear-gradient(var(--gl-inner),var(--gl-inner)),var(--gl-opaque)}
+html[data-glass] .stw-bar{background:rgb(var(--gl-tint) / max(var(--gl-a), .6))}
+
+/* tool shell (style.css): its white surfaces are hard-coded, so name them */
+html[data-glass]{--card:rgb(var(--gl-tint) / var(--gl-a)); --radius:18px}
+html[data-glass] input, html[data-glass] select, html[data-glass] textarea{background:var(--gl-field)}
+html[data-glass] select option{background:var(--gl-opaque)}
+html[data-glass] table.grid thead th{background:var(--gl-inner)}
+html[data-glass] table.grid tbody tr:hover, html[data-glass] table.pgrid tbody tr:hover td{background:var(--gl-inner)}
+html[data-glass] table.pgrid thead th, html[data-glass] table.pgrid .stick,
+html[data-glass] table.pgrid tfoot td{background:var(--gl-opaque)}
+html[data-glass] .modal-box, html[data-glass] dialog.linedlg{background:var(--gl-opaque);
+  -webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px)}
+html[data-glass]:not([data-theme="dark"]) .kpi.accent{background:rgb(239 251 249 / .6)}
+html[data-glass][data-theme="dark"] .kpi.accent{background:rgb(16 49 46 / .55)}
+
+/* sell-through dashboard (its own <style>) */
+html[data-glass]{--surface:rgb(var(--gl-tint) / var(--gl-a)); --surface-2:var(--gl-inner)}
+
+/* ---- top bars: the palette's header colour, frosted ---- */
+html[data-glass] .r-top, html[data-glass] .topbar{
+  background:color-mix(in srgb, var(--hdr-bg,#2f5496) calc(45% + var(--gl-a) * 45%), transparent);
+  background-image:linear-gradient(180deg, rgb(255 255 255 / calc(.12 * var(--gl-shine))), transparent 60%);
+  border-bottom:1px solid rgb(255 255 255 / calc(.1 + .2 * var(--gl-shine)));
+  box-shadow:inset 0 1px 0 rgb(255 255 255 / calc(.3 * var(--gl-shine))), 0 6px 24px rgb(0 0 0 / .14);
+  -webkit-backdrop-filter:blur(var(--gl-blur)) saturate(1.9);
+  backdrop-filter:blur(var(--gl-blur)) saturate(1.9);
+}
+/* the round buttons in every top bar (menu, palette, glass, light / dark): glass pills */
+html[data-glass] :is(.sn-open, .tm-btn){
+  background:rgb(255 255 255 / .14);
+  box-shadow:inset 0 1px 0 rgb(255 255 255 / calc(.2 + .35 * var(--gl-shine))), inset 0 -1px 0 rgb(0 0 0 / .12),
+             0 2px 8px rgb(0 0 0 / .12);
+}
+html[data-glass] :is(.sn-open, .tm-btn):hover{background:rgb(255 255 255 / .26)}
+html[data-glass] .topbar{position:sticky;top:0;z-index:40}
+@media (max-width:760px){ html[data-glass] .topbar{position:static} }
+
+/* ---- side menu + popovers ---- */
+html[data-glass] .sn-drawer{
+  background:rgb(var(--gl-tint) / max(var(--gl-a), .55));
+  background-image:var(--gl-sheen);
+  border-right:1px solid var(--gl-border);
+  box-shadow:inset -1px 0 0 rgb(255 255 255 / calc(.3 * var(--gl-shine))), 8px 0 40px rgb(0 0 0 / .2);
+  -webkit-backdrop-filter:blur(calc(var(--gl-blur) + 8px)) saturate(1.7);
+  backdrop-filter:blur(calc(var(--gl-blur) + 8px)) saturate(1.7);
+}
+html[data-glass] .sn-overlay{background:rgb(10 16 24 / .22)}
+html[data-glass] .sn-drawer .sn-body a:hover{background:var(--gl-inner)}
+html[data-glass] .tm-pop{
+  background:rgb(var(--gl-tint) / max(var(--gl-a), .9));
+  background-image:var(--gl-sheen);
+  border:1px solid var(--gl-border);
+  box-shadow:var(--gl-rim), 0 16px 40px rgb(0 0 0 / .25);
+  -webkit-backdrop-filter:blur(22px) saturate(1.7); backdrop-filter:blur(22px) saturate(1.7);
+}
+
+/* ---- the glass button + its settings popover (shown whether glass is on or off) ---- */
+.tm-btn[data-glass-open] .gl-ic-on{display:none}
+html[data-glass] .tm-btn[data-glass-open]{background:rgb(255 255 255 / .32) !important;box-shadow:inset 0 1px 0 rgb(255 255 255 / .5)}
+.tm-pop.gl-pop{right:0;width:248px;padding:12px 14px 14px;gap:10px}
+.gl-pop .gl-row{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:14px}
+.gl-pop .gl-row b{font-weight:700}
+.gl-pop .gl-switch{position:relative;width:42px;height:24px;border-radius:999px;border:0;padding:0;cursor:pointer;
+  background:var(--sn-line);flex:none;transition:background .15s}
+.gl-pop .gl-switch::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;
+  background:#fff;box-shadow:0 1px 3px rgb(0 0 0 / .3);transition:transform .15s}
+.gl-pop .gl-switch[aria-checked="true"]{background:var(--sn-active-ink)}
+.gl-pop .gl-switch[aria-checked="true"]::after{transform:translateX(18px)}
+.gl-pop .gl-switch:hover{background:var(--sn-line)}
+.gl-pop .gl-switch[aria-checked="true"]:hover{background:var(--sn-active-ink)}
+.gl-pop .gl-lbl{font-size:12px;color:var(--sn-muted);margin-bottom:-4px}
+.gl-pop label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--sn-muted)}
+.gl-pop label span{display:flex;justify-content:space-between}
+.gl-pop label output{color:var(--sn-ink);font-variant-numeric:tabular-nums}
+.gl-pop input[type=range]{width:100%;accent-color:var(--sn-active-ink);margin:0;padding:0;background:none;border:0}
+.gl-pop .gl-bgs{display:flex;gap:7px;flex-wrap:wrap}
+.tm-pop.gl-pop .gl-bgs button{width:30px;height:30px;padding:0;border-radius:50%;border:2px solid transparent;
+  flex:none;cursor:pointer;justify-content:center}
+.tm-pop.gl-pop .gl-bgs button[aria-checked="true"]{border-color:var(--sn-ink)}
+.tm-pop.gl-pop .gl-bgs button[aria-checked="true"]::after{content:none}
+.gl-pop.gl-off :is(label,.gl-bgs,.gl-lbl){opacity:.45}
+.gl-pop .gl-note{margin:0;font-size:11px;color:var(--sn-muted)}
+
+@media (prefers-reduced-transparency: reduce){
+  html[data-glass]{--gl-a:.92}
+}
