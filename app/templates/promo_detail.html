@@ -552,11 +552,20 @@ function parseDate(text) {
 const ddmmyyyy = iso => iso ? iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4) : '';
 const productRows = () => [...document.querySelectorAll('table.pgrid tbody tr')].filter(r => r.querySelector('input.pd'));
 
-// Ctrl/Cmd+C on a date box copies it as 12/11/2026 (a date box has no text to select)
-document.addEventListener('keydown', function (e) {
-  const inp = e.target;
-  if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'c' || !inp.matches || !inp.matches('input.pd, input.tdx')) return;
-  if (inp.value && navigator.clipboard) { e.preventDefault(); navigator.clipboard.writeText(ddmmyyyy(inp.value)); }
+// Date boxes are plain text (dd/mm/yyyy) so they select, copy and paste like any
+// cell; 📅 beside each opens the browser's calendar through a hidden date input
+// in the same box, so the calendar opens right under it.
+const iso = box => box.value.trim() ? parseDate(box.value) : '';     // '' = blank, null = not a date
+document.addEventListener('click', function (e) {
+  const btn = e.target.closest('.calbtn');
+  if (!btn) return;
+  const box = btn.previousElementSibling, cal = btn.nextElementSibling;
+  cal.value = iso(box) || '';
+  cal.onchange = () => {
+    box.value = ddmmyyyy(cal.value);
+    box.dispatchEvent(new Event('change', {bubbles: true}));
+  };
+  try { cal.showPicker(); } catch (err) { cal.focus(); cal.click(); }
 });
 // Paste into a date box. One date fills that box; From + To copied together fill
 // both; a column of dates copied from Excel fills down the products from this row
@@ -574,14 +583,14 @@ document.addEventListener('paste', async function (e) {
   const pick = ds => which === 'start' ? {start: ds[0], end: ds[1]} : {end: ds[0]};
   if (inp.matches('input.tdx')) {                 // the "Dates for ticked" boxes
     const v = pick(lines[0]);
-    document.querySelectorAll('input.tdx').forEach(i => { if (v[i.dataset.which]) i.value = v[i.dataset.which]; });
+    document.querySelectorAll('input.tdx').forEach(i => { if (v[i.dataset.which]) i.value = ddmmyyyy(v[i.dataset.which]); });
     return;
   }
   const rows = productRows(), from = rows.indexOf(inp.closest('tr'));
   const jobs = lines.slice(0, rows.length - from).map((ds, i) => {
     const tr = rows[from + i], v = pick(ds);
     const box = w => tr.querySelector('input.pd[data-which="' + w + '"]');
-    return {key: box('start').dataset.key, start: v.start || box('start').value, end: v.end || box('end').value};
+    return {key: box('start').dataset.key, start: v.start || iso(box('start')) || '', end: v.end || iso(box('end')) || ''};
   });
   for (const j of jobs) {
     const r = await post('/promo/' + PROMO_ID + '/product_dates', j);
@@ -594,7 +603,10 @@ document.addEventListener('click', async function (e) {
   if (!e.target.closest('.tdset')) return;
   const keys = [...document.querySelectorAll('input.selrow:checked')].map(c => c.value);
   if (!keys.length) return;
-  const v = w => document.querySelector('input.tdx[data-which="' + w + '"]').value;
+  const boxes = [...document.querySelectorAll('input.tdx')];
+  const bad = boxes.find(b => iso(b) === null);
+  if (bad) { flag(bad, 'not a date — use dd/mm/yyyy'); return; }
+  const v = w => iso(boxes.find(b => b.dataset.which === w)) || '';
   const r = await post('/promo/' + PROMO_ID + '/product_dates', {keys, start: v('start'), end: v('end')});
   if (r.error) { flag(document.querySelector('input.tdx'), r.error); return; }
   await refreshLive();
@@ -661,8 +673,10 @@ document.addEventListener('change', async function (e) {
     if (r.error) { flag(inp, r.error); return; }
     await refreshLive();
   } else if (inp.matches('input.pd')) {
+    if (iso(inp) === null) { flag(inp, 'not a date — use dd/mm/yyyy'); return; }
+    flag(inp, '');
     const row = inp.closest('tr');
-    const val = w => row.querySelector('input.pd[data-which="' + w + '"]').value;
+    const val = w => iso(row.querySelector('input.pd[data-which="' + w + '"]')) || '';
     const r = await post('/promo/' + PROMO_ID + '/product_dates', {key: inp.dataset.key, start: val('start'), end: val('end')});
     if (r.error) { flag(inp, r.error); return; }
     if (r.warning) alert(r.warning);
@@ -672,13 +686,14 @@ document.addEventListener('change', async function (e) {
 // Enter in a grid box moves down a row, like a spreadsheet
 document.addEventListener('keydown', function (e) {
   const inp = e.target;
-  if (e.key !== 'Enter' || !inp.matches || !inp.matches('input.gin')) return;
+  if (e.key !== 'Enter' || !inp.matches || !inp.matches('input.gin, input.pd')) return;
   e.preventDefault();
+  const kind = inp.matches('input.pd') ? 'input.pd' : 'input.gin';
   const td = inp.closest('td'), tr = td.closest('tr');
   const col = [...tr.children].indexOf(td);
   let next = tr.nextElementSibling;
   while (next) {
-    const cell = next.children[col], box = cell && cell.querySelector('input.gin');
+    const cell = next.children[col], box = cell && cell.querySelector(kind);
     if (box && cell.colSpan === td.colSpan) { box.focus(); box.select(); return; }
     next = next.nextElementSibling;
   }

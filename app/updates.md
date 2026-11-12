@@ -9,6 +9,10 @@ st_weekly, field, ageing, items, st_table, sell_through, promos, vendor_bills) o
 Add an entry with every commit people would notice. Everything above the first
 "##" is ignored.
 
+## 2026-11-12 | Vendor Promos: easier dates, clearer removing | promos
+- The From / To boxes in the grid are now plain dd/mm/yyyy boxes: select, copy and paste them like any cell (they didn't take Ctrl+C / Ctrl+V before). 📅 beside each opens a calendar; Enter moves down a row.
+- The ✕ in a retailer's columns takes the product off that retailer only — it now says which retailer. The ✕ at the end of each row (every retailer) is gone: tick products and press "Remove selected" instead.
+
 ## 2026-11-12 | Vendor Promos: find products, paste dates | promos
 - Add products now has two boxes: paste codes on the left, or find products on the right — it lists the promo brand's products and filters as you type (tick "all brands" to search everything). Tick what you want and add it, optionally with a % off.
 - Rows copied straight from the Excel promo form (From, To, Code, Description…) bring each product's dates with them; a header row is skipped.

@@ -43,7 +43,7 @@
   {%- elif key == 'tools' -%}
     <td class="rowactions {{ cls }}">
       <button type="button" class="link" title="More settings: description, RRP, support basis, growth, funding split" onclick="openLine({{ l.id }})">✎</button>
-      <form method="post" action="/line/{{ l.id }}/delete" data-confirm="Take {{ l.product_code or 'this line' }} off this retailer?" data-confirm-ok="Remove"><button class="link danger" title="Remove from this retailer">✕</button></form>
+      <form method="post" action="/line/{{ l.id }}/delete" data-confirm="Take {{ l.product_code or 'this product' }} off {{ l.promo_retailer.retailer_name }}? Other retailers keep it." data-confirm-ok="Remove"><button class="link danger" title="Remove from {{ l.promo_retailer.retailer_name }} only">✕</button></form>
     </td>
   {%- endif -%}
 {%- endmacro %}
@@ -58,8 +58,8 @@
     <button class="btn small danger-btn" disabled>Remove selected</button>
   </form>
   <span class="tickdates" hidden>Dates for ticked:
-    <input type="date" class="tdx" data-which="start" aria-label="From for the ticked products"> –
-    <input type="date" class="tdx" data-which="end" aria-label="To for the ticked products">
+    <span class="dbox"><input type="text" class="tdx" data-which="start" aria-label="From for the ticked products" placeholder="dd/mm/yyyy" maxlength="11" autocomplete="off" spellcheck="false"><button type="button" class="calbtn" tabindex="-1" title="Pick from a calendar" aria-label="Pick from a calendar">📅</button><input type="date" class="calpick" tabindex="-1" aria-hidden="true"></span> –
+    <span class="dbox"><input type="text" class="tdx" data-which="end" aria-label="To for the ticked products" placeholder="dd/mm/yyyy" maxlength="11" autocomplete="off" spellcheck="false"><button type="button" class="calbtn" tabindex="-1" title="Pick from a calendar" aria-label="Pick from a calendar">📅</button><input type="date" class="calpick" tabindex="-1" aria-hidden="true"></span>
     <button type="button" class="btn small ghost tdset" title="Give every ticked product these dates (blank = the promo's)">Set</button>
   </span>
   {% endif %}
@@ -100,8 +100,8 @@
       <td class="stick s2 desc">{{ row.description }}</td>
       <td class="num">{{ row.rrp_inc|money }}</td>
       {% if editable %}
-        <td class="pdate{{ ' own' if row.own_dates }}"><input type="date" class="pd" data-key="{{ row.key }}" data-which="start" value="{{ row.start }}"></td>
-        <td class="pdate{{ ' own' if row.own_dates }}"><input type="date" class="pd" data-key="{{ row.key }}" data-which="end" value="{{ row.end }}"></td>
+        <td class="pdate{{ ' own' if row.own_dates }}"><span class="dbox"><input type="text" class="pd" data-key="{{ row.key }}" data-which="start" value="{{ row.start.strftime('%d/%m/%Y') }}" placeholder="dd/mm/yyyy" maxlength="11" autocomplete="off" spellcheck="false"><button type="button" class="calbtn" tabindex="-1" title="Pick from a calendar" aria-label="Pick from a calendar">📅</button><input type="date" class="calpick" tabindex="-1" aria-hidden="true"></span></td>
+        <td class="pdate{{ ' own' if row.own_dates }}"><span class="dbox"><input type="text" class="pd" data-key="{{ row.key }}" data-which="end" value="{{ row.end.strftime('%d/%m/%Y') }}" placeholder="dd/mm/yyyy" maxlength="11" autocomplete="off" spellcheck="false"><button type="button" class="calbtn" tabindex="-1" title="Pick from a calendar" aria-label="Pick from a calendar">📅</button><input type="date" class="calpick" tabindex="-1" aria-hidden="true"></span></td>
       {% else %}
         <td class="pdate{{ ' own' if row.own_dates }}">{{ row.start.strftime('%d/%m/%Y') }}</td>
         <td class="pdate{{ ' own' if row.own_dates }}">{{ row.end.strftime('%d/%m/%Y') }}</td>
@@ -116,7 +116,7 @@
         {% endif %}
       {% endfor %}
       {% if editable %}
-        <td class="rowactions">{% if row.key not in seps and not loop.last %}<button type="button" class="link sepadd" data-sepadd="{{ row.key }}" title="Add a separator below this product">⎯ gap</button>{% endif %}<form method="post" action="/promo/{{ promo.id }}/product_delete" data-confirm="Take {{ row.code or 'this product' }} off the promotion for every retailer?" data-confirm-ok="Remove"><input type="hidden" name="key" value="{{ row.key }}"><button class="link danger" title="Remove from every retailer">✕</button></form></td>
+        <td class="rowactions">{% if row.key not in seps and not loop.last %}<button type="button" class="link sepadd" data-sepadd="{{ row.key }}" title="Add a separator below this product">⎯ gap</button>{% endif %}</td>
       {% endif %}
     </tr>
     {% set sep = seps.get(row.key) %}

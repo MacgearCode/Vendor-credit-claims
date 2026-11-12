@@ -425,7 +425,7 @@ table.pgrid input.gin.pct{width:4.3em}
 table.pgrid input.gin.hand{font-style:italic}
 table.pgrid input.gin.bad{border-color:var(--danger);outline:1px solid var(--danger)}
 table.pgrid input.gin.saving{opacity:.5}
-table.pgrid input.pd{font-size:.78rem;padding:.1rem .2rem;width:8.6em}
+table.pgrid input.pd{font-size:.78rem;padding:.1rem .25rem;width:6.6em;font-variant-numeric:tabular-nums}
 table.pgrid td.pdate.own{background:#fff4d6}
 table.pgrid td.none{color:var(--muted);text-align:center}
 table.pgrid form{display:inline}
@@ -501,3 +501,9 @@ table.pgrid input.sepin::placeholder{font-weight:400;font-style:italic;color:var
 .grid-tools .tickdates input{font-size:.78rem;padding:.1rem .2rem;width:8.8em}
 .grid-tools .tickdates input.bad{border-color:var(--danger);outline:1px solid var(--danger)}
 table.pgrid input.pd.bad{border-color:var(--danger);outline:1px solid var(--danger)}
+/* promo grid: date boxes are text (copy / paste) with a calendar button */
+.dbox{display:inline-flex;align-items:center;gap:.1rem;white-space:nowrap;position:relative}
+.calbtn{background:none;border:0;padding:0 .1rem;cursor:pointer;font-size:.8rem;opacity:.55;line-height:1}
+.calbtn:hover{opacity:1}
+.dbox .calpick{position:absolute;left:0;bottom:0;width:1px;height:1px;opacity:0;border:0;padding:0;pointer-events:none}
+.grid-tools .tickdates input.tdx{width:6.6em}
