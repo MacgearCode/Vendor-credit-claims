@@ -10,6 +10,7 @@ Add an entry with every commit people would notice. Everything above the first
 "##" is ignored.
 
 ## 2026-11-12 | Vendor Promos: funding split per customer | promos
+- Actual sales typed on a line with no 6wk avg now show their claim: once a promo has actual sales, the grid adds "Act Supp Claim" and "Act MG Claim" beside the expected ones (and the Internal Excel export has them too).
 - Each customer card now has the funding split beside Rebate and Growth: Supplier and MacGear %, with the retailer funding the rest (shown as you type). Leave them blank to use the promo's default split; a split set on a single line still wins.
 - The card is tidier: the name and its links on one line, then one strip of settings.
 

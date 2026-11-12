@@ -16,6 +16,13 @@
                'claim': [('actq','Qty Sold'),('aclaim','Claim')]} %}
 {% set cols = COLS[view] %}
 {% set mini = MINI[view] %}
+{# Once any actual sales are in, the internal grid shows the actual claims too
+   (they need no 6wk avg) and a collapsed customer shows its actual claim. #}
+{% if view == 'internal' and pv.has_actuals %}
+  {% set cols = cols[:11] + [('sclaim','Exp Supp Claim'),('mclaim','Exp MG Claim'),
+                             ('aclaim','Act Supp Claim'),('amclaim','Act MG Claim'),('tools','')] %}
+  {% set mini = [('pct','% Off'),('aclaim','Act Supp Claim')] %}
+{% endif %}
 
 {% macro cell(key, lv, cls, editable) -%}
   {%- set l = lv.line %}{% set c = lv.result -%}
@@ -38,6 +45,7 @@
   {%- elif key == 'actq' -%}
     <td class="num {{ cls }}">{% if l.actual_sales is not none %}{{ '%g'|format(l.actual_sales) }}{% else %}<span class="danger" title="No actual sales entered — counts as 0 on the claim">—</span>{% endif %}</td>
   {%- elif key == 'aclaim' -%}<td class="num {{ cls }}">{{ (c.actual_supplier_claim or 0)|money if l.actual_sales is not none else '' }}</td>
+  {%- elif key == 'amclaim' -%}<td class="num {{ cls }}">{{ (c.actual_mg_claim or 0)|money if l.actual_sales is not none else '' }}</td>
   {%- elif key == 'sclaim' -%}<td class="num {{ cls }}">{{ c.supplier_claim|money }}</td>
   {%- elif key == 'mclaim' -%}<td class="num {{ cls }}">{{ c.mg_claim|money }}</td>
   {%- elif key == 'tools' -%}
@@ -139,7 +147,7 @@
       <td class="stick s1">Totals</td><td class="stick s2"></td><td colspan="3"></td>
       {% for rv in pv.retailers %}{% set pr = rv.pr %}
         {% for k, label in cols %}<td class="num full g{{ pr.id }}{{ ' gstart' if loop.first }}">
-          {%- if k == 'sclaim' %}{{ rv.supplier_total|money }}{% elif k == 'mclaim' %}{{ rv.mg_total|money }}{% elif k == 'tsup' and view == 'sales' %}{{ rv.total_support_total|money }}{% elif k == 'aclaim' %}{{ rv.actual_supplier_total|money }}{% endif -%}
+          {%- if k == 'sclaim' %}{{ rv.supplier_total|money }}{% elif k == 'mclaim' %}{{ rv.mg_total|money }}{% elif k == 'tsup' and view == 'sales' %}{{ rv.total_support_total|money }}{% elif k == 'aclaim' %}{{ rv.actual_supplier_total|money }}{% elif k == 'amclaim' %}{{ rv.actual_mg_total|money }}{% endif -%}
         </td>{% endfor %}
         {% for k, label in mini %}<td class="num mini g{{ pr.id }}{{ ' gstart' if loop.first }}">
           {%- if k == 'sclaim' %}{{ rv.supplier_total|money }}{% elif k == 'aclaim' %}{{ rv.actual_supplier_total|money }}{% endif -%}
