@@ -9,6 +9,15 @@ st_weekly, field, ageing, items, st_table, sell_through, promos, vendor_bills) o
 Add an entry with every commit people would notice. Everything above the first
 "##" is ignored.
 
+## 2026-11-12 | Vendor Promos: find products, paste dates | promos
+- Add products now has two boxes: paste codes on the left, or find products on the right — it lists the promo brand's products and filters as you type (tick "all brands" to search everything). Tick what you want and add it, optionally with a % off.
+- Rows copied straight from the Excel promo form (From, To, Code, Description…) bring each product's dates with them; a header row is skipped.
+- Dates copy and paste: Ctrl+C on a From / To box copies it, pasting a date (12/11/2026, 12-Nov-26…) fills it, and pasting a column of dates from Excel fills down the products. "Dates for ticked" gives every ticked product the same dates.
+
+## 2026-11-12 | Vendor Promos: growth per customer, separators in Excel | promos
+- Each customer card now has a Growth box beside Rebate: that customer's expected growth, which drives its expected sales and claim. Leave it blank to use the promo's default; a growth set on a single line still wins.
+- The Excel exports (including the Claim) now list products in the grid's order, with the separators and their headings.
+
 ## 2026-11-12 | Vendor Promos: remove several products at once, edit rebates, separators | promos
 - Each product row on a promo now has a tick box. Tick the ones to drop (the box in the Code heading ticks them all) and press "Remove selected" to take them off every retailer in one go.
 - A customer's rebate can now be changed after the promo is set up: type it in the Rebate box on the customer's card. Support, margins and claims update straight away. "rebate x%" in the grid heading jumps to the card.

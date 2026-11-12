@@ -57,6 +57,11 @@
         data-confirm="Take the selected products off the promotion for every retailer?" data-confirm-ok="Remove">
     <button class="btn small danger-btn" disabled>Remove selected</button>
   </form>
+  <span class="tickdates" hidden>Dates for ticked:
+    <input type="date" class="tdx" data-which="start" aria-label="From for the ticked products"> –
+    <input type="date" class="tdx" data-which="end" aria-label="To for the ticked products">
+    <button type="button" class="btn small ghost tdset" title="Give every ticked product these dates (blank = the promo's)">Set</button>
+  </span>
   {% endif %}
   <span class="hint">Click a retailer's name to expand or collapse it.{% if editable %} Type in the boxes — each saves as you leave it; Enter moves down.{% endif %}</span>
 </div>
@@ -171,7 +176,7 @@
     <label class="cogs-wrap">MacGear % off cost <input name="cogs_mg_pct" class="cmp" type="number" step="any" min="0" value="{{ (l.cogs_mg_pct * 100)|round(4) if l.cogs_mg_pct is not none else '' }}" style="width:6em" title="MacGear funds this % of the buy-ex (gross)"></label>
     <label>6wk avg <input name="avg_6wk" type="number" step="any" min="0" value="{{ l.avg_6wk if l.avg_6wk is not none else '' }}" style="width:7em"></label>
     <label>Actual sales <input name="actual_sales" type="number" step="any" min="0" value="{{ l.actual_sales if l.actual_sales is not none else '' }}" style="width:7em"></label>
-    <label>Growth <input name="growth" type="number" step="any" placeholder="def {{ promo.growth_default }}" value="{{ l.growth if l.growth is not none else '' }}" style="width:6em"></label>
+    <label>Growth <input name="growth" type="number" step="any" placeholder="def {{ pr.growth if pr.growth is not none else promo.growth_default }}" value="{{ l.growth if l.growth is not none else '' }}" style="width:6em"></label>
     {% set overridden = (l.ratio_supplier is not none or l.ratio_mg is not none or l.ratio_retailer is not none) %}
     {% set es = l.ratio_supplier if l.ratio_supplier is not none else promo.ratio_supplier %}
     {% set em = l.ratio_mg if l.ratio_mg is not none else promo.ratio_mg %}

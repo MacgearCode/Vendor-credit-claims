@@ -11,7 +11,7 @@
 {% elif request.query_params.get('err') == 'warehouse' %}
 <div class="banner error">The reporting warehouse couldn't be reached, so item details, buy prices and the 6wk avg weren't filled in. Enter them by hand or try again shortly.</div>
 {% elif request.query_params.get('err') == 'paste' %}
-<div class="banner error">Nothing added — paste at least one product code and tick at least one retailer.</div>
+<div class="banner error">Nothing added — paste or tick at least one product, and tick at least one retailer to add it to.</div>
 {% elif request.query_params.get('err') == 'no_st' %}
 <div class="banner error">That retailer doesn't send sell-through, so there's no 6wk avg to pull — enter it by hand.</div>
 {% endif %}
@@ -22,7 +22,7 @@
 {% if qp.get('added') is not none %}
 <div class="banner ok">Added {{ qp.get('added') }} line{{ '' if qp.get('added') == '1' else 's' }}{% if qp.get('updated', '0') != '0' %}; updated % off on {{ qp.get('updated') }} already there{% endif %}.
   {% if qp.get('missing') %}<br>Not in NetSuite, skipped: <strong>{{ qp.get('missing') }}</strong>{% endif %}
-  {% if qp.get('bad') %}<br>{{ qp.get('bad') }} line{{ 's' if qp.get('bad') != '1' }} had a % off that isn't a number from 0 to 100 and {{ 'were' if qp.get('bad') != '1' else 'was' }} skipped.{% endif %}</div>
+  {% if qp.get('bad') %}<br>{{ qp.get('bad') }} line{{ 's' if qp.get('bad') != '1' }} couldn't be read — a % off outside 0–100, or a To date before the From — and {{ 'were' if qp.get('bad') != '1' else 'was' }} skipped.{% endif %}</div>
 {% endif %}
 
 <div class="head-row">
@@ -86,10 +86,31 @@
 <details class="card addproducts" id="addproducts"{{ ' open' if not pv.products }}>
   <summary>+ Add products</summary>
   {% if pv.retailers %}
-  <form method="post" action="/promo/{{ promo.id }}/products" class="addprod-form">
-    <label class="paste">Product codes — one per line, pasted from Excel or typed. A second column is the % off (optional).
-      <textarea name="codes" rows="6" placeholder="ELK-80150-R&#9;20&#10;ELK-80151-R&#9;20&#10;ELK-80152-R" required></textarea>
-    </label>
+  <form method="post" action="/promo/{{ promo.id }}/products" class="addprod-form" id="addprodform">
+    <div class="addprod-boxes">
+      <div class="addprod-box">
+        <h4>Paste codes</h4>
+        <label class="paste">One per line, pasted from Excel or typed. A second column is the % off
+          (optional); blank rows become separators.
+          <textarea name="codes" rows="9" placeholder="ELK-80150-R&#9;20&#10;ELK-80151-R&#9;20&#10;ELK-80152-R"></textarea>
+        </label>
+      </div>
+      <div class="addprod-box finder">
+        <h4>Find products</h4>
+        <div class="finder-bar">
+          <input type="search" class="fq" placeholder="Search code or name…" autocomplete="off" aria-label="Search products">
+          {% if promo.brand %}<label class="chk" title="Search every brand, not just {{ promo.brand }}"><input type="checkbox" class="fwide"> all brands</label>{% endif %}
+        </div>
+        <div class="finder-meta">
+          <span class="fcount muted"></span>
+          <button type="button" class="link fall">tick all shown</button>
+          <span class="fsel"></span>
+          <button type="button" class="link fclear" hidden>clear</button>
+        </div>
+        <div class="finder-list"></div>
+        <label class="fpct">% off for the ticked products <input type="number" step="any" min="0" max="100" class="fpctin" placeholder="optional"></label>
+      </div>
+    </div>
     <div class="addprod-side">
       <fieldset>
         <legend>Add to</legend>
@@ -106,8 +127,9 @@
       <button class="btn small">Add products</button>
     </div>
   </form>
-  <p class="hint">Each line gets that retailer's buy price and 6wk avg. A product already on a
-     retailer is left as it is, except a pasted % off updates it. Codes not in NetSuite are skipped.</p>
+  <p class="hint">Use either box, or both — one press adds everything. Each line gets that
+     retailer's buy price and 6wk avg. A product already on a retailer is left as it is, except a
+     given % off updates it. Codes not in NetSuite are skipped.</p>
   {% else %}
   <p class="hint">Add a retailer first (bottom of the page).</p>
   {% endif %}
@@ -173,11 +195,14 @@
 {% set pr = rv.pr %}
 <section class="card retailer" id="pr{{ pr.id }}">
   <div class="head-row">
-    <h2>{{ pr.retailer_name }} <small class="muted">{% if not editable %}rebate {{ pr.rebate|pct }} · {% endif %}{{ rv.lines|length }} product{{ 's' if rv.lines|length != 1 }}</small></h2>
+    <h2>{{ pr.retailer_name }} <small class="muted">{% if not editable %}rebate {{ pr.rebate|pct }} · growth {{ (pr.growth if pr.growth is not none else promo.growth_default)|pct }} · {% endif %}{{ rv.lines|length }} product{{ 's' if rv.lines|length != 1 }}</small></h2>
     {% if editable %}
     <label class="rebate-edit" title="This customer's rebate on this promo. Changing it recalculates net buy, support, margins and claims for its lines.">Rebate
-      <input class="rin" type="number" step="any" min="0" max="100" data-pr="{{ pr.id }}" data-key="rebate-{{ pr.id }}" data-which="r"
+      <input class="rin" type="number" step="any" min="0" max="100" data-pr="{{ pr.id }}" data-what="rebate" data-key="rebate-{{ pr.id }}" data-which="r"
              value="{{ (pr.rebate * 100)|round(4) }}">%</label>
+    <label class="rebate-edit" title="Growth expected on this customer's 6wk avg during the promo. Blank = the promo's default ({{ (promo.growth_default * 100)|round(2) }}%). A growth set on a line (✎) still wins.">Growth
+      <input class="rin" type="number" step="any" data-pr="{{ pr.id }}" data-what="growth" data-key="growth-{{ pr.id }}" data-which="g"
+             placeholder="{{ (promo.growth_default * 100)|round(2) }}" value="{{ (pr.growth * 100)|round(4) if pr.growth is not none else '' }}">%</label>
     {% endif %}
     {% if editable %}
     {% if rv.lines %}
@@ -408,6 +433,8 @@ function syncSelected() {
   const n = rows.filter(c => c.checked).length;
   const all = document.querySelector('input.selall');
   if (all) { all.checked = n > 0 && n === rows.length; all.indeterminate = n > 0 && n < rows.length; }
+  const td = document.querySelector('.tickdates');
+  if (td) td.hidden = n === 0;
   const form = document.getElementById('bulkdel');
   if (!form) return;
   const btn = form.querySelector('button');
@@ -423,6 +450,154 @@ document.addEventListener('change', function (e) {
   } else if (e.target.matches('input.selrow')) {
     syncSelected();
   }
+});
+
+// ---- Add products: the finder (browse the promo's brand, or type to search) ----
+(function () {
+  const box = document.getElementById('addproducts');
+  const form = document.getElementById('addprodform');
+  if (!box || !form) return;
+  const fq = form.querySelector('.fq'), wide = form.querySelector('.fwide');
+  const list = form.querySelector('.finder-list'), count = form.querySelector('.fcount');
+  const sel = form.querySelector('.fsel'), clear = form.querySelector('.fclear');
+  const picked = new Set();
+  let shown = [], timer = null, seq = 0, loaded = false;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+  const money = v => v == null ? '' : '$' + v.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+  function syncPicked() {
+    sel.textContent = picked.size ? picked.size + ' ticked' : '';
+    clear.hidden = !picked.size;
+  }
+  function render(data) {
+    shown = data.items;
+    const wideOn = wide && wide.checked;
+    list.innerHTML = shown.length ? shown.map(i =>
+      '<label class="frow' + (i.on_promo ? ' on' : '') + '">' +
+      '<input type="checkbox" value="' + esc(i.code) + '"' + (picked.has(i.code) ? ' checked' : '') + (i.on_promo ? ' disabled' : '') + '>' +
+      '<span class="fcode">' + esc(i.code) + '</span>' +
+      '<span class="fdesc">' + esc(i.description) + (wideOn || !data.brand ? ' <span class="muted">· ' + esc(i.brand) + '</span>' : '') + '</span>' +
+      (i.status && i.status !== 'Active' ? '<span class="fstat">' + esc(i.status) + '</span>' : '') +
+      (i.on_promo ? '<span class="fstat">on promo</span>' : '<span class="frrp">' + money(i.rrp_inc) + '</span>') +
+      '</label>').join('')
+      : '<p class="hint">No products match.</p>';
+    count.textContent = data.total > shown.length
+      ? 'showing ' + shown.length + ' of ' + data.total.toLocaleString() + ' — type to narrow'
+      : data.total + ' product' + (data.total === 1 ? '' : 's') + (data.brand ? ' in ' + data.brand : '');
+  }
+  async function load() {
+    loaded = true;
+    const me = ++seq;
+    const url = '/promo/' + PROMO_ID + '/items?q=' + encodeURIComponent(fq.value.trim()) + (wide && wide.checked ? '&wide=1' : '');
+    const res = await fetch(url);
+    const data = await res.json().catch(() => ({error: 'the product list could not be loaded'}));
+    if (me !== seq) return;                       // a newer search has started
+    if (!res.ok || data.error) { list.innerHTML = '<p class="hint danger">' + esc(data.error || 'not loaded') + '</p>'; count.textContent = ''; return; }
+    render(data);
+  }
+  fq.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 200); });
+  fq.addEventListener('keydown', e => { if (e.key === 'Enter') e.preventDefault(); });   // Enter doesn't submit
+  if (wide) wide.addEventListener('change', load);
+  list.addEventListener('change', e => {
+    const cb = e.target;
+    if (!cb.matches('input[type=checkbox]')) return;
+    cb.checked ? picked.add(cb.value) : picked.delete(cb.value);
+    syncPicked();
+  });
+  form.querySelector('.fall').addEventListener('click', () => {
+    list.querySelectorAll('input[type=checkbox]:not(:disabled)').forEach(cb => { cb.checked = true; picked.add(cb.value); });
+    syncPicked();
+  });
+  clear.addEventListener('click', () => {
+    picked.clear();
+    list.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = false; });
+    syncPicked();
+  });
+  // load the brand's products the first time the box is opened
+  if (box.open) load();
+  box.addEventListener('toggle', () => { if (box.open && !loaded) load(); });
+  // on submit: ticked products travel as "pick" fields (with the % off, if given)
+  form.addEventListener('submit', e => {
+    form.querySelectorAll('input[name="pick"]').forEach(i => i.remove());
+    const pct = form.querySelector('.fpctin').value.trim();
+    picked.forEach(code => {
+      const h = document.createElement('input');
+      h.type = 'hidden'; h.name = 'pick'; h.value = pct ? code + '\t' + pct : code;
+      form.appendChild(h);
+    });
+    if (!picked.size && !form.codes.value.trim()) {
+      e.preventDefault();
+      count.textContent = 'Paste or tick at least one product first.';
+      count.classList.add('danger');
+    }
+  });
+})();
+
+// ---- dates: copy / paste like a spreadsheet ---------------------------------------
+// Day first, as typed or copied in Australia: 12/11/2026, 12/11/26, 12-Nov-26, 2026-11-12.
+const MONTHS = {jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12};
+function parseDate(text) {
+  const t = String(text || '').trim().toLowerCase();
+  let y, m, d, x = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ t].*)?$/);
+  if (x) { [y, m, d] = [+x[1], +x[2], +x[3]]; }
+  else {
+    x = t.match(/^(\d{1,2})[\/.\- ](\d{1,2}|[a-z]{3})[a-z]*[\/.\- ](\d{2}|\d{4})$/);
+    if (!x) return null;
+    d = +x[1]; m = /^\d+$/.test(x[2]) ? +x[2] : MONTHS[x[2]]; y = +x[3] + (x[3].length === 2 ? 2000 : 0);
+  }
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (!m || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;
+  return dt.toISOString().slice(0, 10);
+}
+const ddmmyyyy = iso => iso ? iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4) : '';
+const productRows = () => [...document.querySelectorAll('table.pgrid tbody tr')].filter(r => r.querySelector('input.pd'));
+
+// Ctrl/Cmd+C on a date box copies it as 12/11/2026 (a date box has no text to select)
+document.addEventListener('keydown', function (e) {
+  const inp = e.target;
+  if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'c' || !inp.matches || !inp.matches('input.pd, input.tdx')) return;
+  if (inp.value && navigator.clipboard) { e.preventDefault(); navigator.clipboard.writeText(ddmmyyyy(inp.value)); }
+});
+// Paste into a date box. One date fills that box; From + To copied together fill
+// both; a column of dates copied from Excel fills down the products from this row
+// (blank lines and separator rows skipped, so a block with its gaps lines up).
+document.addEventListener('paste', async function (e) {
+  const inp = document.activeElement;
+  if (!inp || !inp.matches || !inp.matches('input.pd, input.tdx')) return;
+  const text = (e.clipboardData || window.clipboardData).getData('text');
+  const lines = text.split(/\r?\n/).filter(l => l.replace(/\t/g, '').trim() !== '')
+    .map(l => l.split('\t').map(parseDate).filter(Boolean));
+  e.preventDefault();
+  if (!lines.length || !lines[0].length) { flag(inp, 'not a date — use dd/mm/yyyy'); return; }
+  flag(inp, '');
+  const which = inp.dataset.which;
+  const pick = ds => which === 'start' ? {start: ds[0], end: ds[1]} : {end: ds[0]};
+  if (inp.matches('input.tdx')) {                 // the "Dates for ticked" boxes
+    const v = pick(lines[0]);
+    document.querySelectorAll('input.tdx').forEach(i => { if (v[i.dataset.which]) i.value = v[i.dataset.which]; });
+    return;
+  }
+  const rows = productRows(), from = rows.indexOf(inp.closest('tr'));
+  const jobs = lines.slice(0, rows.length - from).map((ds, i) => {
+    const tr = rows[from + i], v = pick(ds);
+    const box = w => tr.querySelector('input.pd[data-which="' + w + '"]');
+    return {key: box('start').dataset.key, start: v.start || box('start').value, end: v.end || box('end').value};
+  });
+  for (const j of jobs) {
+    const r = await post('/promo/' + PROMO_ID + '/product_dates', j);
+    if (r.error) { flag(inp, r.error); break; }
+  }
+  await refreshLive();
+});
+// "Dates for ticked: From – To  Set"
+document.addEventListener('click', async function (e) {
+  if (!e.target.closest('.tdset')) return;
+  const keys = [...document.querySelectorAll('input.selrow:checked')].map(c => c.value);
+  if (!keys.length) return;
+  const v = w => document.querySelector('input.tdx[data-which="' + w + '"]').value;
+  const r = await post('/promo/' + PROMO_ID + '/product_dates', {keys, start: v('start'), end: v('end')});
+  if (r.error) { flag(document.querySelector('input.tdx'), r.error); return; }
+  await refreshLive();
 });
 
 // ✎ on a cell: the line's rarer settings in a dialog
@@ -482,7 +657,7 @@ document.addEventListener('change', async function (e) {
     if (r.error) { flag(inp, r.error); return; }
     await refreshLive();
   } else if (inp.matches('input.rin')) {
-    const r = await post('/retailer/' + inp.dataset.pr + '/rebate', {value: inp.value});
+    const r = await post('/retailer/' + inp.dataset.pr + '/' + inp.dataset.what, {value: inp.value});
     if (r.error) { flag(inp, r.error); return; }
     await refreshLive();
   } else if (inp.matches('input.pd')) {

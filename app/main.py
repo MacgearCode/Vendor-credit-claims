@@ -1519,16 +1519,38 @@ def promo_detail(promo_id: int, request: Request, view: str = "internal",
 
 
 # ---- products (the promo grid) -----------------------------------------------
+@app.get("/promo/{promo_id}/items")
+def promo_find_items(promo_id: int, q: str = "", wide: int = 0, db: Session = Depends(get_db)):
+    """The Add products finder: NetSuite items matching q — the promo's brand only
+    unless wide=1 (every brand) — with on_promo marking the ones already in the grid."""
+    promo = db.get(Promotion, promo_id)
+    if not promo:
+        return JSONResponse({"error": "no such promotion"}, status_code=404)
+    brand = "" if wide else (promo.brand or "")
+    try:
+        items, total = promo_data.find_items(promo.country, q, brand)
+    except warehouse.WarehouseUnavailable:
+        return JSONResponse({"error": "The product list comes from the reporting warehouse, "
+                                      "which couldn't be reached — try again shortly."},
+                            status_code=503)
+    on = {_product_key(l) for pr in promo.retailers for l in pr.lines}
+    return JSONResponse({"items": [dict(i, on_promo=i["code"].upper() in on) for i in items],
+                         "total": total, "brand": brand})
+
+
 @app.post("/promo/{promo_id}/products")
 async def add_products(promo_id: int, request: Request, db: Session = Depends(get_db)):
-    """Add pasted products to the ticked retailer blocks. Each line gets that
-    retailer's buy price and 6wk avg; a product already on a block keeps its line
+    """Add pasted and/or picked products to the ticked retailer blocks. Each line gets
+    that retailer's buy price and 6wk avg; a product already on a block keeps its line
     (a pasted % off updates it). Codes not in NetSuite are skipped and listed."""
     form = await request.form()
     promo = db.get(Promotion, promo_id)
     if not promo:
         return RedirectResponse("/promos", status_code=303)
-    rows, bad, breaks = promo_data.parse_paste(form.get("codes", ""))
+    # pasted text, then anything ticked in the finder (one "pick" per product); the
+    # paste's trailing blank lines go, or they'd read as a separator before the picks
+    text = "\n".join([form.get("codes", "").rstrip()] + form.getlist("pick"))
+    rows, bad, breaks, row_dates = promo_data.parse_paste(text)
     ticked = set(form.getlist("pr"))
     blocks = [pr for pr in promo.retailers if str(pr.id) in ticked]
     start, end = _parse_date(form.get("start_date")), _parse_date(form.get("end_date"))
@@ -1567,7 +1589,7 @@ async def add_products(promo_id: int, request: Request, db: Session = Depends(ge
             line = _new_line(pr, it, pct, s, e)
             new.append(line)
             have[key] = line
-        db.add_all(new)
+        pr.lines.extend(new)          # in the collection now, so the date step below sees them
         added += len(new)
         if new and not wh_err:
             try:
@@ -1585,9 +1607,20 @@ async def add_products(promo_id: int, request: Request, db: Session = Depends(ge
             db.add(PromoSeparator(promo_id=promo_id, after_key=last))
             have_sep.add(last)
     db.flush()
-    if (start or end) and found:
-        wh_err = not _set_product_dates(promo, {it["code"].upper() for it, _ in found},
-                                        start, end) or wh_err
+    # Dates: a pasted row's own From / To win; the box's From / To cover the rest.
+    windows = defaultdict(set)
+    for it, _ in found:
+        key = it["code"].upper()
+        pasted = row_dates.get(key)
+        if pasted:
+            windows[pasted].add(key)
+        elif start or end:
+            windows[(start, end)].add(key)
+    for (s_, e_), keys in windows.items():
+        if (e_ or promo.end_date) < (s_ or promo.start_date):
+            bad += sorted(keys)           # a lone From after the promo ends: dates left alone
+            continue
+        wh_err = not _set_product_dates(promo, keys, s_, e_) or wh_err
     db.commit()
     q = {"added": added, "updated": updated}
     if missing:
@@ -1633,8 +1666,8 @@ async def set_line_field(line_id: int, request: Request, db: Session = Depends(g
 
 @app.post("/promo/{promo_id}/product_dates")
 async def set_product_dates(promo_id: int, request: Request, db: Session = Depends(get_db)):
-    """Set one product's promo window across every retailer: {"key", "start", "end"};
-    blank = the promotion's date."""
+    """Set products' promo window across every retailer: {"key" or "keys": [...],
+    "start", "end"}; blank = the promotion's date."""
     data = await request.json()
     promo = db.get(Promotion, promo_id)
     if not promo:
@@ -1643,7 +1676,10 @@ async def set_product_dates(promo_id: int, request: Request, db: Session = Depen
     if (end or promo.end_date) < (start or promo.start_date):
         return JSONResponse({"error": "the end date can't be before the start date"},
                             status_code=400)
-    ok = _set_product_dates(promo, {(data.get("key") or "").upper()}, start, end)
+    keys = {(k or "").upper() for k in (data.get("keys") or [data.get("key")]) if k}
+    if not keys:
+        return JSONResponse({"error": "no products given"}, status_code=400)
+    ok = _set_product_dates(promo, keys, start, end)
     db.commit()
     return JSONResponse({"ok": True, **({} if ok else {
         "warning": "dates saved, but the 6wk avg couldn't be re-pulled (warehouse unreachable)"})})
@@ -1733,6 +1769,26 @@ async def set_rebate(pr_id: int, request: Request, db: Session = Depends(get_db)
     if v is not None and not 0 <= v <= 100:
         return JSONResponse({"error": "the rebate must be 0–100%"}, status_code=400)
     pr.rebate = (v or 0.0) / 100.0
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+@app.post("/retailer/{pr_id}/growth")
+async def set_growth(pr_id: int, request: Request, db: Session = Depends(get_db)):
+    """Change one customer's growth expectation: {"value": percent, blank = the
+    promo's default}. Expected sales and claims for its lines follow (lines with
+    their own growth keep it)."""
+    data = await request.json()
+    pr = db.get(PromoRetailer, pr_id)
+    if not pr:
+        return JSONResponse({"error": "no such retailer"}, status_code=404)
+    raw = data.get("value")
+    v = _parse_float(raw)
+    if v is None and raw not in (None, ""):
+        return JSONResponse({"error": "enter a number"}, status_code=400)
+    if v is not None and not -100 <= v <= 1000:
+        return JSONResponse({"error": "growth must be between -100% and 1000%"}, status_code=400)
+    pr.growth = v / 100.0 if v is not None else None
     db.commit()
     return JSONResponse({"ok": True})
 

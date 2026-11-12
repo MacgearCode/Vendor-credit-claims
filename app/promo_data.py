@@ -176,41 +176,128 @@ def items(codes, country: str, level_ids) -> dict:
     return out
 
 
+_STATUS_ORDER = {"Active": 0, "EOL": 1, "": 2, "Inactive": 3}
+FIND_LIMIT = 600                 # the biggest brand (Garmin) has ~500 live items
+
+
+def _catalog(country: str) -> list[dict]:
+    """Every live NetSuite inventory item, with this country's RRP and status, for
+    the promo product finder (~4,500 rows — filtered in memory as people type)."""
+    rows = warehouse.query(
+        """select macgear_code, description, brand, aud_rrp, nzd_rrp, au_status, nz_status
+           from reporting.dim_item
+           where ns_item_id is not null and not coalesce(is_inactive, false)
+             and item_type = 'Inventory Item'""")
+    nz = country == "NZ"
+    items = [{"code": c, "description": d or "", "brand": b or "",
+              "rrp_inc": float(nr if nz else ar) if (nr if nz else ar) is not None else None,
+              "status": ((ns if nz else as_) or "")}
+             for c, d, b, ar, nr, as_, ns in rows]
+    # Active first, then EOL...; within each, items with no RRP (display dummies,
+    # "T00Z-…" boxes) after the real products
+    items.sort(key=lambda i: (_STATUS_ORDER.get(i["status"], 2), i["rrp_inc"] is None,
+                              i["code"].upper()))
+    return items
+
+
+def find_items(country: str, query: str = "", brand: str = "") -> tuple[list[dict], int]:
+    """Items for the promo product finder: every word of query must appear in the
+    code or name (any order, any case); brand limits it to one NetSuite brand.
+    Active first, then EOL, then the rest. Returns (first FIND_LIMIT, total matching).
+    Raises WarehouseUnavailable."""
+    country = (country or "AU").upper()
+    items = warehouse.cached(("promo_catalog", country), lambda: _catalog(country),
+                             ttl=ENTRIES_TTL)
+    words = (query or "").upper().split()
+    brand = (brand or "").strip().upper()
+    hits = [i for i in items
+            if (not brand or i["brand"].upper() == brand)
+            and all(w in i["code"].upper() or w in i["description"].upper() for w in words)]
+    return hits[:FIND_LIMIT], len(hits)
+
+
+_MONTHS = {m: i for i, m in enumerate(
+    ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
+
+
+def parse_date_text(text: str) -> date | None:
+    """A date as people type or copy it in Australia: day first — 12/11/2026,
+    12/11/26, 12-11-2026, 12.11.2026, 12 Nov 2026, 12-Nov-26 — or ISO 2026-11-12.
+    None if it isn't one."""
+    t = (text or "").strip().lower()
+    m = re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})(?:[ t].*)?", t)          # ISO (Excel may add a time)
+    if m:
+        y, mo, d = (int(x) for x in m.groups())
+    else:
+        m = re.fullmatch(r"(\d{1,2})[/.\- ](\d{1,2}|[a-z]{3})[a-z]*[/.\- ](\d{2}|\d{4})", t)
+        if not m:
+            return None
+        d, mo, y = m.groups()
+        mo = _MONTHS.get(mo[:3]) if mo.isalpha() else int(mo)
+        d, y = int(d), int(y) + (2000 if len(y) == 2 else 0)
+        if mo is None:
+            return None
+    try:
+        return date(y, mo, d)
+    except ValueError:
+        return None
+
+
 def parse_paste(text: str):
-    """Rows pasted from Excel (or typed): one product per line, code first, an
-    optional second column = % off ("20", "20%", or 0.2 as Excel copies a
-    percent-formatted cell's raw value). Returns ([(code, pct_or_None)], [bad lines],
-    {upper(code) followed by a blank row}) — the blank rows people leave between
-    blocks of products become separators. A code pasted twice keeps its first row."""
-    rows, bad, seen, breaks = [], [], set(), set()
+    """Rows pasted from Excel (or typed), one product per line. A row is read as:
+      code  |  code, % off  |  code, description
+      plus, anywhere in it, up to two dates = that product's From / To
+    so rows copied straight from the Excel promo form (From | To | Code |
+    Description | ...) work too. % off is only read from the short code, % off
+    form — in a full-width row the columns after the description are customer codes
+    and prices, not a discount. % off can be "20", "20%" or 0.2 (Excel's raw value
+    of a percent cell). Blank rows between products become separators; a header
+    row (no digit in its code cell) is skipped. A code pasted twice keeps its first row.
+
+    Returns (rows [(code, pct_or_None)], bad lines, {upper(code) followed by a blank
+    row}, {upper(code): (from, to)} for rows that carried dates)."""
+    rows, bad, seen, breaks, dates = [], [], set(), set(), {}
     gap = False
     for raw in (text or "").splitlines():
-        parts = [p.strip() for p in re.split(r"[\t,;]", raw) if p.strip()]
-        if len(parts) == 1 and " " in parts[0]:
+        sep = "\t" if "\t" in raw else r"[,;]"      # Excel cells; descriptions may hold commas
+        parts = [p.strip() for p in re.split(sep, raw) if p.strip()]
+        if len(parts) == 1 and " " in parts[0] and not parse_date_text(parts[0]):
             parts = parts[0].split()          # "CODE 20" typed with a space
         if not parts:
             gap = bool(rows)                  # a blank row after at least one product
             continue
-        code, pct = parts[0], None
-        if len(parts) > 1:
-            v = parts[1].replace("%", "").strip()
+        found_dates = [d for d in map(parse_date_text, parts) if d]
+        cells = [c for c in parts if not parse_date_text(c)]
+        if not cells:
+            bad.append(raw.strip())
+            continue
+        code, pct = cells[0], None
+        if len(cells) > 2 and not any(ch.isdigit() for ch in code):
+            continue                          # a header row: "From  To  Code  Product Description"
+        if len(cells) == 2:
+            v = cells[1].replace("%", "").strip()
             try:
                 pct = float(v)
             except ValueError:
-                bad.append(raw.strip())
-                continue
-            if "%" not in parts[1] and 0 < pct < 1:
+                pct = None                    # code + description: no % off given
+        if pct is not None:
+            if "%" not in cells[1] and 0 < pct < 1:
                 pct *= 100                    # 0.2 -> 20%
             if not 0 <= pct <= 100:
                 bad.append(raw.strip())
                 continue
+        if len(found_dates) >= 2 and found_dates[1] < found_dates[0]:
+            bad.append(raw.strip())           # To before From
+            continue
         if gap:
             breaks.add(rows[-1][0].upper())
             gap = False
         if code.upper() not in seen:
             seen.add(code.upper())
             rows.append((code, pct))
-    return rows, bad, breaks
+            if found_dates:
+                dates[code.upper()] = (found_dates[0], found_dates[1] if len(found_dates) > 1 else None)
+    return rows, bad, breaks, dates
 
 
 # ---- 6-week average ------------------------------------------------------------

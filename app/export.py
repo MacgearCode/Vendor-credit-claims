@@ -13,6 +13,7 @@ HEAD = Font(bold=True, color="FFFFFF")
 HEAD_FILL = PatternFill("solid", fgColor="2F5496")
 TITLE = Font(bold=True, size=14)
 BOLD = Font(bold=True)
+SEP = Font(bold=True, italic=True, color="2F5496")
 
 # (header, attribute path, number format) per view
 VIEWS = {
@@ -63,6 +64,30 @@ VIEWS = {
 }
 
 
+def grouped_lines(pv, pr_id, keep=lambda lv: True):
+    """One customer's lines in the grid's product order, with the grid's separators
+    between them: yields a LineView, or ("sep", heading) for a separator. A separator
+    only shows between two of this customer's lines; when several fall between them,
+    the last heading given wins."""
+    seps = {s.after_key: s.label for s in pv.promo.separators}
+    pending, started = None, False
+    for row in pv.products:
+        lv = row.cells.get(pr_id)
+        if lv is not None and keep(lv):
+            if pending is not None and started:
+                yield ("sep", pending)
+            pending, started = None, True
+            yield lv
+        if row.key in seps and started:
+            pending = seps[row.key] or (pending if pending is not None else "")
+
+
+def _write_sep(sh, r, label):
+    """A separator row: blank, or its heading in column A."""
+    if label:
+        sh.cell(r, 1, label).font = SEP
+
+
 def _resolve(lv, path):
     if "." not in path:                  # the line view's own field (product dates)
         return getattr(lv, path)
@@ -101,7 +126,10 @@ def build_workbook(pv, view: str) -> io.BytesIO:
             cell.font = HEAD
             cell.fill = HEAD_FILL
             cell.alignment = Alignment(wrap_text=True, vertical="center")
-        for r, lv in enumerate(rv.lines, start=2):
+        for r, lv in enumerate(grouped_lines(pv, rv.pr.id), start=2):
+            if isinstance(lv, tuple):
+                _write_sep(sh, r, lv[1])
+                continue
             for c, (_, path, fmt) in enumerate(cols, start=1):
                 val = _resolve(lv, path)
                 cell = sh.cell(r, c, val)
@@ -137,7 +165,9 @@ def build_claim_workbook(pv) -> io.BytesIO:
             ("Claim #", p.claim_number),
             ("Claim date", vr.claim_date if vr and vr.claim_date else ""),
             ("Promotion dates", f"{p.start_date:%d/%m/%Y} to {p.end_date:%d/%m/%Y}"),
-            (f"Claim total ({cur})", round(pv.claim_aud, 2)),
+            (f"Claim total ({cur})" + (" — expected, no actual sales yet"
+                                       if pv.claim_basis == "expected" else ""),
+             round(pv.claim_aud, 2)),
             (f"Claim total (USD @ {p.aud_usd_rate})", round(pv.claim_usd, 2))]
     for i, (k, v) in enumerate(meta, start=3):
         ws.cell(i, 1, k).font = BOLD
@@ -162,11 +192,14 @@ def build_claim_workbook(pv) -> io.BytesIO:
 
     grand = 0.0
     for rv in pv.retailers:
-        lines = [lv for lv in rv.lines if lv.line.actual_sales is not None]
+        lines = list(grouped_lines(pv, rv.pr.id, keep=lambda lv: lv.line.actual_sales is not None))
         if not lines:
             continue
         for lv in lines:
             r += 1
+            if isinstance(lv, tuple):
+                _write_sep(ws, r, lv[1])
+                continue
             claim = lv.result.actual_supplier_claim or 0.0
             vals = [rv.pr.retailer_name, lv.line.product_code, lv.line.description,
                     lv.start, lv.end, lv.result.supplier_support, lv.line.actual_sales, claim]

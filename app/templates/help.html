@@ -23,9 +23,12 @@
     <li><strong>Create the promotion.</strong> Click <em>+ New Promotion</em>. Fill in the claim #,
       name, brand, date range, the AUD→USD rate, and the default funding split. Tick the retailers
       taking part (set each one's rebate if it differs).</li>
-    <li><strong>Add products.</strong> On the promo page open <em>+ Add products</em>, paste the
-      product codes straight from Excel (one per line; a second column is the % off) and tick the
-      retailers they're for. Each line fills in the description, RRP, that retailer's buy price (its
+    <li><strong>Add products.</strong> On the promo page open <em>+ Add products</em>. Either paste
+      product codes straight from Excel into the left box (one per line; a second column is the
+      % off; rows copied from the Excel promo form with their From / To dates bring those dates
+      too), or use <em>Find products</em> on the right — it lists the promo brand's products, and
+      typing searches them (tick <em>all brands</em> to search everything); tick the ones you want.
+      Then tick the retailers they're for. Each line fills in the description, RRP, that retailer's buy price (its
       NetSuite price level) and its <em>6-week average</em>. <em>+ products</em> on a retailer's
       heading pastes for that retailer only, and <em>+ add</em> in an empty cell adds one product to
       one retailer.</li>
@@ -39,7 +42,12 @@
       them in what you paste (as in the Excel form) or click <em>⎯ gap</em> at the end of a row; a
       separator can carry a heading, and its ✕ removes it. A customer's rebate can be changed at any time in the
       <em>Rebate</em> box on its card under <em>Customers</em> (click "rebate x%" in the grid heading to
-      jump there); its support, margins and claims recalculate straight away.</li>
+      jump there); its support, margins and claims recalculate straight away. The <em>Growth</em> box
+      beside it sets that customer's growth expectation (blank = the promo's default); a growth set
+      on a single line with ✎ still wins. The Excel exports keep the grid's order and separators.
+      Dates copy and paste like a spreadsheet: Ctrl+C on a From / To box copies it, pasting a date
+      fills it, and pasting a column of dates from Excel fills down the products. Tick products to
+      give them all the same dates with <em>Dates for ticked</em>.</li>
     <li><strong>Send for approval.</strong> Move the promo status through the workflow (see below) as
       the vendor approves the spend and Sales releases it to the customer.</li>
     <li><strong>Log the customer claim.</strong> After the promo runs, enter each retailer's

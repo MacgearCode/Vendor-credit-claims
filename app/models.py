@@ -85,6 +85,9 @@ class PromoRetailer(Base):
     promo_id: Mapped[int] = mapped_column(ForeignKey("promotions.id"))
     retailer_name: Mapped[str] = mapped_column(String)
     rebate: Mapped[float] = mapped_column(Float, default=0.0)  # rebate for this block
+    # growth expectation for this customer (fraction); NULL -> the promo's default.
+    # A growth set on a line still wins over it.
+    growth: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Picker entry behind the block (app/promo_data.py) — NetSuite price level for the
     # buy price, sell-through retailer for the 6wk avg. NULL on blocks made before
     # 2026-10-21; those are matched by name.

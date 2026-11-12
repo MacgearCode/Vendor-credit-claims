@@ -471,3 +471,33 @@ table.pgrid .sepadd{font-size:.72rem;margin-right:.25rem;opacity:.55}
 table.pgrid tr:hover .sepadd{opacity:1}
 [data-theme="dark"] table.pgrid tr.seprow td,[data-theme="dark"] table.pgrid tr.seprow:hover td{background:#222b37}
 table.pgrid input.sepin::placeholder{font-weight:400;font-style:italic;color:var(--muted);opacity:.8}
+/* promo Add products: paste box + finder side by side */
+.addprod-boxes{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(340px,100%),1fr));gap:1rem;flex:1 1 640px}
+.addprod-box{display:flex;flex-direction:column;gap:.35rem;min-width:0}
+.addprod-box h4{margin:0;font-size:.92rem}
+.addprod-box .paste{flex:1 1 auto}
+.finder-bar{display:flex;gap:.6rem;align-items:center}
+.finder-bar .fq{flex:1;min-width:0}
+.finder-meta{display:flex;gap:.6rem;align-items:center;font-size:.8rem;min-height:1.2rem;flex-wrap:wrap}
+.finder-meta .fsel{font-weight:600;color:var(--brand)}
+.finder-list{border:1px solid var(--line);border-radius:6px;height:15rem;overflow:auto;background:var(--card)}
+.finder-list .hint{padding:.5rem .7rem;margin:0}
+.frow{display:flex;gap:.5rem;align-items:baseline;padding:.25rem .55rem;border-bottom:1px solid var(--line);font-size:.82rem;cursor:pointer}
+.frow:hover{background:#f7f9fc}
+.frow input{margin:0;align-self:center}
+.frow .fcode{flex:0 0 7.5rem;font-variant-numeric:tabular-nums;font-weight:600}
+.frow .fdesc{flex:1;min-width:0}
+.frow .frrp{flex:0 0 auto;color:var(--muted);font-variant-numeric:tabular-nums}
+.frow .fstat{flex:0 0 auto;font-size:.72rem;color:var(--muted);border:1px solid var(--line);border-radius:10px;padding:0 .4rem}
+.frow.on{opacity:.55;cursor:default}
+.frow:has(input:checked){background:#eaf1fd}
+.fpct{font-size:.82rem;display:flex;gap:.4rem;align-items:center}
+.fpct input{width:6em}
+[data-theme="dark"] .frow:hover{background:#222b37}
+[data-theme="dark"] .frow:has(input:checked){background:#1d2942}
+/* promo grid: dates for the ticked products */
+.grid-tools .tickdates{display:inline-flex;align-items:center;gap:.3rem;margin-right:.5rem;font-size:.82rem}
+.grid-tools .tickdates[hidden]{display:none}
+.grid-tools .tickdates input{font-size:.78rem;padding:.1rem .2rem;width:8.8em}
+.grid-tools .tickdates input.bad{border-color:var(--danger);outline:1px solid var(--danger)}
+table.pgrid input.pd.bad{border-color:var(--danger);outline:1px solid var(--danger)}
