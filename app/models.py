@@ -71,6 +71,8 @@ class Promotion(Base):
         back_populates="promotion", cascade="all, delete-orphan")
     vendor_request: Mapped[VendorRequest | None] = relationship(
         back_populates="promotion", cascade="all, delete-orphan", uselist=False)
+    separators: Mapped[list[PromoSeparator]] = relationship(
+        back_populates="promotion", cascade="all, delete-orphan")
     documents: Mapped[list[PromoDocument]] = relationship(
         back_populates="promotion", cascade="all, delete-orphan",
         order_by="PromoDocument.uploaded_at")
@@ -211,6 +213,19 @@ class ProcessedInvoice(Base):
     # Set by hand once the CSV has actually gone into NetSuite, so the log
     # distinguishes "downloaded" from "posted".
     imported: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class PromoSeparator(Base):
+    """A gap (optionally headed) between groups of products in the promo grid, like
+    the blank rows people leave between blocks in the Excel promo form. It sits under
+    the product row `after_key` (upper(code), as service.ProductRow.key)."""
+    __tablename__ = "promo_separators"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    promo_id: Mapped[int] = mapped_column(ForeignKey("promotions.id"), index=True)
+    after_key: Mapped[str] = mapped_column(String)
+    label: Mapped[str] = mapped_column(String, default="")
+
+    promotion: Mapped[Promotion] = relationship(back_populates="separators")
 
 
 class PromoDocument(Base):

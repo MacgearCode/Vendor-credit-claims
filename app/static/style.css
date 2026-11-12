@@ -412,8 +412,8 @@ table.pgrid thead{position:sticky;top:0;z-index:3}
 table.pgrid tbody tr:hover td{background:#f7f9fc}
 table.pgrid .stick{position:sticky;background:var(--card);z-index:1}
 table.pgrid thead th.stick{background:#eef1f6;z-index:4}
-table.pgrid .s1{left:0;width:7.6rem;min-width:7.6rem;max-width:7.6rem;overflow:hidden;text-overflow:ellipsis}
-table.pgrid .s2{left:7.6rem;min-width:15rem;max-width:22rem;white-space:normal;box-shadow:inset -2px 0 0 var(--line)}
+table.pgrid .s1{left:0;width:8.9rem;min-width:8.9rem;max-width:8.9rem;overflow:hidden;text-overflow:ellipsis}
+table.pgrid .s2{left:8.9rem;min-width:15rem;max-width:22rem;white-space:normal;box-shadow:inset -2px 0 0 var(--line)}
 table.pgrid .gstart{box-shadow:inset 3px 0 0 var(--brand)}
 table.pgrid th.ghead{text-align:left}
 table.pgrid .mini{display:none}
@@ -449,3 +449,25 @@ table.claimcalc th{text-align:left;padding-right:1rem}
 table.claimcalc tr.claimrow td,table.claimcalc tr.claimrow th{border-top:2px solid var(--line)}
 .warn-text{color:#8a6d00}
 [data-theme="dark"] .warn-text{color:#e8cf7a}
+/* promo grid: tick products to remove several at once */
+table.pgrid input.selrow,table.pgrid input.selall{margin:0 .35rem 0 0;vertical-align:-2px;cursor:pointer}
+table.pgrid tbody tr:has(input.selrow:checked) td{background:#fdecea}
+[data-theme="dark"] table.pgrid tbody tr:has(input.selrow:checked) td{background:#3a1d1d}
+.grid-tools form.bulkdel{display:inline;margin-right:.4rem}
+.grid-tools form.bulkdel .btn:disabled{opacity:.5}
+/* promo customer card: rebate edited in place */
+.retailer .rebate-edit{display:inline-flex;align-items:center;gap:.3rem;font-size:.85rem;color:var(--muted)}
+.retailer .rebate-edit input.rin{width:5.5em;text-align:right;padding:.15rem .3rem;font-size:.85rem}
+.retailer .rebate-edit input.rin.bad{border-color:var(--danger);outline:1px solid var(--danger)}
+table.pgrid th.ghead a.small{font-size:.78rem;text-decoration:none}
+table.pgrid th.ghead a.small:hover{text-decoration:underline}
+/* promo grid: separators between groups of products */
+table.pgrid tr.seprow td{background:#eef1f6;padding:.15rem .4rem;height:1.6rem;border-top:2px solid var(--line)}
+table.pgrid tr.seprow:hover td{background:#eef1f6}
+table.pgrid td.sepcell{left:0;z-index:1;font-weight:700;color:var(--brand)}
+table.pgrid input.sepin{width:100%;max-width:24rem;font-weight:700;color:var(--brand);background:transparent;border:1px dashed transparent;padding:.1rem .3rem;font-size:.8rem}
+table.pgrid input.sepin:hover,table.pgrid input.sepin:focus{border-color:var(--line);background:var(--card)}
+table.pgrid .sepadd{font-size:.72rem;margin-right:.25rem;opacity:.55}
+table.pgrid tr:hover .sepadd{opacity:1}
+[data-theme="dark"] table.pgrid tr.seprow td,[data-theme="dark"] table.pgrid tr.seprow:hover td{background:#222b37}
+table.pgrid input.sepin::placeholder{font-weight:400;font-style:italic;color:var(--muted);opacity:.8}

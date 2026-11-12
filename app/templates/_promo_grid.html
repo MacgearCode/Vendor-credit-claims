@@ -52,20 +52,26 @@
 <div class="grid-tools">
   <button type="button" class="link" data-expand="all">expand all</button> ·
   <button type="button" class="link" data-expand="none">collapse all</button>
+  {% if editable and pv.products %}
+  <form method="post" action="/promo/{{ promo.id }}/product_delete" id="bulkdel" class="bulkdel"
+        data-confirm="Take the selected products off the promotion for every retailer?" data-confirm-ok="Remove">
+    <button class="btn small danger-btn" disabled>Remove selected</button>
+  </form>
+  {% endif %}
   <span class="hint">Click a retailer's name to expand or collapse it.{% if editable %} Type in the boxes — each saves as you leave it; Enter moves down.{% endif %}</span>
 </div>
 <div class="pgrid-wrap">
 <table class="grid pgrid" data-promo="{{ promo.id }}">
   <thead>
     <tr class="grp">
-      <th class="stick s1" rowspan="2">Code</th>
+      <th class="stick s1" rowspan="2">{% if editable and pv.products %}<input type="checkbox" class="selall" title="Select every product">{% endif %}Code</th>
       <th class="stick s2" rowspan="2">Description</th>
       <th class="num" rowspan="2">RRP</th>
       <th rowspan="2">From</th><th rowspan="2">To</th>
       {% for rv in pv.retailers %}{% set pr = rv.pr %}
         <th class="ghead full g{{ pr.id }}" colspan="{{ cols|length }}" data-pr="{{ pr.id }}">
           <button type="button" class="gtoggle" data-pr="{{ pr.id }}" title="Collapse">▾ {{ pr.retailer_name }}</button>
-          <small class="muted">rebate {{ pr.rebate|pct }}</small>
+          <a class="muted small" href="#pr{{ pr.id }}" title="Go to {{ pr.retailer_name }}'s card{{ ' to change the rebate' if editable }}">rebate {{ pr.rebate|pct }}</a>
           {% if editable %}<button type="button" class="link gadd" data-pr="{{ pr.id }}" title="Paste products for {{ pr.retailer_name }} only">+ products</button>{% endif %}
         </th>
         <th class="ghead mini g{{ pr.id }}" colspan="{{ mini|length }}" data-pr="{{ pr.id }}">
@@ -82,9 +88,10 @@
     </tr>
   </thead>
   <tbody>
+  {% set seps = {} %}{% for s in promo.separators %}{% set _ = seps.update({s.after_key: s}) %}{% endfor %}
   {% for row in pv.products %}
     <tr>
-      <td class="stick s1 code">{{ row.code }}</td>
+      <td class="stick s1 code">{% if editable %}<input type="checkbox" class="selrow" name="key" value="{{ row.key }}" form="bulkdel" title="Select {{ row.code or 'this product' }}">{% endif %}{{ row.code }}</td>
       <td class="stick s2 desc">{{ row.description }}</td>
       <td class="num">{{ row.rrp_inc|money }}</td>
       {% if editable %}
@@ -104,9 +111,18 @@
         {% endif %}
       {% endfor %}
       {% if editable %}
-        <td class="rowactions"><form method="post" action="/promo/{{ promo.id }}/product_delete" data-confirm="Take {{ row.code or 'this product' }} off the promotion for every retailer?" data-confirm-ok="Remove"><input type="hidden" name="key" value="{{ row.key }}"><button class="link danger" title="Remove from every retailer">✕</button></form></td>
+        <td class="rowactions">{% if row.key not in seps and not loop.last %}<button type="button" class="link sepadd" data-sepadd="{{ row.key }}" title="Add a separator below this product">⎯ gap</button>{% endif %}<form method="post" action="/promo/{{ promo.id }}/product_delete" data-confirm="Take {{ row.code or 'this product' }} off the promotion for every retailer?" data-confirm-ok="Remove"><input type="hidden" name="key" value="{{ row.key }}"><button class="link danger" title="Remove from every retailer">✕</button></form></td>
       {% endif %}
     </tr>
+    {% set sep = seps.get(row.key) %}
+    {% if sep and not loop.last %}
+    <tr class="seprow">
+      <td class="stick sepcell" colspan="2">{% if editable %}<input class="sepin" data-sep="{{ sep.id }}" data-key="sep-{{ sep.id }}" data-which="l" value="{{ sep.label }}" placeholder="heading for the next group (optional)" maxlength="120">{% else %}{{ sep.label }}{% endif %}</td>
+      <td colspan="3"></td>
+      {% for rv in pv.retailers %}<td class="full g{{ rv.pr.id }} gstart" colspan="{{ cols|length }}"></td><td class="mini g{{ rv.pr.id }} gstart" colspan="{{ mini|length }}"></td>{% endfor %}
+      {% if editable %}<td class="rowactions"><button type="button" class="link danger" data-sepdel="{{ sep.id }}" title="Remove this separator">✕</button></td>{% endif %}
+    </tr>
+    {% endif %}
   {% else %}
     <tr><td colspan="5" class="muted">No products yet{% if editable %} — paste some codes above{% endif %}.</td>
       {% for rv in pv.retailers %}<td class="full g{{ rv.pr.id }}" colspan="{{ cols|length }}"></td><td class="mini g{{ rv.pr.id }}" colspan="{{ mini|length }}"></td>{% endfor %}

@@ -15,14 +15,23 @@ from app.service import build_promo_view
 
 
 def test_parse_paste_excel_columns():
-    rows, bad = parse_paste("ELK-80150-R\t20\nELK-80151-R\t20%\r\nELK-80152-R\t0.25\n\nELK-80194-R\n")
+    rows, bad, breaks = parse_paste("ELK-80150-R\t20\nELK-80151-R\t20%\r\nELK-80152-R\t0.25\n\nELK-80194-R\n")
     assert rows == [("ELK-80150-R", 20.0), ("ELK-80151-R", 20.0),
                     ("ELK-80152-R", 25.0), ("ELK-80194-R", None)]
     assert bad == []
+    assert breaks == {"ELK-80152-R"}                    # the blank row after it
+
+
+def test_parse_paste_blank_rows_from_excel():
+    # Excel copies an empty row as tabs; leading / trailing / repeated blanks don't count
+    text = "\t\t\nA1\t20\nB2\t20\n\t\t\n\t\t\nC3\t15\n\nD4\n\t\n"
+    rows, bad, breaks = parse_paste(text)
+    assert [c for c, _ in rows] == ["A1", "B2", "C3", "D4"]
+    assert breaks == {"B2", "C3"}
 
 
 def test_parse_paste_separators_dupes_and_bad_values():
-    rows, bad = parse_paste("A1, 15\nB2 30\nA1\t50\nC3\tlots\nD4\t140")
+    rows, bad, breaks = parse_paste("A1, 15\nB2 30\nA1\t50\nC3\tlots\nD4\t140")
     assert rows == [("A1", 15.0), ("B2", 30.0)]          # A1 again: first row wins
     assert bad == ["C3\tlots", "D4\t140"]
 

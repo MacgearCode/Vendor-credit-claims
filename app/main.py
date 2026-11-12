@@ -26,6 +26,7 @@ from .db import (Base, SessionLocal, UPLOAD_DIR, engine, ensure_schema, get_db,
                  migrate_statuses, rebuild_reference_tables)
 from .export import build_claim_workbook, build_workbook
 from .models import (Attachment, CustomerClaim, LineItem, ProcessedInvoice, PromoDocument,
+                     PromoSeparator,
                      PromoRetailer, Promotion, Retailer, User,
                      VendorRequest)
 from .service import build_promo_view, line_dates
@@ -1527,7 +1528,7 @@ async def add_products(promo_id: int, request: Request, db: Session = Depends(ge
     promo = db.get(Promotion, promo_id)
     if not promo:
         return RedirectResponse("/promos", status_code=303)
-    rows, bad = promo_data.parse_paste(form.get("codes", ""))
+    rows, bad, breaks = promo_data.parse_paste(form.get("codes", ""))
     ticked = set(form.getlist("pr"))
     blocks = [pr for pr in promo.retailers if str(pr.id) in ticked]
     start, end = _parse_date(form.get("start_date")), _parse_date(form.get("end_date"))
@@ -1573,6 +1574,16 @@ async def add_products(promo_id: int, request: Request, db: Session = Depends(ge
                 _fill_avg_6wk(pr, new)
             except warehouse.WarehouseUnavailable:
                 wh_err = True
+    # Blank rows in the paste -> separators, under the last product found before each
+    # (a gap after a code NetSuite doesn't know moves up to the product above it).
+    have_sep = {sep.after_key for sep in promo.separators}
+    last = None
+    for c, _ in rows:
+        if c.upper() in info:
+            last = info[c.upper()]["code"].upper()
+        if c.upper() in breaks and last and last not in have_sep:
+            db.add(PromoSeparator(promo_id=promo_id, after_key=last))
+            have_sep.add(last)
     db.flush()
     if (start or end) and found:
         wh_err = not _set_product_dates(promo, {it["code"].upper() for it, _ in found},
@@ -1640,18 +1651,90 @@ async def set_product_dates(promo_id: int, request: Request, db: Session = Depen
 
 @app.post("/promo/{promo_id}/product_delete")
 async def delete_product(promo_id: int, request: Request, db: Session = Depends(get_db)):
-    """Take a product off the promo — its line on every retailer."""
+    """Take products off the promo — their line on every retailer. One "key" per
+    product (the row ✕), or many (the grid's tick boxes + "Remove selected")."""
     form = await request.form()
     promo = db.get(Promotion, promo_id)
     if not promo:
         return RedirectResponse("/promos", status_code=303)
-    key = (form.get("key") or "").upper()
+    keys = {k.upper() for k in form.getlist("key") if k}
+    order = [row.key for row in build_promo_view(promo).products]
+    removed = set()
     for pr in promo.retailers:
         for l in list(pr.lines):
-            if _product_key(l) == key:
+            if _product_key(l) in keys:
+                removed.add(_product_key(l))
                 db.delete(l)
+    _repoint_separators(promo, order, removed, db)
     db.commit()
-    return RedirectResponse(f"/promo/{promo_id}", status_code=303)
+    return RedirectResponse(f"/promo/{promo_id}?removed={len(removed)}", status_code=303)
+
+
+def _repoint_separators(promo, order, removed, db):
+    """A separator under a product that's gone moves up to the nearest product above
+    that's still there (or goes, if none is)."""
+    for sep in list(promo.separators):
+        if sep.after_key not in removed:
+            continue
+        i = order.index(sep.after_key) if sep.after_key in order else 0
+        above = next((k for k in reversed(order[:i]) if k not in removed), None)
+        if above is None or any(s.after_key == above for s in promo.separators if s is not sep):
+            db.delete(sep)
+        else:
+            sep.after_key = above
+
+
+@app.post("/promo/{promo_id}/separator")
+async def add_separator(promo_id: int, request: Request, db: Session = Depends(get_db)):
+    """Put a separator under a product row: {"key": product key}."""
+    data = await request.json()
+    promo = db.get(Promotion, promo_id)
+    key = (data.get("key") or "").upper()
+    if not promo or not key:
+        return JSONResponse({"error": "no such product"}, status_code=400)
+    if not any(s.after_key == key for s in promo.separators):
+        db.add(PromoSeparator(promo_id=promo_id, after_key=key))
+        db.commit()
+    return JSONResponse({"ok": True})
+
+
+@app.post("/promo/separator/{sep_id}")
+async def set_separator(sep_id: int, request: Request, db: Session = Depends(get_db)):
+    """Change a separator's heading: {"label": ...} (blank = a plain gap)."""
+    data = await request.json()
+    sep = db.get(PromoSeparator, sep_id)
+    if not sep:
+        return JSONResponse({"error": "no such separator"}, status_code=404)
+    sep.label = (data.get("label") or "").strip()[:120]
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+@app.post("/promo/separator/{sep_id}/delete")
+def delete_separator(sep_id: int, db: Session = Depends(get_db)):
+    sep = db.get(PromoSeparator, sep_id)
+    if sep:
+        db.delete(sep)
+        db.commit()
+    return JSONResponse({"ok": True})
+
+
+@app.post("/retailer/{pr_id}/rebate")
+async def set_rebate(pr_id: int, request: Request, db: Session = Depends(get_db)):
+    """Change one customer's rebate on a promo: {"value": percent}. Net buy, support,
+    margins and claims for its lines are derived from it, so they follow."""
+    data = await request.json()
+    pr = db.get(PromoRetailer, pr_id)
+    if not pr:
+        return JSONResponse({"error": "no such retailer"}, status_code=404)
+    v = _parse_float(data.get("value"))
+    if v is None and data.get("value") not in (None, ""):
+        return JSONResponse({"error": "enter a number"}, status_code=400)
+    if v is not None and not 0 <= v <= 100:
+        return JSONResponse({"error": "the rebate must be 0–100%"}, status_code=400)
+    pr.rebate = (v or 0.0) / 100.0
+    db.commit()
+    return JSONResponse({"ok": True})
 
 
 @app.post("/retailer/{pr_id}/refresh_avg")

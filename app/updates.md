@@ -9,6 +9,11 @@ st_weekly, field, ageing, items, st_table, sell_through, promos, vendor_bills) o
 Add an entry with every commit people would notice. Everything above the first
 "##" is ignored.
 
+## 2026-11-12 | Vendor Promos: remove several products at once, edit rebates, separators | promos
+- Each product row on a promo now has a tick box. Tick the ones to drop (the box in the Code heading ticks them all) and press "Remove selected" to take them off every retailer in one go.
+- A customer's rebate can now be changed after the promo is set up: type it in the Rebate box on the customer's card. Support, margins and claims update straight away. "rebate x%" in the grid heading jumps to the card.
+- Separate groups of products in the grid, like the blank rows in the Excel form: blank rows in what you paste become separators, or click "⎯ gap" at the end of a product row. A separator can have a heading (e.g. "Laptop stands").
+
 ## 2026-11-12 | Vendor Promos: claims from actual sales | promos
 - Once you type actual sales, the vendor claim follows them: the vendor credit request and the totals now show the expected and the actual claim, and claim the actual. Lines without actual sales count as 0 and are flagged.
 - Leave the vendor amount blank to claim the calculated figure; a typed amount overrides it, and "Use the calculated amount" switches back.

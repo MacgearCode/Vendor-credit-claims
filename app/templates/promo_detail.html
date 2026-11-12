@@ -16,6 +16,9 @@
 <div class="banner error">That retailer doesn't send sell-through, so there's no 6wk avg to pull — enter it by hand.</div>
 {% endif %}
 {% set qp = request.query_params %}
+{% if qp.get('removed') %}
+<div class="banner ok">Removed {{ qp.get('removed') }} product{{ '' if qp.get('removed') == '1' else 's' }} from the promotion.</div>
+{% endif %}
 {% if qp.get('added') is not none %}
 <div class="banner ok">Added {{ qp.get('added') }} line{{ '' if qp.get('added') == '1' else 's' }}{% if qp.get('updated', '0') != '0' %}; updated % off on {{ qp.get('updated') }} already there{% endif %}.
   {% if qp.get('missing') %}<br>Not in NetSuite, skipped: <strong>{{ qp.get('missing') }}</strong>{% endif %}
@@ -170,7 +173,12 @@
 {% set pr = rv.pr %}
 <section class="card retailer" id="pr{{ pr.id }}">
   <div class="head-row">
-    <h2>{{ pr.retailer_name }} <small class="muted">rebate {{ pr.rebate|pct }} · {{ rv.lines|length }} product{{ 's' if rv.lines|length != 1 }}</small></h2>
+    <h2>{{ pr.retailer_name }} <small class="muted">{% if not editable %}rebate {{ pr.rebate|pct }} · {% endif %}{{ rv.lines|length }} product{{ 's' if rv.lines|length != 1 }}</small></h2>
+    {% if editable %}
+    <label class="rebate-edit" title="This customer's rebate on this promo. Changing it recalculates net buy, support, margins and claims for its lines.">Rebate
+      <input class="rin" type="number" step="any" min="0" max="100" data-pr="{{ pr.id }}" data-key="rebate-{{ pr.id }}" data-which="r"
+             value="{{ (pr.rebate * 100)|round(4) }}">%</label>
+    {% endif %}
     {% if editable %}
     {% if rv.lines %}
     <form method="post" action="/retailer/{{ pr.id }}/refresh_avg" data-confirm="Replace every line's 6wk avg for {{ pr.retailer_name }} with the latest sell-through (hand-entered figures included)?" data-confirm-ok="Refresh">
@@ -380,6 +388,11 @@ document.addEventListener('click', function (e) {
     box.querySelector('textarea').focus();
     return;
   }
+  // separators between groups of products
+  const sadd = e.target.closest('[data-sepadd]');
+  if (sadd) { post('/promo/' + PROMO_ID + '/separator', {key: sadd.dataset.sepadd}).then(refreshLive); return; }
+  const sdel = e.target.closest('[data-sepdel]');
+  if (sdel) { post('/promo/separator/' + sdel.dataset.sepdel + '/delete', {}).then(refreshLive); return; }
   const tick = e.target.closest('[data-tick]');
   if (tick) {
     tick.closest('fieldset').querySelectorAll('input[name="pr"]')
@@ -387,6 +400,30 @@ document.addEventListener('click', function (e) {
   }
 });
 applyOpen(openSet());
+syncSelected();  // ticks a browser restored on Back
+
+// tick boxes on product rows -> "Remove selected"
+function syncSelected() {
+  const rows = [...document.querySelectorAll('input.selrow')];
+  const n = rows.filter(c => c.checked).length;
+  const all = document.querySelector('input.selall');
+  if (all) { all.checked = n > 0 && n === rows.length; all.indeterminate = n > 0 && n < rows.length; }
+  const form = document.getElementById('bulkdel');
+  if (!form) return;
+  const btn = form.querySelector('button');
+  btn.disabled = n === 0;
+  btn.textContent = n ? 'Remove ' + n + ' selected' : 'Remove selected';
+  form.setAttribute('data-confirm', 'Take ' + n + ' product' + (n === 1 ? '' : 's') +
+                    ' off the promotion for every retailer?');
+}
+document.addEventListener('change', function (e) {
+  if (e.target.matches('input.selall')) {
+    document.querySelectorAll('input.selrow').forEach(c => { c.checked = e.target.checked; });
+    syncSelected();
+  } else if (e.target.matches('input.selrow')) {
+    syncSelected();
+  }
+});
 
 // ✎ on a cell: the line's rarer settings in a dialog
 function openLine(id) { const d = document.getElementById('line-' + id); if (d) d.showModal(); }
@@ -406,7 +443,10 @@ async function refreshLive() {
   const act = document.activeElement, key = focusKey(act);
   const typed = act && act.matches && act.matches('input') && act.value !== act.defaultValue ? act.value : null;
   const scroller = document.querySelector('.pgrid-wrap'), sx = scroller ? scroller.scrollLeft : 0;
+  const ticked = new Set([...document.querySelectorAll('input.selrow:checked')].map(c => c.value));
   document.getElementById('promo-live').replaceWith(fresh);
+  document.querySelectorAll('input.selrow').forEach(c => { c.checked = ticked.has(c.value); });
+  syncSelected();
   applyOpen(openSet());
   wireDialogs();
   const sc = document.querySelector('.pgrid-wrap'); if (sc) sc.scrollLeft = sx;
@@ -435,6 +475,14 @@ document.addEventListener('change', async function (e) {
     inp.classList.add('saving');
     const r = await post('/line/' + inp.dataset.line + '/set', {field: inp.dataset.field, value: inp.value});
     inp.classList.remove('saving');
+    if (r.error) { flag(inp, r.error); return; }
+    await refreshLive();
+  } else if (inp.matches('input.sepin')) {
+    const r = await post('/promo/separator/' + inp.dataset.sep, {label: inp.value});
+    if (r.error) { flag(inp, r.error); return; }
+    await refreshLive();
+  } else if (inp.matches('input.rin')) {
+    const r = await post('/retailer/' + inp.dataset.pr + '/rebate', {value: inp.value});
     if (r.error) { flag(inp, r.error); return; }
     await refreshLive();
   } else if (inp.matches('input.pd')) {

@@ -179,14 +179,17 @@ def items(codes, country: str, level_ids) -> dict:
 def parse_paste(text: str):
     """Rows pasted from Excel (or typed): one product per line, code first, an
     optional second column = % off ("20", "20%", or 0.2 as Excel copies a
-    percent-formatted cell's raw value). Returns ([(code, pct_or_None)], [bad lines]);
-    a code pasted twice keeps its first row."""
-    rows, bad, seen = [], [], set()
+    percent-formatted cell's raw value). Returns ([(code, pct_or_None)], [bad lines],
+    {upper(code) followed by a blank row}) — the blank rows people leave between
+    blocks of products become separators. A code pasted twice keeps its first row."""
+    rows, bad, seen, breaks = [], [], set(), set()
+    gap = False
     for raw in (text or "").splitlines():
         parts = [p.strip() for p in re.split(r"[\t,;]", raw) if p.strip()]
         if len(parts) == 1 and " " in parts[0]:
             parts = parts[0].split()          # "CODE 20" typed with a space
         if not parts:
+            gap = bool(rows)                  # a blank row after at least one product
             continue
         code, pct = parts[0], None
         if len(parts) > 1:
@@ -201,10 +204,13 @@ def parse_paste(text: str):
             if not 0 <= pct <= 100:
                 bad.append(raw.strip())
                 continue
+        if gap:
+            breaks.add(rows[-1][0].upper())
+            gap = False
         if code.upper() not in seen:
             seen.add(code.upper())
             rows.append((code, pct))
-    return rows, bad
+    return rows, bad, breaks
 
 
 # ---- 6-week average ------------------------------------------------------------
