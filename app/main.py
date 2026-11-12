@@ -24,8 +24,8 @@ from sqlalchemy.orm import Session
 
 from .db import (Base, SessionLocal, UPLOAD_DIR, engine, ensure_schema, get_db,
                  migrate_statuses, rebuild_reference_tables)
-from .export import build_workbook
-from .models import (Attachment, CustomerClaim, LineItem, ProcessedInvoice,
+from .export import build_claim_workbook, build_workbook
+from .models import (Attachment, CustomerClaim, LineItem, ProcessedInvoice, PromoDocument,
                      PromoRetailer, Promotion, Retailer, User,
                      VendorRequest)
 from .service import build_promo_view, line_dates
@@ -1273,10 +1273,10 @@ def dashboard(request: Request, brand: str = "", status: str = "", country: str 
         "active": sum(1 for r in rows if r.promo.status not in ("Draft", "Closed")),
         "customer_claimed": customer_claimed,
         "vendor_outstanding": sum(
-            r.supplier_total_aud for r in rows
+            r.claim_aud for r in rows
             if not (r.promo.vendor_request and r.promo.vendor_request.status == vr_done)),
         "vendor_recovered": sum(
-            r.supplier_total_aud for r in rows
+            r.claim_aud for r in rows
             if r.promo.vendor_request and r.promo.vendor_request.status == vr_done),
         "mg_absorbed": sum(r.mg_total_aud for r in rows),
     }
@@ -1465,6 +1465,7 @@ async def create_promo(request: Request, db: Session = Depends(get_db)):
     country = (form.get("country") or "AU").upper()
     promo = Promotion(
         claim_number=form.get("claim_number", "").strip(),
+        vendor_reference=form.get("vendor_reference", "").strip(),
         name=form.get("name", "").strip(),
         brand=form.get("brand", "").strip(),
         country=country,
@@ -1509,7 +1510,7 @@ def promo_detail(promo_id: int, request: Request, view: str = "internal",
         return RedirectResponse("/promos", status_code=303)
     pv = build_promo_view(promo)
     retailers = _retailer_picker(db, (promo.country,))
-    if view not in ("internal", "sales", "vendor"):
+    if view not in ("internal", "sales", "vendor", "claim"):
         view = "internal"
     return templates.TemplateResponse(request, "promo_detail.html", {
         "pv": pv, "promo": promo, "view": view,
@@ -1779,17 +1780,13 @@ async def upload_attachment(pr_id: int, file: UploadFile = File(...),
                             db: Session = Depends(get_db)):
     pr = db.get(PromoRetailer, pr_id)
     if pr and file and file.filename:
-        ext = os.path.splitext(file.filename)[1]
-        stored = f"{uuid.uuid4().hex}{ext}"
-        dest = os.path.join(UPLOAD_DIR, stored)
-        with open(dest, "wb") as out:
-            shutil.copyfileobj(file.file, out)
+        stored, size = _save_upload(file)
         db.add(Attachment(
             promo_retailer_id=pr_id,
             filename=os.path.basename(file.filename),
             stored_name=stored,
             content_type=file.content_type or "",
-            size=os.path.getsize(dest),
+            size=size,
         ))
         db.commit()
     return RedirectResponse(f"/promo/{pr.promo_id}", status_code=303)
@@ -1805,6 +1802,59 @@ def download_attachment(att_id: int, db: Session = Depends(get_db)):
         return RedirectResponse(f"/promo/{att.promo_retailer.promo_id}", status_code=303)
     return FileResponse(path, filename=att.filename,
                         media_type=att.content_type or "application/octet-stream")
+
+
+# ---- promotion documents (vendor promo sheets, approvals, the claim as sent) ---
+def _save_upload(file) -> tuple[str, int]:
+    """Copy an uploaded file into UPLOAD_DIR under a fresh name; (stored name, size)."""
+    stored = f"{uuid.uuid4().hex}{os.path.splitext(file.filename)[1]}"
+    dest = os.path.join(UPLOAD_DIR, stored)
+    with open(dest, "wb") as out:
+        shutil.copyfileobj(file.file, out)
+    return stored, os.path.getsize(dest)
+
+
+@app.post("/promo/{promo_id}/documents")
+async def upload_documents(promo_id: int, request: Request, db: Session = Depends(get_db)):
+    form = await request.form()
+    promo = db.get(Promotion, promo_id)
+    if not promo:
+        return RedirectResponse("/promos", status_code=303)
+    label = (form.get("label") or "").strip()
+    for f in form.getlist("files"):
+        if getattr(f, "filename", ""):
+            stored, size = _save_upload(f)
+            db.add(PromoDocument(promo_id=promo_id, label=label,
+                                 filename=os.path.basename(f.filename), stored_name=stored,
+                                 content_type=f.content_type or "", size=size))
+    db.commit()
+    return RedirectResponse(f"/promo/{promo_id}#documents", status_code=303)
+
+
+@app.get("/promo/document/{doc_id}")
+def download_document(doc_id: int, db: Session = Depends(get_db)):
+    doc = db.get(PromoDocument, doc_id)
+    if not doc:
+        return RedirectResponse("/promos", status_code=303)
+    path = os.path.join(UPLOAD_DIR, doc.stored_name)
+    if not os.path.exists(path):
+        return RedirectResponse(f"/promo/{doc.promo_id}", status_code=303)
+    return FileResponse(path, filename=doc.filename,
+                        media_type=doc.content_type or "application/octet-stream")
+
+
+@app.post("/promo/document/{doc_id}/delete")
+def delete_document(doc_id: int, db: Session = Depends(get_db)):
+    doc = db.get(PromoDocument, doc_id)
+    if not doc:
+        return RedirectResponse("/promos", status_code=303)
+    promo_id = doc.promo_id
+    path = os.path.join(UPLOAD_DIR, doc.stored_name)
+    if os.path.exists(path):
+        os.remove(path)
+    db.delete(doc)
+    db.commit()
+    return RedirectResponse(f"/promo/{promo_id}#documents", status_code=303)
 
 
 @app.post("/attachment/{att_id}/delete")
@@ -1827,11 +1877,13 @@ async def update_vendor(promo_id: int, request: Request, db: Session = Depends(g
     form = await request.form()
     promo = db.get(Promotion, promo_id)
     vr = promo.vendor_request or VendorRequest(promo_id=promo_id)
-    pv = build_promo_view(promo)
-    vr.amount_aud = _parse_float(form.get("amount_aud"))
-    if vr.amount_aud is None:
-        vr.amount_aud = pv.supplier_total_aud
-    vr.amount_usd = _parse_float(form.get("amount_usd")) or (vr.amount_aud * promo.aud_usd_rate)
+    # Blank amounts are stored blank, so the claim keeps following the calculation
+    # (actual sales once entered) — service.build_promo_view. "Use calculated" clears.
+    if form.get("use_calc"):
+        vr.amount_aud = vr.amount_usd = None
+    else:
+        vr.amount_aud = _parse_float(form.get("amount_aud"))
+        vr.amount_usd = _parse_float(form.get("amount_usd")) if vr.amount_aud is not None else None
     vr.status = form.get("status", "Not Sent")
     vr.claim_date = _parse_date(form.get("claim_date"))
     vr.notes = form.get("notes", "").strip()
@@ -1861,6 +1913,7 @@ async def update_details(promo_id: int, request: Request, db: Session = Depends(
         return RedirectResponse("/promos", status_code=303)
     promo.name = form.get("name", "").strip()
     promo.claim_number = form.get("claim_number", "").strip()
+    promo.vendor_reference = form.get("vendor_reference", "").strip()
     promo.brand = form.get("brand", "").strip()
     sd = _parse_date(form.get("start_date")) or promo.start_date
     ed = _parse_date(form.get("end_date")) or promo.end_date
@@ -1895,6 +1948,10 @@ def delete_promo(promo_id: int, db: Session = Depends(get_db)):
     promo = db.get(Promotion, promo_id)
     if promo:
         _remove_attachment_files(promo.retailers)
+        for doc in promo.documents:
+            path = os.path.join(UPLOAD_DIR, doc.stored_name)
+            if os.path.exists(path):
+                os.remove(path)
         db.delete(promo)
         db.commit()
     return RedirectResponse("/promos", status_code=303)
@@ -1907,9 +1964,9 @@ def export_promo(promo_id: int, view: str, db: Session = Depends(get_db)):
     if not promo:
         return RedirectResponse("/promos", status_code=303)
     pv = build_promo_view(promo)
-    if view not in ("internal", "sales", "vendor"):
+    if view not in ("internal", "sales", "vendor", "claim"):
         view = "internal"
-    buf = build_workbook(pv, view)
+    buf = build_claim_workbook(pv) if view == "claim" else build_workbook(pv, view)
     fname = f"{(promo.name or 'promo').replace(' ', '_')}_{view}.xlsx"
     return StreamingResponse(
         buf,

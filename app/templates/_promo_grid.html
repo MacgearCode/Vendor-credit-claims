@@ -8,10 +8,12 @@
   'sales':    [('buy','Buy ex'),('tsup','Tot Sup'),('std','Std Mgn'),('pmg','Promo Mgn'),('exp','Exp Sales'),
                ('pct','% Off'),('price','Promo Price')],
   'vendor':   [('ssup','Supp Sup'),('exp','Exp Sales'),('sclaim','Supp Claim'),('pct','% Off'),('price','Promo Price')],
+  'claim':    [('ssup','Support / unit'),('actq','Qty Sold'),('aclaim','Claim')],
 } %}
 {% set MINI = {'internal': [('pct','% Off'),('sclaim','Supp Claim')],
                'sales': [('pct','% Off'),('price','Promo Price')],
-               'vendor': [('pct','% Off'),('sclaim','Supp Claim')]} %}
+               'vendor': [('pct','% Off'),('sclaim','Supp Claim')],
+               'claim': [('actq','Qty Sold'),('aclaim','Claim')]} %}
 {% set cols = COLS[view] %}
 {% set mini = MINI[view] %}
 
@@ -33,6 +35,9 @@
   {%- elif key == 'exp' -%}<td class="num {{ cls }}" title="{{ lv.weeks|round(1) }} wks">{{ c.expected_sales|money }}</td>
   {%- elif key == 'act' -%}
     <td class="num {{ cls }}{% if l.actual_sales is not none and c.expected_sales is not none %}{{ ' cell-up' if l.actual_sales > c.expected_sales else (' cell-down' if l.actual_sales < c.expected_sales) }}{% endif %}"><input class="gin" type="number" step="any" min="0" data-line="{{ l.id }}" data-field="actual_sales" value="{{ l.actual_sales if l.actual_sales is not none else '' }}"></td>
+  {%- elif key == 'actq' -%}
+    <td class="num {{ cls }}">{% if l.actual_sales is not none %}{{ '%g'|format(l.actual_sales) }}{% else %}<span class="danger" title="No actual sales entered — counts as 0 on the claim">—</span>{% endif %}</td>
+  {%- elif key == 'aclaim' -%}<td class="num {{ cls }}">{{ (c.actual_supplier_claim or 0)|money if l.actual_sales is not none else '' }}</td>
   {%- elif key == 'sclaim' -%}<td class="num {{ cls }}">{{ c.supplier_claim|money }}</td>
   {%- elif key == 'mclaim' -%}<td class="num {{ cls }}">{{ c.mg_claim|money }}</td>
   {%- elif key == 'tools' -%}
@@ -113,10 +118,10 @@
       <td class="stick s1">Totals</td><td class="stick s2"></td><td colspan="3"></td>
       {% for rv in pv.retailers %}{% set pr = rv.pr %}
         {% for k, label in cols %}<td class="num full g{{ pr.id }}{{ ' gstart' if loop.first }}">
-          {%- if k == 'sclaim' %}{{ rv.supplier_total|money }}{% elif k == 'mclaim' %}{{ rv.mg_total|money }}{% elif k == 'tsup' and view == 'sales' %}{{ rv.total_support_total|money }}{% endif -%}
+          {%- if k == 'sclaim' %}{{ rv.supplier_total|money }}{% elif k == 'mclaim' %}{{ rv.mg_total|money }}{% elif k == 'tsup' and view == 'sales' %}{{ rv.total_support_total|money }}{% elif k == 'aclaim' %}{{ rv.actual_supplier_total|money }}{% endif -%}
         </td>{% endfor %}
         {% for k, label in mini %}<td class="num mini g{{ pr.id }}{{ ' gstart' if loop.first }}">
-          {%- if k == 'sclaim' %}{{ rv.supplier_total|money }}{% endif -%}
+          {%- if k == 'sclaim' %}{{ rv.supplier_total|money }}{% elif k == 'aclaim' %}{{ rv.actual_supplier_total|money }}{% endif -%}
         </td>{% endfor %}
       {% endfor %}
       {% if editable %}<td></td>{% endif %}

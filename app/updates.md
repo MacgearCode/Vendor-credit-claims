@@ -9,6 +9,13 @@ st_weekly, field, ageing, items, st_table, sell_through, promos, vendor_bills) o
 Add an entry with every commit people would notice. Everything above the first
 "##" is ignored.
 
+## 2026-11-12 | Vendor Promos: claims from actual sales | promos
+- Once you type actual sales, the vendor claim follows them: the vendor credit request and the totals now show the expected and the actual claim, and claim the actual. Lines without actual sales count as 0 and are flagged.
+- Leave the vendor amount blank to claim the calculated figure; a typed amount overrides it, and "Use the calculated amount" switches back.
+- New Claim view and Excel export — the claim to send the vendor: support per unit × units sold, per customer, with the claim total.
+- New Vendor reference field on a promo (the vendor's own promo id), printed on the claim.
+- New Promotion documents section: keep the vendor's promo sheet, approvals and the claim as sent with the promo.
+
 ## 2026-11-10 | Try the glass look
 - A new button in the top bar, beside the colour and light / dark buttons, switches the site to a frosted "glass" look. It's off unless you turn it on.
 - Its menu has sliders for panel opacity, blur, glow and shine, and five backgrounds. Your choice is remembered in this browser only.

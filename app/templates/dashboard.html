@@ -91,7 +91,7 @@
       <td>{{ p.start_date }} → {{ p.end_date }}</td>
       <td>{{ r.retailers|length }}</td>
       <td class="num">{{ r.customer_expected_aud|money }}</td>
-      <td class="num">{{ r.supplier_total_aud|money }}</td>
+      <td class="num" title="{{ {'override': 'Amount typed on the vendor request', 'actual': 'From actual sales', 'expected': 'Expected — no actual sales yet'}[r.claim_basis] }}">{{ r.claim_aud|money }}</td>
       <td>
         {% set claimed = r.retailers|selectattr('pr.customer_claim')|list %}
         {% set credited = [] %}

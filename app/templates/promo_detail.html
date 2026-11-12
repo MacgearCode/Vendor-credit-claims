@@ -28,11 +28,11 @@
       <span class="pill pg-{{ PILL_GROUP.get(promo.status,'grey') }}">{{ promo.status }}</span></h1>
     <p class="sub"><span class="pill pg-blue">{{ promo.country or 'AU' }}</span>
        {{ promo.brand }} · {{ promo.start_date }} → {{ promo.end_date }}
-       ({{ pv.weeks|round(1) }} wks){% if promo.claim_number %} · Claim #{{ promo.claim_number }}{% endif %}
+       ({{ pv.weeks|round(1) }} wks){% if promo.claim_number %} · Claim #{{ promo.claim_number }}{% endif %}{% if promo.vendor_reference %} · Vendor ref {{ promo.vendor_reference }}{% endif %}
        {% if editable %}<button type="button" class="link" onclick="toggleEdit('details')">✎ edit details</button>{% endif %}</p>
   </div>
   <div class="views">
-    {% for v in ['internal','sales','vendor'] %}
+    {% for v in ['internal','sales','vendor','claim'] %}
       <a class="tab {{ 'active' if view==v }}" href="/promo/{{ promo.id }}?view={{ v }}">{{ v|capitalize }}</a>
     {% endfor %}
     <a class="btn ghost" href="/promo/{{ promo.id }}/export/{{ view }}">⬇ Export {{ view }}</a>
@@ -45,6 +45,7 @@
     <label>Promotion name <input name="name" value="{{ promo.name }}" style="min-width:18em"></label>
     <label>Brand <input name="brand" value="{{ promo.brand }}"></label>
     <label>Claim # <input name="claim_number" value="{{ promo.claim_number }}"></label>
+    <label>Vendor reference <input name="vendor_reference" value="{{ promo.vendor_reference or '' }}" title="The vendor's own id for this promo — printed on the claim"></label>
     <label>Start date <input type="date" name="start_date" id="d_start" value="{{ promo.start_date }}"></label>
     <label>End date <input type="date" name="end_date" id="d_end" value="{{ promo.end_date }}"></label>
     <label>Exchange rate ({{ cur }} → USD) <input type="number" step="0.0001" min="0.0001" name="aud_usd_rate" value="{{ promo.aud_usd_rate }}" style="width:7em"></label>
@@ -110,14 +111,52 @@
 </details>
 {% endif %}
 
+<section class="card promodocs" id="documents">
+  <h3>Promotion documents <small class="muted">— the vendor's promo sheet, approvals, the claim as sent</small></h3>
+  {% if promo.documents %}
+  <ul class="files">
+    {% for d in promo.documents %}
+    <li>
+      <a href="/promo/document/{{ d.id }}">📎 {{ d.filename }}</a>
+      {% if d.label %}<span class="pill pg-blue">{{ d.label }}</span>{% endif %}
+      <span class="muted">{{ (d.size / 1024)|round(1) }} KB · {{ d.uploaded_at|sydney if d.uploaded_at else '' }}</span>
+      {% if editable %}
+      <form method="post" action="/promo/document/{{ d.id }}/delete" data-confirm="Delete {{ d.filename }}?">
+        <button class="link danger" title="delete">✕</button>
+      </form>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="hint">No documents yet.</p>
+  {% endif %}
+  {% if editable %}
+  <form method="post" action="/promo/{{ promo.id }}/documents" enctype="multipart/form-data" class="inline-form">
+    <input type="file" name="files" multiple required>
+    <input name="label" list="doclabels" placeholder="label (optional)" style="width:14em">
+    <datalist id="doclabels">
+      <option value="Vendor promo sheet"><option value="Vendor approval"><option value="Claim sent to vendor"><option value="Vendor credit note">
+    </datalist>
+    <button class="btn small">Upload</button>
+  </form>
+  {% endif %}
+</section>
+
 <div id="promo-live">
 <section class="totals">
-  <div class="kpi"><span>Customer expected claim</span><strong>${{ pv.customer_expected_aud|money }}</strong></div>
-  {% if view != 'vendor' %}
-  <div class="kpi"><span>MacGear absorbs</span><strong>${{ pv.mg_total_aud|money }}</strong></div>
+  {% set BASIS = {'override': 'amount entered on the vendor request', 'actual': 'from actual sales', 'expected': 'expected — no actual sales yet'} %}
+  {% if view != 'claim' %}
+  <div class="kpi"><span>Customer expected claim</span><strong>${{ pv.customer_expected_aud|money }}</strong>
+    {% if pv.has_actuals %}<small>actual ${{ pv.actual_customer_aud|money }}</small>{% endif %}</div>
   {% endif %}
-  <div class="kpi accent"><span>Vendor claim ({{ cur }})</span><strong>${{ pv.supplier_total_aud|money }}</strong></div>
-  <div class="kpi"><span>Vendor claim (USD @ {{ promo.aud_usd_rate }})</span><strong>${{ pv.supplier_total_usd|money }}</strong></div>
+  {% if view not in ('vendor', 'claim') %}
+  <div class="kpi"><span>MacGear absorbs</span><strong>${{ pv.mg_total_aud|money }}</strong>
+    {% if pv.has_actuals %}<small>actual ${{ pv.actual_mg_aud|money }}</small>{% endif %}</div>
+  {% endif %}
+  <div class="kpi accent"><span>Vendor claim ({{ cur }})</span><strong>${{ pv.claim_aud|money }}</strong>
+    <small>{{ BASIS[pv.claim_basis] }}{% if pv.claim_basis != 'expected' and view != 'claim' %} · expected ${{ pv.supplier_total_aud|money }}{% endif %}</small></div>
+  <div class="kpi"><span>Vendor claim (USD @ {{ promo.aud_usd_rate }})</span><strong>${{ pv.claim_usd|money }}</strong></div>
 </section>
 
 <section class="card promogrid">
@@ -227,13 +266,29 @@
     <span class="pill pg-{{ PILL_GROUP.get(vstatus,'grey') }}">{{ vstatus }}</span>
     <span class="nexthint">→ {{ VENDOR_NEXT.get(vstatus, '') }}</span>
   </h3>
-  <p class="hint">Calculated supplier claim: <strong>${{ pv.supplier_total_aud|money }}</strong> {{ cur }}
-    / <strong>${{ pv.supplier_total_usd|money }}</strong> USD. Leave amount blank to use the calculated value.</p>
-  <form method="post" action="/promo/{{ promo.id }}/vendor" class="inline-form">
-    <label>Amount {{ cur }} <input name="amount_aud" type="number" step="any"
-      value="{{ vr.amount_aud if vr and vr.amount_aud is not none else '' }}" style="width:9em"></label>
-    <label>Amount USD <input name="amount_usd" type="number" step="any"
-      value="{{ vr.amount_usd if vr and vr.amount_usd is not none else '' }}" style="width:9em"></label>
+  <table class="grid compact claimcalc">
+    <tr><th>Expected claim</th><td class="num">${{ pv.supplier_total_aud|money }} {{ cur }}</td>
+        <td class="num">${{ pv.supplier_total_usd|money }} USD</td><td class="muted">6wk avg × growth × weeks — for approval</td></tr>
+    <tr><th>Actual claim</th>
+      {% if pv.has_actuals %}
+        <td class="num">${{ pv.actual_supplier_aud|money }} {{ cur }}</td><td class="num">${{ pv.actual_supplier_usd|money }} USD</td>
+        <td class="muted">actual sales × supplier support{% if pv.lines_without_actuals %} · <span class="danger">{{ pv.lines_without_actuals }} line{{ 's' if pv.lines_without_actuals != 1 }} with no actual sales entered, counted as 0</span>{% endif %}</td>
+      {% else %}
+        <td colspan="3" class="muted">enter actual sales in the grid to calculate it</td>
+      {% endif %}</tr>
+    <tr class="claimrow"><th>Claiming</th><td class="num"><strong>${{ pv.claim_aud|money }} {{ cur }}</strong></td>
+      <td class="num"><strong>${{ pv.claim_usd|money }} USD</strong></td><td>{{ BASIS[pv.claim_basis] }}</td></tr>
+  </table>
+  {% if pv.claim_basis == 'override' %}
+  <p class="hint warn-text">An amount has been entered, so the claim no longer follows the calculation.
+    {% if editable %}<button class="link" form="vendorform" name="use_calc" value="1">Use the calculated amount</button>{% endif %}</p>
+  {% endif %}
+  {% if editable %}
+  <form method="post" action="/promo/{{ promo.id }}/vendor" class="inline-form" id="vendorform">
+    <label>Amount {{ cur }} <input name="amount_aud" type="number" step="any" placeholder="{{ '%.2f'|format(pv.claim_aud) if pv.claim_basis != 'override' }}"
+      value="{{ vr.amount_aud if vr and vr.amount_aud is not none else '' }}" style="width:9em" title="Leave blank to claim the calculated amount"></label>
+    <label>Amount USD <input name="amount_usd" type="number" step="any" placeholder="{{ '%.2f'|format(pv.claim_usd) if pv.claim_basis != 'override' }}"
+      value="{{ vr.amount_usd if vr and vr.amount_usd is not none else '' }}" style="width:9em" title="Leave blank to convert at the promo's rate"></label>
     <label>Status
       <select name="status">
         {% for s in VENDOR_STATUSES %}
@@ -245,6 +300,8 @@
     <input name="notes" placeholder="notes" value="{{ vr.notes if vr else '' }}" style="flex:1">
     <button class="btn small">Save</button>
   </form>
+  <p class="hint">Leave the amounts blank to claim the calculated figure — it updates as actual sales are entered.</p>
+  {% endif %}
 </section>
 </div>
 

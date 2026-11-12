@@ -244,9 +244,11 @@ td.cell-down{background:#f8d7da;color:#842029;font-weight:600}
 
 .attachments{margin-top:.9rem;padding-top:.7rem;border-top:1px dashed var(--line)}
 .attachments h4{margin:.2rem 0 .4rem;font-size:.9rem}
-.attachments ul.files{list-style:none;padding:0;margin:.2rem 0 .6rem}
-.attachments ul.files li{display:flex;align-items:center;gap:.5rem;padding:.15rem 0}
-.attachments ul.files form{display:inline}
+.attachments ul.files,.promodocs ul.files{list-style:none;padding:0;margin:.2rem 0 .6rem}
+.attachments ul.files li,.promodocs ul.files li{display:flex;align-items:center;gap:.5rem;padding:.15rem 0;flex-wrap:wrap}
+.attachments ul.files form,.promodocs ul.files form{display:inline}
+.promodocs h3{margin:.1rem 0 .5rem}
+.promodocs h3 small{font-weight:400;font-size:.8rem}
 
 .split-group{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;border:1px solid var(--line);border-radius:8px;padding:.3rem .6rem;margin:0}
 .split-group.wide{margin:1rem 0;padding:.6rem .9rem}
@@ -440,3 +442,10 @@ dialog.linedlg h3{margin:0 0 .6rem}
 .custhead{margin:1.2rem 0 .5rem;font-size:1.05rem}
 .custcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(440px,100%),1fr));gap:1rem;align-items:start;margin-bottom:1rem}
 .custcards .card{margin:0}
+/* vendor claim: expected vs actual (promo_detail.html) */
+.kpi small{display:block;color:var(--muted);font-size:.75rem;margin-top:.15rem}
+table.claimcalc{width:auto;margin:.3rem 0 .6rem}
+table.claimcalc th{text-align:left;padding-right:1rem}
+table.claimcalc tr.claimrow td,table.claimcalc tr.claimrow th{border-top:2px solid var(--line)}
+.warn-text{color:#8a6d00}
+[data-theme="dark"] .warn-text{color:#e8cf7a}

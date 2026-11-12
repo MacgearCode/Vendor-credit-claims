@@ -579,6 +579,19 @@ code), buy price = `dim_item_price` for the block's price level, RRP = level 1.
   (`service.line_dates`) and its 6wk-avg window ends before its own start. Moving a
   product's or the promo's start re-pulls sell-through avgs, never hand-typed ones.
   The export has From / To columns.
+- **Vendor claim (user, 2026-11-12):** `PromoView.claim_aud/claim_usd/claim_basis` is the
+  one figure for the vendor — a typed `vendor_requests.amount_aud` (override) wins, else
+  the actual-sales claim once ANY line has actual sales (lines without count 0 and are
+  flagged, `lines_without_actuals`), else the expected claim. The vendor request stores
+  blank amounts as NULL so the claim keeps following the calculation (it used to save
+  the expected figure, so actual sales never reached it); "Use the calculated amount"
+  clears. Tiles, the dashboard and the Claim export all use it.
+- **Claim view** (`?view=claim`, `export.build_claim_workbook`): support / unit × actual
+  qty per line, subtotal per customer, vendor reference, nothing internal; lines with no
+  actual sales left off. `promotions.vendor_reference` = the vendor's own promo id.
+- **Promotion documents** (`promo_documents`, `/promo/{id}/documents`,
+  `/promo/document/{id}`): files for the whole promo (vendor promo sheet, approvals, claim
+  sent), stored in `data/uploads` like the per-retailer `attachments`; deleted with the promo.
 - **Not yet removed:** the n8n nightly pricing push → `/admin/sync-pricing` →
   `products` still runs but nothing reads `products` any more. Retire the n8n
   workflow, then the endpoint, `pricing_sync.py`, the product seed and the

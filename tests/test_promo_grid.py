@@ -40,7 +40,7 @@ def _promo(retailers):
     return SimpleNamespace(
         start_date=date(2026, 11, 12), end_date=date(2026, 12, 2), country="AU",
         aud_usd_rate=0.65, ratio_supplier=0.5, ratio_mg=0.5, ratio_retailer=0.0,
-        growth_default=0.0, retailers=retailers)
+        growth_default=0.0, retailers=retailers, vendor_request=None)
 
 
 def _block(id, name, lines):
@@ -66,3 +66,32 @@ def test_product_rows_and_own_weeks():
     # expected sales = ceil(avg x (1+growth)) x the product's own weeks
     assert a1.cells[1].result.expected_sales == 10 * 3.0
     assert b2.cells[2].result.expected_sales == 10 * 12 / 7
+
+
+def _claim_promo(actuals, vendor_amount=None):
+    lines = [_line(i + 1, f"C{i}", avg=10.0) for i in range(len(actuals))]
+    for l, a in zip(lines, actuals):
+        l.actual_sales = a
+    promo = _promo([_block(1, "Officeworks", lines)])
+    if vendor_amount is not None:
+        promo.vendor_request = SimpleNamespace(amount_aud=vendor_amount, amount_usd=None)
+    return build_promo_view(promo)
+
+
+def test_claim_follows_actual_sales():
+    # no actuals yet: the vendor claim is the expected one
+    pv = _claim_promo([None, None])
+    assert pv.claim_basis == "expected" and pv.claim_aud == pv.supplier_total_aud
+    # actuals on one line: the claim is actual sales only; the other line counts 0
+    pv = _claim_promo([7, None])
+    support = pv.retailers[0].lines[0].result.supplier_support
+    assert pv.claim_basis == "actual"
+    assert pv.claim_aud == 7 * support == pv.actual_supplier_aud
+    assert pv.lines_without_actuals == 1
+    assert pv.claim_usd == pv.claim_aud * 0.65
+
+
+def test_typed_vendor_amount_overrides():
+    pv = _claim_promo([7, 3], vendor_amount=123.45)
+    assert pv.claim_basis == "override"
+    assert pv.claim_aud == 123.45 and pv.claim_usd == 123.45 * 0.65

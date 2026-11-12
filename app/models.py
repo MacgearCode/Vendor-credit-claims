@@ -46,6 +46,7 @@ class Promotion(Base):
     __tablename__ = "promotions"
     id: Mapped[int] = mapped_column(primary_key=True)
     claim_number: Mapped[str] = mapped_column(String, default="", index=True)
+    vendor_reference: Mapped[str] = mapped_column(String, default="")  # the vendor's own promo id
     name: Mapped[str] = mapped_column(String, default="")
     brand: Mapped[str] = mapped_column(String, default="", index=True)
     country: Mapped[str] = mapped_column(String, default="AU", index=True)  # AU / NZ
@@ -70,6 +71,9 @@ class Promotion(Base):
         back_populates="promotion", cascade="all, delete-orphan")
     vendor_request: Mapped[VendorRequest | None] = relationship(
         back_populates="promotion", cascade="all, delete-orphan", uselist=False)
+    documents: Mapped[list[PromoDocument]] = relationship(
+        back_populates="promotion", cascade="all, delete-orphan",
+        order_by="PromoDocument.uploaded_at")
 
 
 class PromoRetailer(Base):
@@ -207,6 +211,22 @@ class ProcessedInvoice(Base):
     # Set by hand once the CSV has actually gone into NetSuite, so the log
     # distinguishes "downloaded" from "posted".
     imported: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class PromoDocument(Base):
+    """A file kept with the whole promotion — the vendor's promo sheet, approvals,
+    the claim as sent. (Attachment is per retailer block: the customer's claim.)"""
+    __tablename__ = "promo_documents"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    promo_id: Mapped[int] = mapped_column(ForeignKey("promotions.id"), index=True)
+    label: Mapped[str] = mapped_column(String, default="")   # e.g. "Vendor promo sheet"
+    filename: Mapped[str] = mapped_column(String)            # original name
+    stored_name: Mapped[str] = mapped_column(String)         # unique name in UPLOAD_DIR
+    content_type: Mapped[str] = mapped_column(String, default="")
+    size: Mapped[int] = mapped_column(Integer, default=0)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    promotion: Mapped[Promotion] = relationship(back_populates="documents")
 
 
 class Attachment(Base):

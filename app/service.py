@@ -66,6 +66,13 @@ class PromoView:
     actual_customer_aud: float
     actual_supplier_usd: float
     has_actuals: bool
+    lines_without_actuals: int        # lines with no actual sales typed (count 0 on the claim)
+    # What goes to the vendor (user, 2026-11-12): an amount typed on the vendor
+    # request wins; else the actual-sales claim once any actual sales are in; else
+    # the expected claim. basis = "override" | "actual" | "expected".
+    claim_aud: float = 0.0
+    claim_usd: float = 0.0
+    claim_basis: str = "expected"
 
 
 def _line_inputs(line: LineItem, pr: PromoRetailer, promo: Promotion) -> LineInputs:
@@ -160,6 +167,15 @@ def build_promo_view(promo: Promotion) -> PromoView:
         row.cells.setdefault(pr_id, lv)
 
     rate = promo.aud_usd_rate or 0.0
+    vr = promo.vendor_request
+    if vr is not None and vr.amount_aud is not None:
+        basis, claim = "override", vr.amount_aud
+    elif promo_has_actuals:
+        basis, claim = "actual", a_supplier_aud
+    else:
+        basis, claim = "expected", supplier_aud
+    claim_usd = vr.amount_usd if (basis == "override" and vr.amount_usd is not None) else claim * rate
+    n_missing = sum(1 for rv in retailer_views for lv in rv.lines if lv.line.actual_sales is None)
     return PromoView(
         promo=promo, weeks=weeks, retailers=retailer_views,
         supplier_total_aud=supplier_aud, mg_total_aud=mg_aud,
@@ -169,4 +185,6 @@ def build_promo_view(promo: Promotion) -> PromoView:
         actual_supplier_aud=a_supplier_aud, actual_mg_aud=a_mg_aud,
         actual_customer_aud=a_cust_aud, actual_supplier_usd=a_supplier_aud * rate,
         has_actuals=promo_has_actuals,
+        lines_without_actuals=n_missing,
+        claim_aud=claim, claim_usd=claim_usd, claim_basis=basis,
     )

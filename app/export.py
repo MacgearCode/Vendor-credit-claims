@@ -117,3 +117,86 @@ def build_workbook(pv, view: str) -> io.BytesIO:
     wb.save(buf)
     buf.seek(0)
     return buf
+
+
+def build_claim_workbook(pv) -> io.BytesIO:
+    """The claim to send the vendor: actual units sold x supplier support per unit,
+    one sheet, subtotalled per customer. Only lines with actual sales entered are
+    listed (the rest count as 0 — the page flags them). Nothing internal: no buy
+    prices, margins or MacGear's share."""
+    p = pv.promo
+    cur = "NZD" if (p.country or "AU").upper() == "NZ" else "AUD"
+    vr = p.vendor_request
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Claim"
+
+    ws["A1"] = f"{p.name or 'Promotion'} — Vendor Claim"
+    ws["A1"].font = TITLE
+    meta = [("Brand", p.brand), ("Vendor reference", p.vendor_reference or ""),
+            ("Claim #", p.claim_number),
+            ("Claim date", vr.claim_date if vr and vr.claim_date else ""),
+            ("Promotion dates", f"{p.start_date:%d/%m/%Y} to {p.end_date:%d/%m/%Y}"),
+            (f"Claim total ({cur})", round(pv.claim_aud, 2)),
+            (f"Claim total (USD @ {p.aud_usd_rate})", round(pv.claim_usd, 2))]
+    for i, (k, v) in enumerate(meta, start=3):
+        ws.cell(i, 1, k).font = BOLD
+        cell = ws.cell(i, 2, v)
+        if isinstance(v, float):
+            cell.number_format = "#,##0.00"
+            cell.font = BOLD
+        elif hasattr(v, "year"):
+            cell.number_format = "dd/mm/yyyy"
+            cell.alignment = Alignment(horizontal="left")
+
+    cols = [("Customer", None), ("Code", None), ("Description", None),
+            ("From", "dd/mm/yyyy"), ("To", "dd/mm/yyyy"),
+            (f"Supplier support / unit ({cur})", "#,##0.00"), ("Qty sold", "#,##0"),
+            (f"Claim ({cur})", "#,##0.00")]
+    r = len(meta) + 4
+    for c, (h, _) in enumerate(cols, start=1):
+        cell = ws.cell(r, c, h)
+        cell.font = HEAD
+        cell.fill = HEAD_FILL
+        cell.alignment = Alignment(wrap_text=True, vertical="center")
+
+    grand = 0.0
+    for rv in pv.retailers:
+        lines = [lv for lv in rv.lines if lv.line.actual_sales is not None]
+        if not lines:
+            continue
+        for lv in lines:
+            r += 1
+            claim = lv.result.actual_supplier_claim or 0.0
+            vals = [rv.pr.retailer_name, lv.line.product_code, lv.line.description,
+                    lv.start, lv.end, lv.result.supplier_support, lv.line.actual_sales, claim]
+            for c, ((_, fmt), v) in enumerate(zip(cols, vals), start=1):
+                cell = ws.cell(r, c, v)
+                if fmt:
+                    cell.number_format = fmt
+        r += 1
+        ws.cell(r, 1, f"{rv.pr.retailer_name} total").font = BOLD
+        sub = ws.cell(r, len(cols), rv.actual_supplier_total)
+        sub.number_format, sub.font = "#,##0.00", BOLD
+        grand += rv.actual_supplier_total
+        r += 1                                   # blank row between customers
+
+    r += 1
+    if grand:
+        ws.cell(r, 1, "Total claim").font = BOLD
+        tot = ws.cell(r, len(cols), grand)
+        tot.number_format, tot.font = "#,##0.00", BOLD
+        if pv.claim_basis == "override" and abs(pv.claim_aud - grand) > 0.005:
+            r += 1
+            ws.cell(r, 1, "Amount claimed").font = BOLD
+            amt = ws.cell(r, len(cols), pv.claim_aud)
+            amt.number_format, amt.font = "#,##0.00", BOLD
+    else:
+        ws.cell(r, 1, "No actual sales have been entered yet.")
+
+    for col, width in zip("ABCDEFGH", (22, 16, 42, 12, 12, 16, 10, 14)):
+        ws.column_dimensions[col].width = width
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
