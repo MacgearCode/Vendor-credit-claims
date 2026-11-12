@@ -69,7 +69,7 @@
 <table class="grid pgrid" data-promo="{{ promo.id }}">
   <thead>
     <tr class="grp">
-      <th class="stick s1" rowspan="2">{% if editable and pv.products %}<input type="checkbox" class="selall" title="Select every product">{% endif %}Code</th>
+      <th class="stick s1" rowspan="2">{% if editable and pv.products %}<span class="drag-spacer"></span><input type="checkbox" class="selall" title="Select every product">{% endif %}Code</th>
       <th class="stick s2" rowspan="2">Description</th>
       <th class="num" rowspan="2">RRP</th>
       <th rowspan="2">From</th><th rowspan="2">To</th>
@@ -95,8 +95,8 @@
   <tbody>
   {% set seps = {} %}{% for s in promo.separators %}{% set _ = seps.update({s.after_key: s}) %}{% endfor %}
   {% for row in pv.products %}
-    <tr>
-      <td class="stick s1 code">{% if editable %}<input type="checkbox" class="selrow" name="key" value="{{ row.key }}" form="bulkdel" title="Select {{ row.code or 'this product' }}">{% endif %}{{ row.code }}</td>
+    <tr data-item="p:{{ row.key }}">
+      <td class="stick s1 code">{% if editable %}<span class="drag" draggable="true" title="Drag to move">⋮⋮</span><input type="checkbox" class="selrow" name="key" value="{{ row.key }}" form="bulkdel" title="Select {{ row.code or 'this product' }}">{% endif %}{{ row.code }}</td>
       <td class="stick s2 desc">{{ row.description }}</td>
       <td class="num">{{ row.rrp_inc|money }}</td>
       {% if editable %}
@@ -121,8 +121,8 @@
     </tr>
     {% set sep = seps.get(row.key) %}
     {% if sep and not loop.last %}
-    <tr class="seprow">
-      <td class="stick sepcell" colspan="2">{% if editable %}<input class="sepin" data-sep="{{ sep.id }}" data-key="sep-{{ sep.id }}" data-which="l" value="{{ sep.label }}" placeholder="heading for the next group (optional)" maxlength="120">{% else %}{{ sep.label }}{% endif %}</td>
+    <tr class="seprow" data-item="s:{{ sep.id }}">
+      <td class="stick sepcell" colspan="2">{% if editable %}<span class="drag" draggable="true" title="Drag to move">⋮⋮</span><input class="sepin" data-sep="{{ sep.id }}" data-key="sep-{{ sep.id }}" data-which="l" value="{{ sep.label }}" placeholder="heading for the next group (optional)" maxlength="120">{% else %}{{ sep.label }}{% endif %}</td>
       <td colspan="3"></td>
       {% for rv in pv.retailers %}<td class="full g{{ rv.pr.id }} gstart" colspan="{{ cols|length }}"></td><td class="mini g{{ rv.pr.id }} gstart" colspan="{{ mini|length }}"></td>{% endfor %}
       {% if editable %}<td class="rowactions"><button type="button" class="link danger" data-sepdel="{{ sep.id }}" title="Remove this separator">✕</button></td>{% endif %}

@@ -118,6 +118,9 @@ class LineItem(Base):
     # every line of a code in the promo — the grid edits it per product row
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # the product's place in the promo grid (same on every line of a code); NULL on
+    # lines from before 2026-11-12 -> their id, i.e. the order they were added
+    position: Mapped[float | None] = mapped_column(Float, nullable=True)
     actual_sales: Mapped[float | None] = mapped_column(Float, nullable=True)  # qty actually claimed
     # support basis: "pct_off" (discount, default) | "margin" (target margin) | "cogs" (% off cost)
     support_basis: Mapped[str] = mapped_column(String, default="pct_off")

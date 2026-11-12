@@ -412,8 +412,8 @@ table.pgrid thead{position:sticky;top:0;z-index:3}
 table.pgrid tbody tr:hover td{background:#f7f9fc}
 table.pgrid .stick{position:sticky;background:var(--card);z-index:1}
 table.pgrid thead th.stick{background:#eef1f6;z-index:4}
-table.pgrid .s1{left:0;width:8.9rem;min-width:8.9rem;max-width:8.9rem;overflow:hidden;text-overflow:ellipsis}
-table.pgrid .s2{left:8.9rem;min-width:15rem;max-width:22rem;white-space:normal;box-shadow:inset -2px 0 0 var(--line)}
+table.pgrid .s1{left:0;width:9.9rem;min-width:9.9rem;max-width:9.9rem;overflow:hidden;text-overflow:ellipsis}
+table.pgrid .s2{left:9.9rem;min-width:15rem;max-width:22rem;white-space:normal;box-shadow:inset -2px 0 0 var(--line)}
 table.pgrid .gstart{box-shadow:inset 3px 0 0 var(--brand)}
 table.pgrid th.ghead{text-align:left}
 table.pgrid .mini{display:none}
@@ -507,3 +507,14 @@ table.pgrid input.pd.bad{border-color:var(--danger);outline:1px solid var(--dang
 .calbtn:hover{opacity:1}
 .dbox .calpick{position:absolute;left:0;bottom:0;width:1px;height:1px;opacity:0;border:0;padding:0;pointer-events:none}
 .grid-tools .tickdates input.tdx{width:6.6em}
+/* promo grid: drag rows to reorder */
+table.pgrid .drag{display:inline-block;width:.9rem;margin-right:.15rem;color:var(--muted);cursor:grab;user-select:none;letter-spacing:-.2em;opacity:.5}
+table.pgrid tr:hover .drag{opacity:1}
+table.pgrid .drag:active{cursor:grabbing}
+table.pgrid .drag-spacer{display:inline-block;width:1.05rem}
+table.pgrid tr.dragging td{opacity:.45;background:#eaf1fd}
+[data-theme="dark"] table.pgrid tr.dragging td{background:#1d2942}
+table.pgrid td.sepcell .drag{vertical-align:middle}
+table.pgrid td.sepcell input.sepin{width:calc(100% - 1.3rem)}
+.addprod-side .place{display:flex;flex-direction:column;gap:.2rem;font-size:.85rem;max-width:100%}
+.addprod-side .place select{max-width:22rem}

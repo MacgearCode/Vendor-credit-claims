@@ -64,7 +64,7 @@ def _line(id, code, pct=0.2, avg=10.0, start=None, end=None):
         retailer_buy_ex=50.0, pct_off=pct, avg_6wk=avg, actual_sales=None,
         support_basis="pct_off", target_margin=None, cogs_supplier_pct=None, cogs_mg_pct=None,
         ratio_supplier=None, ratio_mg=None, ratio_retailer=None, growth=None,
-        start_date=start, end_date=end)
+        start_date=start, end_date=end, position=None)
 
 
 def _promo(retailers):
@@ -169,3 +169,13 @@ def test_find_items_brand_words_and_limit(monkeypatch):
     monkeypatch.setattr(promo_data, "FIND_LIMIT", 1)
     items, total = promo_data.find_items("AU", "", "EUFY")
     assert len(items) == 1 and total == 2
+
+
+def test_grid_order_follows_position_then_when_added():
+    lines = [_line(1, "A1"), _line(2, "B2"), _line(3, "C3")]
+    pv = build_promo_view(_promo([_block(1, "OW", lines)]))
+    assert [r.key for r in pv.products] == ["A1", "B2", "C3"]          # no positions: as added
+    for l, pos in zip(lines, (2.0, 0.0, 1.0)):
+        l.position = pos
+    pv = build_promo_view(_promo([_block(1, "OW", lines)]))
+    assert [r.key for r in pv.products] == ["B2", "C3", "A1"]          # moved

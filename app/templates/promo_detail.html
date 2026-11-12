@@ -112,6 +112,15 @@
       </div>
     </div>
     <div class="addprod-side">
+      {% if pv.products %}
+      <label class="place">Place new products
+        <select name="place">
+          <option value="">at the end</option>
+          <option value="top">at the top</option>
+          {% for row in pv.products %}<option value="after:{{ row.key }}">after {{ row.code }}{% if row.description %} — {{ row.description|truncate(38, True, '…') }}{% endif %}</option>{% endfor %}
+        </select>
+      </label>
+      {% endif %}
       <fieldset>
         <legend>Add to</legend>
         {% for rv in pv.retailers %}
@@ -609,6 +618,39 @@ document.addEventListener('click', async function (e) {
   const v = w => iso(boxes.find(b => b.dataset.which === w)) || '';
   const r = await post('/promo/' + PROMO_ID + '/product_dates', {keys, start: v('start'), end: v('end')});
   if (r.error) { flag(document.querySelector('input.tdx'), r.error); return; }
+  await refreshLive();
+});
+
+// ---- drag ⋮⋮ to move a product or separator; saved on drop ----------------------
+let dragRow = null, dragFrom = '';
+const gridItems = () => [...document.querySelectorAll('table.pgrid tbody tr[data-item]')].map(tr => tr.dataset.item);
+document.addEventListener('dragstart', function (e) {
+  const h = e.target.closest && e.target.closest('.drag');
+  if (!h) return;
+  dragRow = h.closest('tr');
+  dragFrom = gridItems().join('|');
+  dragRow.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', dragRow.dataset.item);
+  try { e.dataTransfer.setDragImage(dragRow, 16, 12); } catch (err) {}
+});
+document.addEventListener('dragover', function (e) {
+  if (!dragRow) return;
+  e.preventDefault();                       // a move may land here
+  const tr = e.target.closest && e.target.closest('table.pgrid tbody tr[data-item]');
+  if (!tr || tr === dragRow) return;
+  const r = tr.getBoundingClientRect();
+  tr.parentNode.insertBefore(dragRow, e.clientY > r.top + r.height / 2 ? tr.nextSibling : tr);
+});
+document.addEventListener('drop', function (e) { if (dragRow) e.preventDefault(); });
+document.addEventListener('dragend', async function () {
+  if (!dragRow) return;
+  dragRow.classList.remove('dragging');
+  dragRow = null;
+  const items = gridItems();
+  if (items.join('|') === dragFrom) return;  // dropped where it started
+  const r = await post('/promo/' + PROMO_ID + '/order', {items});
+  if (r.error) alert(r.error);
   await refreshLive();
 });
 

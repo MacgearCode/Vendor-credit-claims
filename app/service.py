@@ -150,10 +150,11 @@ def build_promo_view(promo: Promotion) -> PromoView:
         a_cust_aud += a_support
         promo_has_actuals = promo_has_actuals or has_actuals
 
-    # Product rows, ordered by when the product first joined the promo.
+    # Product rows, in the grid's order (line.position; else when it was added).
     rows: dict[str, ProductRow] = {}
-    all_lines = sorted(((lv.line.id or 0, rv.pr.id, lv) for rv in retailer_views
-                        for lv in rv.lines), key=lambda t: t[0])
+    all_lines = sorted((((lv.line.position if lv.line.position is not None else lv.line.id or 0),
+                         lv.line.id or 0), rv.pr.id, lv)
+                       for rv in retailer_views for lv in rv.lines)
     for _, pr_id, lv in all_lines:
         l = lv.line
         key = (l.product_code or "").strip().upper() or f"#{l.id}"

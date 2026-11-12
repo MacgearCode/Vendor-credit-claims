@@ -9,6 +9,10 @@ st_weekly, field, ageing, items, st_table, sell_through, promos, vendor_bills) o
 Add an entry with every commit people would notice. Everything above the first
 "##" is ignored.
 
+## 2026-11-12 | Vendor Promos: move products around | promos
+- Drag a product, or a separator, by the ⋮⋮ handle at the start of its row to move it; it saves when you let go. The Excel exports follow the new order.
+- Add products has a "Place new products" choice: at the end, at the top, or after a chosen product. Added after a product that ends a group, they stay inside that group.
+
 ## 2026-11-12 | Vendor Promos: easier dates, clearer removing | promos
 - The From / To boxes in the grid are now plain dd/mm/yyyy boxes: select, copy and paste them like any cell (they didn't take Ctrl+C / Ctrl+V before). 📅 beside each opens a calendar; Enter moves down a row.
 - The ✕ in a retailer's columns takes the product off that retailer only — it now says which retailer. The ✕ at the end of each row (every retailer) is gone: tick products and press "Remove selected" instead.

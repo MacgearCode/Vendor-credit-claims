@@ -1566,6 +1566,7 @@ async def add_products(promo_id: int, request: Request, db: Session = Depends(ge
     except warehouse.WarehouseUnavailable:
         return RedirectResponse(f"/promo/{promo_id}?err=warehouse", status_code=303)
 
+    order_before = _product_order(promo)
     # A product already in the promo keeps its window on the new lines.
     known = {}
     for pr in promo.retailers:
@@ -1596,6 +1597,23 @@ async def add_products(promo_id: int, request: Request, db: Session = Depends(ge
                 _fill_avg_6wk(pr, new)
             except warehouse.WarehouseUnavailable:
                 wh_err = True
+    # Place products new to the promo: at the end (default), the top, or after one.
+    new_keys = list(dict.fromkeys(it["code"].upper() for it, _ in found
+                                  if it["code"].upper() not in known))
+    if new_keys:
+        place = form.get("place", "")
+        after = place[6:].upper() if place.startswith("after:") else None
+        if place == "top":
+            order = new_keys + order_before
+        elif after in order_before:
+            i = order_before.index(after) + 1
+            order = order_before[:i] + new_keys + order_before[i:]
+            for sep in promo.separators:         # stay in that product's group, above its gap
+                if sep.after_key == after:
+                    sep.after_key = new_keys[-1]
+        else:
+            order = order_before + new_keys
+        _renumber(promo, order)
     # Blank rows in the paste -> separators, under the last product found before each
     # (a gap after a code NetSuite doesn't know moves up to the product above it).
     have_sep = {sep.after_key for sep in promo.separators}
@@ -1704,6 +1722,51 @@ async def delete_product(promo_id: int, request: Request, db: Session = Depends(
     _repoint_separators(promo, order, removed, db)
     db.commit()
     return RedirectResponse(f"/promo/{promo_id}?removed={len(removed)}", status_code=303)
+
+
+def _product_order(promo):
+    """The promo's product keys in grid order."""
+    return [row.key for row in build_promo_view(promo).products]
+
+
+def _renumber(promo, keys):
+    """Store keys' order as each line's position (every line of a product alike)."""
+    pos = {k: i for i, k in enumerate(keys)}
+    for pr in promo.retailers:
+        for l in pr.lines:
+            l.position = float(pos.get(_product_key(l), len(keys) + (l.id or 0)))
+
+
+@app.post("/promo/{promo_id}/order")
+async def reorder_grid(promo_id: int, request: Request, db: Session = Depends(get_db)):
+    """The grid after a drag: {"items": ["p:<product key>" | "s:<separator id>", ...]}
+    top to bottom. Products take that order; each separator goes under the product
+    just above it (one at the very top, or straight after another, is dropped)."""
+    data = await request.json()
+    promo = db.get(Promotion, promo_id)
+    if not promo:
+        return JSONResponse({"error": "no such promotion"}, status_code=404)
+    items = [str(i) for i in data.get("items") or []]
+    keys = [i[2:].upper() for i in items if i.startswith("p:")]
+    known = set(_product_order(promo))
+    if set(keys) != known:
+        return JSONResponse({"error": "the grid changed meanwhile — reload and try again"},
+                            status_code=409)
+    _renumber(promo, keys)
+    seps = {str(s.id): s for s in promo.separators}
+    above, used = None, set()
+    for i in items:
+        if i.startswith("p:"):
+            above = i[2:].upper()
+        elif i.startswith("s:") and i[2:] in seps:
+            sep = seps.pop(i[2:])
+            if above is None or above in used:
+                db.delete(sep)
+            else:
+                sep.after_key = above
+                used.add(above)
+    db.commit()
+    return JSONResponse({"ok": True})
 
 
 def _repoint_separators(promo, order, removed, db):
