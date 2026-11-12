@@ -1856,6 +1856,34 @@ async def set_growth(pr_id: int, request: Request, db: Session = Depends(get_db)
     return JSONResponse({"ok": True})
 
 
+@app.post("/retailer/{pr_id}/split")
+async def set_split(pr_id: int, request: Request, db: Session = Depends(get_db)):
+    """Change one customer's funding split: {"supplier": %, "mg": %}; the retailer
+    funds the rest. Both blank = back to the promo's default; one blank takes the
+    promo's figure for it. Lines with their own split keep it."""
+    data = await request.json()
+    pr = db.get(PromoRetailer, pr_id)
+    if not pr:
+        return JSONResponse({"error": "no such retailer"}, status_code=404)
+    promo = pr.promotion
+    raw = [data.get("supplier"), data.get("mg")]
+    vals = [_parse_float(v) for v in raw]
+    if any(v is None and r not in (None, "") for v, r in zip(vals, raw)):
+        return JSONResponse({"error": "enter a number"}, status_code=400)
+    if vals == [None, None]:
+        pr.ratio_supplier = pr.ratio_mg = pr.ratio_retailer = None
+    else:
+        s = vals[0] / 100.0 if vals[0] is not None else promo.ratio_supplier
+        m = vals[1] / 100.0 if vals[1] is not None else promo.ratio_mg
+        r = round(1.0 - s - m, 6)
+        if s < 0 or m < 0 or r < -1e-9:
+            return JSONResponse({"error": "supplier + MacGear must each be 0 or more and "
+                                          "add up to no more than 100%"}, status_code=400)
+        pr.ratio_supplier, pr.ratio_mg, pr.ratio_retailer = s, m, max(r, 0.0)
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
 @app.post("/retailer/{pr_id}/refresh_avg")
 def refresh_avg(pr_id: int, db: Session = Depends(get_db)):
     """Re-pull every line's 6wk avg in this block from sell-through (overwrites)."""

@@ -9,6 +9,10 @@ st_weekly, field, ageing, items, st_table, sell_through, promos, vendor_bills) o
 Add an entry with every commit people would notice. Everything above the first
 "##" is ignored.
 
+## 2026-11-12 | Vendor Promos: funding split per customer | promos
+- Each customer card now has the funding split beside Rebate and Growth: Supplier and MacGear %, with the retailer funding the rest (shown as you type). Leave them blank to use the promo's default split; a split set on a single line still wins.
+- The card is tidier: the name and its links on one line, then one strip of settings.
+
 ## 2026-11-12 | Vendor Promos: move products around | promos
 - Editing a box in a long grid no longer jumps the table back to the top; it stays where you were.
 - Drag a product, or a separator, by the ⋮⋮ handle at the start of its row to move it; it saves when you let go. The Excel exports follow the new order.

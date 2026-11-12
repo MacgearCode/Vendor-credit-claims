@@ -76,7 +76,8 @@ def _promo(retailers):
 
 def _block(id, name, lines, growth=None):
     return SimpleNamespace(id=id, retailer_name=name, rebate=0.0, lines=lines,
-                           customer_claim=None, growth=growth)
+                           customer_claim=None, growth=growth,
+                           ratio_supplier=None, ratio_mg=None, ratio_retailer=None)
 
 
 def test_product_rows_and_own_weeks():
@@ -179,3 +180,18 @@ def test_grid_order_follows_position_then_when_added():
         l.position = pos
     pv = build_promo_view(_promo([_block(1, "OW", lines)]))
     assert [r.key for r in pv.products] == ["B2", "C3", "A1"]          # moved
+
+
+def test_split_line_then_customer_then_promo():
+    # promo default 50/50 (fixture); customer 80/20; one line with its own 100/0
+    lines = [_line(1, "A1"), _line(2, "B2")]
+    lines[1].ratio_supplier, lines[1].ratio_mg, lines[1].ratio_retailer = 1.0, 0.0, 0.0
+    blk = _block(1, "OW", lines)
+    blk.ratio_supplier, blk.ratio_mg, blk.ratio_retailer = 0.8, 0.2, 0.0
+    a1, b2 = build_promo_view(_promo([blk])).retailers[0].lines
+    t = a1.result.total_support_unit
+    assert round(a1.result.supplier_support, 6) == round(t * 0.8, 6)
+    assert round(a1.result.mg_support, 6) == round(t * 0.2, 6)
+    assert b2.result.mg_support == 0 and round(b2.result.supplier_support, 6) == round(t, 6)
+    plain = build_promo_view(_promo([_block(1, "OW", [_line(1, "A1")])])).retailers[0].lines[0]
+    assert round(plain.result.supplier_support, 6) == round(t * 0.5, 6)   # promo default

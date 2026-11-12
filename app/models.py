@@ -88,6 +88,11 @@ class PromoRetailer(Base):
     # growth expectation for this customer (fraction); NULL -> the promo's default.
     # A growth set on a line still wins over it.
     growth: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # funding split for this customer (fractions, set together; retailer = the rest);
+    # NULL -> the promo's default split. A split set on a line still wins over it.
+    ratio_supplier: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ratio_mg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ratio_retailer: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Picker entry behind the block (app/promo_data.py) — NetSuite price level for the
     # buy price, sell-through retailer for the 6wk avg. NULL on blocks made before
     # 2026-10-21; those are matched by name.

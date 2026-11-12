@@ -456,9 +456,6 @@ table.pgrid tbody tr:has(input.selrow:checked) td{background:#fdecea}
 .grid-tools form.bulkdel{display:inline;margin-right:.4rem}
 .grid-tools form.bulkdel .btn:disabled{opacity:.5}
 /* promo customer card: rebate edited in place */
-.retailer .rebate-edit{display:inline-flex;align-items:center;gap:.3rem;font-size:.85rem;color:var(--muted)}
-.retailer .rebate-edit input.rin{width:5.5em;text-align:right;padding:.15rem .3rem;font-size:.85rem}
-.retailer .rebate-edit input.rin.bad{border-color:var(--danger);outline:1px solid var(--danger)}
 table.pgrid th.ghead a.small{font-size:.78rem;text-decoration:none}
 table.pgrid th.ghead a.small:hover{text-decoration:underline}
 /* promo grid: separators between groups of products */
@@ -518,3 +515,18 @@ table.pgrid td.sepcell .drag{vertical-align:middle}
 table.pgrid td.sepcell input.sepin{width:calc(100% - 1.3rem)}
 .addprod-side .place{display:flex;flex-direction:column;gap:.2rem;font-size:.85rem;max-width:100%}
 .addprod-side .place select{max-width:22rem}
+/* promo customer card: name + links, then one strip of settings */
+.retailer .cust-head{align-items:center;flex-wrap:nowrap}
+.retailer .cust-head h2{margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.retailer .cust-links{display:flex;gap:.9rem;align-items:center;flex-shrink:0;font-size:.85rem}
+.retailer .cust-links form{display:inline}
+.cust-params{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.3rem .6rem;margin:.6rem 0 .2rem;
+  padding:.5rem .65rem;border:1px solid var(--line);border-radius:8px;background:#f7f9fc;font-size:.78rem;color:var(--muted)}
+.cust-params label{display:flex;flex-direction:column;gap:.15rem;margin:0}
+.cust-params .pin{display:flex;align-items:center;gap:.2rem;color:var(--muted)}
+.cust-params input{width:100%;min-width:0;text-align:right;padding:.2rem .35rem;font-size:.88rem;color:var(--ink)}
+.cust-params output{display:block;width:100%;text-align:right;padding:.2rem .35rem;font-size:.88rem;color:var(--ink);
+  border:1px dashed var(--line);border-radius:6px}
+.cust-params input.bad{border-color:var(--danger);outline:1px solid var(--danger)}
+.cust-params span b{display:block;color:var(--ink);font-size:.9rem}
+[data-theme="dark"] .cust-params{background:#1d2532}

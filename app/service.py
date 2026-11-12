@@ -75,14 +75,20 @@ class PromoView:
     claim_basis: str = "expected"
 
 
+def _first(*values):
+    """The first value that's set (not None)."""
+    return next((v for v in values if v is not None), None)
+
+
 def _line_inputs(line: LineItem, pr: PromoRetailer, promo: Promotion) -> LineInputs:
     return LineInputs(
         retailer_buy_ex=line.retailer_buy_ex or 0.0,
         rebate=pr.rebate or 0.0,
         pct_off=line.pct_off or 0.0,
-        ratio_supplier=line.ratio_supplier if line.ratio_supplier is not None else promo.ratio_supplier,
-        ratio_mg=line.ratio_mg if line.ratio_mg is not None else promo.ratio_mg,
-        ratio_retailer=line.ratio_retailer if line.ratio_retailer is not None else promo.ratio_retailer,
+        # funding split: the line's own, else the customer's, else the promo's
+        ratio_supplier=_first(line.ratio_supplier, pr.ratio_supplier, promo.ratio_supplier),
+        ratio_mg=_first(line.ratio_mg, pr.ratio_mg, promo.ratio_mg),
+        ratio_retailer=_first(line.ratio_retailer, pr.ratio_retailer, promo.ratio_retailer),
         rrp_inc=line.rrp_inc,
         avg_6wk=line.avg_6wk,
         growth=(line.growth if line.growth is not None

@@ -203,17 +203,13 @@
 {% for rv in pv.retailers %}
 {% set pr = rv.pr %}
 <section class="card retailer" id="pr{{ pr.id }}">
-  <div class="head-row">
-    <h2>{{ pr.retailer_name }} <small class="muted">{% if not editable %}rebate {{ pr.rebate|pct }} · growth {{ (pr.growth if pr.growth is not none else promo.growth_default)|pct }} · {% endif %}{{ rv.lines|length }} product{{ 's' if rv.lines|length != 1 }}</small></h2>
+  {% set eff_s = pr.ratio_supplier if pr.ratio_supplier is not none else promo.ratio_supplier %}
+  {% set eff_m = pr.ratio_mg if pr.ratio_mg is not none else promo.ratio_mg %}
+  {% set eff_g = pr.growth if pr.growth is not none else promo.growth_default %}
+  <div class="head-row cust-head">
+    <h2>{{ pr.retailer_name }} <small class="muted">{{ rv.lines|length }} product{{ 's' if rv.lines|length != 1 }}</small></h2>
     {% if editable %}
-    <label class="rebate-edit" title="This customer's rebate on this promo. Changing it recalculates net buy, support, margins and claims for its lines.">Rebate
-      <input class="rin" type="number" step="any" min="0" max="100" data-pr="{{ pr.id }}" data-what="rebate" data-key="rebate-{{ pr.id }}" data-which="r"
-             value="{{ (pr.rebate * 100)|round(4) }}">%</label>
-    <label class="rebate-edit" title="Growth expected on this customer's 6wk avg during the promo. Blank = the promo's default ({{ (promo.growth_default * 100)|round(2) }}%). A growth set on a line (✎) still wins.">Growth
-      <input class="rin" type="number" step="any" data-pr="{{ pr.id }}" data-what="growth" data-key="growth-{{ pr.id }}" data-which="g"
-             placeholder="{{ (promo.growth_default * 100)|round(2) }}" value="{{ (pr.growth * 100)|round(4) if pr.growth is not none else '' }}">%</label>
-    {% endif %}
-    {% if editable %}
+    <div class="cust-links">
     {% if rv.lines %}
     <form method="post" action="/retailer/{{ pr.id }}/refresh_avg" data-confirm="Replace every line's 6wk avg for {{ pr.retailer_name }} with the latest sell-through (hand-entered figures included)?" data-confirm-ok="Refresh">
       <button class="link" title="Re-pull each line's 6wk avg from this retailer's sell-through">refresh 6wk avg</button>
@@ -222,6 +218,31 @@
     <form method="post" action="/retailer/{{ pr.id }}/delete" data-confirm="Remove {{ pr.retailer_name }} and all its lines?" data-confirm-ok="Remove">
       <button class="link danger">remove retailer</button>
     </form>
+    </div>
+    {% endif %}
+  </div>
+  <div class="cust-params" data-def-s="{{ (promo.ratio_supplier * 100)|round(2) }}" data-def-m="{{ (promo.ratio_mg * 100)|round(2) }}">
+    {% if editable %}
+    <label title="This customer's rebate on this promo. Changing it recalculates net buy, support, margins and claims for its lines.">Rebate
+      <span class="pin"><input class="rin" type="number" step="any" min="0" max="100" data-pr="{{ pr.id }}" data-what="rebate" data-key="rebate-{{ pr.id }}" data-which="r"
+             value="{{ (pr.rebate * 100)|round(4) }}">%</span></label>
+    <label title="Growth expected on this customer's 6wk avg during the promo. Blank = the promo's default ({{ (promo.growth_default * 100)|round(2) }}%). A growth set on a line (✎) still wins.">Growth
+      <span class="pin"><input class="rin" type="number" step="any" data-pr="{{ pr.id }}" data-what="growth" data-key="growth-{{ pr.id }}" data-which="g"
+             placeholder="{{ (promo.growth_default * 100)|round(2) }}" value="{{ (pr.growth * 100)|round(4) if pr.growth is not none else '' }}">%</span></label>
+    <label title="Share of the support the supplier (brand) funds for this customer. Blank = the promo's default. A split set on a line (✎) still wins.">Supplier
+      <span class="pin"><input class="sin" type="number" step="any" min="0" max="100" data-pr="{{ pr.id }}" data-part="supplier" data-key="split-{{ pr.id }}" data-which="s"
+             placeholder="{{ (promo.ratio_supplier * 100)|round(2) }}" value="{{ (pr.ratio_supplier * 100)|round(4) if pr.ratio_supplier is not none else '' }}">%</span></label>
+    <label title="Share MacGear funds for this customer. Blank = the promo's default.">MacGear
+      <span class="pin"><input class="sin" type="number" step="any" min="0" max="100" data-pr="{{ pr.id }}" data-part="mg" data-key="split-{{ pr.id }}" data-which="m"
+             placeholder="{{ (promo.ratio_mg * 100)|round(2) }}" value="{{ (pr.ratio_mg * 100)|round(4) if pr.ratio_mg is not none else '' }}">%</span></label>
+    <label title="The retailer funds the rest: 100 − supplier − MacGear.">Retailer
+      <span class="pin"><output class="sret">{{ ((1 - eff_s - eff_m) * 100)|round(2) }}</output>%</span></label>
+    {% else %}
+    <span>Rebate <b>{{ pr.rebate|pct }}</b></span>
+    <span>Growth <b>{{ eff_g|pct }}</b></span>
+    <span>Supplier <b>{{ eff_s|pct }}</b></span>
+    <span>MacGear <b>{{ eff_m|pct }}</b></span>
+    <span>Retailer <b>{{ (1 - eff_s - eff_m)|pct }}</b></span>
     {% endif %}
   </div>
 
@@ -654,6 +675,17 @@ document.addEventListener('dragend', async function () {
   await refreshLive();
 });
 
+// funding split boxes: show the retailer's share (the rest) as you type
+document.addEventListener('input', function (e) {
+  if (!e.target.matches || !e.target.matches('input.sin')) return;
+  const box = e.target.closest('.cust-params');
+  const v = (p, def) => { const x = parseFloat(box.querySelector('input.sin[data-part="' + p + '"]').value); return isNaN(x) ? parseFloat(def) : x; };
+  const rest = Math.round((100 - v('supplier', box.dataset.defS) - v('mg', box.dataset.defM)) * 100) / 100;
+  const out = box.querySelector('.sret');
+  out.textContent = rest;
+  out.classList.toggle('danger', rest < 0);
+});
+
 // ✎ on a cell: the line's rarer settings in a dialog
 function openLine(id) { const d = document.getElementById('line-' + id); if (d) d.showModal(); }
 
@@ -721,6 +753,12 @@ document.addEventListener('change', async function (e) {
     await refreshLive();
   } else if (inp.matches('input.sepin')) {
     const r = await post('/promo/separator/' + inp.dataset.sep, {label: inp.value});
+    if (r.error) { flag(inp, r.error); return; }
+    await refreshLive();
+  } else if (inp.matches('input.sin')) {
+    const box = inp.closest('.cust-params');
+    const part = p => box.querySelector('input.sin[data-part="' + p + '"]').value;
+    const r = await post('/retailer/' + inp.dataset.pr + '/split', {supplier: part('supplier'), mg: part('mg')});
     if (r.error) { flag(inp, r.error); return; }
     await refreshLive();
   } else if (inp.matches('input.rin')) {

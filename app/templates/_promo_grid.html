@@ -178,12 +178,12 @@
     <label>Actual sales <input name="actual_sales" type="number" step="any" min="0" value="{{ l.actual_sales if l.actual_sales is not none else '' }}" style="width:7em"></label>
     <label>Growth <input name="growth" type="number" step="any" placeholder="def {{ pr.growth if pr.growth is not none else promo.growth_default }}" value="{{ l.growth if l.growth is not none else '' }}" style="width:6em"></label>
     {% set overridden = (l.ratio_supplier is not none or l.ratio_mg is not none or l.ratio_retailer is not none) %}
-    {% set es = l.ratio_supplier if l.ratio_supplier is not none else promo.ratio_supplier %}
-    {% set em = l.ratio_mg if l.ratio_mg is not none else promo.ratio_mg %}
-    {% set er = l.ratio_retailer if l.ratio_retailer is not none else promo.ratio_retailer %}
+    {% set es = l.ratio_supplier if l.ratio_supplier is not none else (pr.ratio_supplier if pr.ratio_supplier is not none else promo.ratio_supplier) %}
+    {% set em = l.ratio_mg if l.ratio_mg is not none else (pr.ratio_mg if pr.ratio_mg is not none else promo.ratio_mg) %}
+    {% set er = l.ratio_retailer if l.ratio_retailer is not none else (pr.ratio_retailer if pr.ratio_retailer is not none else promo.ratio_retailer) %}
     <fieldset class="split-group">
       <legend>Funding split</legend>
-      <label class="chk"><input type="checkbox" name="override_split" class="ovr" {{ 'checked' if overridden }}> Override (else uses promo default)</label>
+      <label class="chk"><input type="checkbox" name="override_split" class="ovr" {{ 'checked' if overridden }}> Override (else uses {{ pr.retailer_name }}'s split)</label>
       <label>Supplier <input name="ratio_supplier" class="rs" type="number" step="any" min="0" max="1" value="{{ es }}" style="width:6em" {{ 'disabled' if not overridden }}></label>
       <label>MacGear <input name="ratio_mg" class="rm" type="number" step="any" min="0" max="1" value="{{ em }}" style="width:6em" {{ 'disabled' if not overridden }}></label>
       <label>Retailer <input name="ratio_retailer" class="rr" type="number" step="any" value="{{ er }}" style="width:6em" readonly title="auto = 1 − supplier − MacGear"></label>
