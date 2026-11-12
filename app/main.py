@@ -1278,7 +1278,7 @@ def dashboard(request: Request, brand: str = "", status: str = "", country: str 
         "vendor_recovered": sum(
             r.claim_aud for r in rows
             if r.promo.vendor_request and r.promo.vendor_request.status == vr_done),
-        "mg_absorbed": sum(r.mg_total_aud for r in rows),
+        "mg_absorbed": sum(r.actual_mg_aud if r.has_actuals else r.mg_total_aud for r in rows),
     }
     brands = [b for b in db.scalars(
         select(Promotion.brand).distinct().order_by(Promotion.brand)).all() if b]
