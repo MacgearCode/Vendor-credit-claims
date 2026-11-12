@@ -671,17 +671,30 @@ async function refreshLive() {
   if (!fresh) return;
   const act = document.activeElement, key = focusKey(act);
   const typed = act && act.matches && act.matches('input') && act.value !== act.defaultValue ? act.value : null;
-  const scroller = document.querySelector('.pgrid-wrap'), sx = scroller ? scroller.scrollLeft : 0;
+  // where everything is scrolled to: the grid's own box (both ways) and every
+  // scrolling container above it, so a save never jumps the view back to the top
+  const scroller = document.querySelector('.pgrid-wrap');
+  const sx = scroller ? scroller.scrollLeft : 0, sy = scroller ? scroller.scrollTop : 0;
+  const outer = [];
+  for (let el = document.getElementById('promo-live').parentElement; el; el = el.parentElement)
+    if (el.scrollTop) outer.push([el, el.scrollTop]);
+  const winY = window.scrollY;
   const ticked = new Set([...document.querySelectorAll('input.selrow:checked')].map(c => c.value));
   document.getElementById('promo-live').replaceWith(fresh);
   document.querySelectorAll('input.selrow').forEach(c => { c.checked = ticked.has(c.value); });
   syncSelected();
   applyOpen(openSet());
   wireDialogs();
-  const sc = document.querySelector('.pgrid-wrap'); if (sc) sc.scrollLeft = sx;
+  const sc = document.querySelector('.pgrid-wrap'); if (sc) { sc.scrollLeft = sx; sc.scrollTop = sy; }
+  outer.forEach(([el, top]) => { el.scrollTop = top; });
+  window.scrollTo(window.scrollX, winY);
   if (key) {
     const el = [...document.querySelectorAll('#promo-live input')].find(i => focusKey(i) === key);
-    if (el) { if (typed !== null) el.value = typed; el.focus(); if (el.select && typed === null) el.select(); }
+    if (el) {
+      if (typed !== null) el.value = typed;
+      el.focus({preventScroll: true});          // already in view: don't let focus scroll
+      if (el.select && typed === null) el.select();
+    }
   }
 }
 

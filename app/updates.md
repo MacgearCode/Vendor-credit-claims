@@ -10,6 +10,7 @@ Add an entry with every commit people would notice. Everything above the first
 "##" is ignored.
 
 ## 2026-11-12 | Vendor Promos: move products around | promos
+- Editing a box in a long grid no longer jumps the table back to the top; it stays where you were.
 - Drag a product, or a separator, by the ⋮⋮ handle at the start of its row to move it; it saves when you let go. The Excel exports follow the new order.
 - Add products has a "Place new products" choice: at the end, at the top, or after a chosen product. Added after a product that ends a group, they stay inside that group.
 
