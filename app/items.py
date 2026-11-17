@@ -11,7 +11,9 @@ Definitions (shared with the warehouse — see Sell Through/CLAUDE.md):
   retail value = units x item-list RRP (the region's own currency)
   sell-in      = net_sales / net_sales_qty: posting account 54, intercompany
                  excluded, ex-GST, subsidiary currency. Weeks end Sunday too.
-  est. GP      = net_sales - net_sales_est_cost (NetSuite's estimate, not COGS)
+  net profit   = net_sales - est. cost - the Brand Profitability deductions per line (customer
+                 rebates, MDF, the brand's freight / vendor rebates shared by gross;
+                 brand_profit/np.py). Was est. GP until 2026-11-17 (user).
   Macgear stock = latest inventory snapshot, saleable locations only
   weeks of cover = SOH / average weekly units over the last 4 weeks
 AU and NZ are never summed: every block is per region.
@@ -255,10 +257,21 @@ def item_detail(item_key: int, region: str, weeks_n: int, caps: set,
                             "available": int(av or 0), "committed": int(cm or 0),
                             "on_order": int(oo or 0), "in_transit": int(it or 0)})
                 inv_total = asat
-    return _shape(weeks, st_rows, si_rows, stores, inv, inv_total, caps)
+    np_weeks = {}
+    if "margin" in caps:
+        # net-profit deductions for this item, by week ending (Sunday)
+        from .brand_profit import np as bp_np
+
+        def week_end(k):
+            d = date(k // 10000, k // 100 % 100, k % 100)
+            return d + timedelta(days=(6 - d.weekday()))
+        np_weeks = {w: v for w, v in bp_np.deductions(
+            region, p["start_key"], int((date.today() + timedelta(days=7)).strftime("%Y%m%d")),
+            lambda k, c, b, i: week_end(k) if i == item_key else None).items() if w is not None}
+    return _shape(weeks, st_rows, si_rows, stores, inv, inv_total, caps, np_weeks)
 
 
-def _shape(weeks, st_rows, si_rows, stores, inv, inv_asat, caps) -> dict:
+def _shape(weeks, st_rows, si_rows, stores, inv, inv_asat, caps, np_weeks=None) -> dict:
     n = len(weeks)
     wi = {w: k for k, w in enumerate(weeks)}
 
@@ -320,7 +333,10 @@ def _shape(weeks, st_rows, si_rows, stores, inv, inv_asat, caps) -> dict:
         if "sell_in_value" in caps:
             series["si_value"] = [round(x) for x in total("si_v")]
         if "margin" in caps:
-            series["si_gp"] = [round(v - c) for v, c in zip(total("si_v"), total("si_c"))]
+            # net profit: est. cost plus the week's deductions (np_weeks); rebates for NP % on net
+            np_c = [(np_weeks or {}).get(w, (0.0, 0.0))[0] for w in weeks]
+            np_r = [(np_weeks or {}).get(w, (0.0, 0.0))[1] for w in weeks]
+            series["si_gp"] = [round(v - c - x) for v, c, x in zip(total("si_v"), total("si_c"), np_c)]
 
     def cover(units, soh):
         if soh is None:
@@ -380,11 +396,14 @@ def _shape(weeks, st_rows, si_rows, stores, inv, inv_asat, caps) -> dict:
         out["inventory"]["weeks_cover"] = (out["inventory"]["available"] / avg_si4) if avg_si4 > 0 else None
         out["sell_in_wtd"] = si_extra if si_extra["week"] else None
         if "margin" in caps:
-            gp = round(sum(total("si_v")) - sum(total("si_c")))
-            kpis["gp"] = gp
+            gp = round(sum(total("si_v")) - sum(total("si_c")) - sum(np_c))
+            kpis["gp"] = gp                                   # net profit (see top)
             kpis["gp_pct"] = (gp / sum(total("si_v")) * 100) if si_value else None
+            net = sum(total("si_v")) - sum(np_r)
+            kpis["np_net_pct"] = (gp / net * 100) if net else None
             if si_extra["week"]:
-                si_extra["gp"] = si_extra["v"] - si_extra["c"]
+                extra = (np_weeks or {}).get(date.fromisoformat(si_extra["week"]), (0.0, 0.0))[0]
+                si_extra["gp"] = si_extra["v"] - si_extra["c"] - extra
         si_extra.pop("c", None)
         if "sell_in_value" not in caps:
             si_extra.pop("v", None)

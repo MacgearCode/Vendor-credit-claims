@@ -10,3 +10,5 @@ deploy/.env
 %OFFCOGS*.xlsx
 # Excel lock/temp files
 ~$*
+# Brand Profitability source workbooks (commercial data, ~120 MB) stay out of git
+brand profitability/*.xls*

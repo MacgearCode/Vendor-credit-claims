@@ -2,6 +2,11 @@
 likes: period, filters, and a matrix whose rows they build from the dimensions.
 Staff with the `sell_in_value` capability only; margin columns need `margin`.
 
+MARGIN = NET PROFIT (2026-11-17, user): the Brand Profitability method per sales line
+(brand_profit/np.py) — customer rebates, MDF and each brand's freight / vendor rebates shared by
+gross — is added to the est. cost column as the cubes are built, so "revenue - cost" is net profit;
+a 4th column carries the rebates so net sales (revenue - rebates) gives NP % on net.
+
 Definitions are the home page's (app/sales.py): revenue = net_sales (account 54,
 intercompany excluded, ex-GST, subsidiary currency); periods on Macgear's FINANCIAL
 year (April–March, FY27 = Apr 2026 – Mar 2027); "LY" = the same dates a year earlier;
@@ -30,6 +35,7 @@ from datetime import date, timedelta
 from io import BytesIO
 
 from . import sales, warehouse
+from .brand_profit import np as bp_np
 
 MONTHLY_TTL = 30 * 60          # closed months barely move
 DAILY_TTL = 5 * 60             # today's invoices
@@ -72,17 +78,19 @@ def names() -> dict:
 # ---- the in-memory summary --------------------------------------------------------
 class Cube:
     """Columnar rows: period key (yyyymm or yyyymmdd), customer_id, brand_id, rep_id,
-    revenue, est. cost, units. Ids of None are stored as -1. Rows arrive SORTED by the
-    period key, so a date range is a bisect slice, not a full scan."""
-    __slots__ = ("k", "c", "b", "r", "v", "x", "q")
+    revenue, cost (est. cost + net-profit deductions), units, customer rebates. Ids of None are
+    stored as -1. Rows arrive SORTED by the period key, so a date range is a bisect slice."""
+    __slots__ = ("k", "c", "b", "r", "v", "x", "q", "n")
 
     def __init__(self, rows):
         self.k, self.c, self.b, self.r = array("i"), array("i"), array("i"), array("i")
-        self.v, self.x, self.q = array("d"), array("d"), array("d")
-        for k, c, b, r, v, x, q in rows:
+        self.v, self.x, self.q, self.n = array("d"), array("d"), array("d"), array("d")
+        for row in rows:
+            k, c, b, r, v, x, q = row[:7]
             self.k.append(k); self.c.append(-1 if c is None else c)
             self.b.append(-1 if b is None else b); self.r.append(-1 if r is None else r)
             self.v.append(float(v or 0)); self.x.append(float(x or 0)); self.q.append(float(q or 0))
+            self.n.append(float(row[7]) if len(row) > 7 else 0.0)
 
     def __len__(self):
         return len(self.k)
@@ -103,7 +111,7 @@ def _monthly(region: str) -> Cube:
         from reporting.fact_sales_line s
         where s.region_key = %(rk)s and s.net_sales is not null
         group by 1, 2, 3 order by 1""", {"rk": rk})
-    return Cube(rows)
+    return Cube(bp_np.adjust_cube_rows(region, rows, monthly=True))
 
 
 def daily_window(today: date) -> tuple[date, date, date, date]:
@@ -131,7 +139,7 @@ def _daily(region: str, today: date) -> Cube:
           and (s.date_key between %(lo)s and %(hi)s or s.date_key between %(llo)s and %(lhi)s)
         group by 1, 2, 3 order by 1""",
         {"rk": rk, "lo": _key(lo), "hi": _key(hi), "llo": _key(ly_lo), "lhi": _key(ly_hi)})
-    return Cube(rows)
+    return Cube(bp_np.adjust_cube_rows(region, rows, monthly=False))
 
 
 def cubes(region: str, today: date) -> tuple[Cube, Cube]:
@@ -325,10 +333,10 @@ def _label(dim: str, c: int, b: int, r: int, k: int, nm: dict) -> str:
 
 
 def _sum_range(m: Cube, d: Cube, a: date, b: date, dims, f, nm, slot: int, acc: dict):
-    """Add [a, b] into acc[key][slot] as [rev, cost, qty]."""
+    """Add [a, b] into acc[key][slot] as [rev, cost, qty, rebates]."""
     for kind, lo, hi in _parts(a, b):
         cube = m if kind == "m" else d
-        k, c, bb, r, v, x, q = cube.k, cube.c, cube.b, cube.r, cube.v, cube.x, cube.q
+        k, c, bb, r, v, x, q, n = cube.k, cube.c, cube.b, cube.r, cube.v, cube.x, cube.q, cube.n
         for i in range(bisect_left(k, lo), bisect_right(k, hi)):
             ki = k[i]
             ci, bi, ri = c[i], bb[i], r[i]
@@ -337,9 +345,9 @@ def _sum_range(m: Cube, d: Cube, a: date, b: date, dims, f, nm, slot: int, acc: 
             key = tuple(_label(dm, ci, bi, ri, ki, nm) for dm in dims)
             cell = acc.get(key)
             if cell is None:
-                cell = acc[key] = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
+                cell = acc[key] = [[0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]]
             s = cell[slot]
-            s[0] += v[i]; s[1] += x[i]; s[2] += q[i]
+            s[0] += v[i]; s[1] += x[i]; s[2] += q[i]; s[3] += n[i]
 
 
 def _items_sql(region: str, p: dict, dims: list, f: dict, nm: dict) -> dict:
@@ -372,6 +380,11 @@ def _items_sql(region: str, p: dict, dims: list, f: dict, nm: dict) -> dict:
         from reporting.fact_sales_line s
         where {' and '.join(where)}
         group by 1, 2, 3, 4, 5, 6""", prm)
+    # net-profit deductions, grouped exactly like the rows (brand_profit/np.py)
+    def dkey(month_dims):
+        return lambda k, c, b, i: (i, (k // 100) if month_dims else 0, c if need_c else -1, b if need_b else -1)
+    ded = {True: bp_np.deductions(region, prm["a"], prm["b"], dkey("month" in dims)),
+           False: bp_np.deductions(region, prm["la"], prm["lb"], dkey("month" in dims))}
     keys = {r[0] for r in rows if r[0] is not None}
     items = dict(((k, (c, d)) for k, c, d in warehouse.query(
         "select item_key, macgear_code, description from reporting.dim_item where item_key = any(%(k)s)",
@@ -381,6 +394,7 @@ def _items_sql(region: str, p: dict, dims: list, f: dict, nm: dict) -> dict:
         c = -1 if c is None else c
         b = -1 if b is None else b
         r = -1 if r is None else r
+        dx, dn = ded[bool(is_cur)].get((-1 if ik is None else ik, ym, c, b), (0.0, 0.0))
         if f.get("brand") is not None and b != f["brand"]:
             continue
         lab = []
@@ -395,9 +409,9 @@ def _items_sql(region: str, p: dict, dims: list, f: dict, nm: dict) -> dict:
                 lab.append(f"{y}-{mo:02d}")
             else:
                 lab.append(_label(dm, c, b, r, ym, nm))
-        cell = acc.setdefault(tuple(lab), [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+        cell = acc.setdefault(tuple(lab), [[0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]])
         s = cell[0 if is_cur else 1]
-        s[0] += float(v or 0); s[1] += float(x or 0); s[2] += float(q or 0)
+        s[0] += float(v or 0); s[1] += float(x or 0) + dx; s[2] += float(q or 0); s[3] += dn
     return acc
 
 
@@ -416,7 +430,7 @@ def _shift_month_labels(acc: dict, dims: list) -> dict:
             if slot == 1:
                 y, m = k[mi].split("-")
                 k[mi] = f"{int(y) + 1}-{m}"
-            cell = out.setdefault(tuple(k), [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+            cell = out.setdefault(tuple(k), [[0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]])
             cell[slot] = [a + b for a, b in zip(cell[slot], vals)]
     return out
 
@@ -446,7 +460,8 @@ def explore(region: str, code: str, fy: int, today: date, dims: list, f: dict,
             row = {"k": list(key), "v": round(cur[0], 2), "ly": round(ly[0], 2),
                    "q": round(cur[2]), "lq": round(ly[2])}
             if margin:
-                row["gp"] = round(cur[0] - cur[1], 2)
+                row["gp"] = round(cur[0] - cur[1], 2)          # net profit (see top)
+                row["ns"] = round(cur[0] - cur[3], 2)          # net sales, after customer rebates
             out["rows"].append(row)
     # targets: to date for the dates shown, and for the whole period
     ams = retailer_ams(region, today)
@@ -463,9 +478,17 @@ def explore(region: str, code: str, fy: int, today: date, dims: list, f: dict,
                 r = idx[key] = {"k": list(key), "v": 0.0, "ly": 0.0, "q": 0, "lq": 0}
                 if margin:
                     r["gp"] = 0.0
+                    r["ns"] = 0.0
                 out["rows"].append(r)
             r["t"] = round(t, 2)
     out["kpis"] = _kpis(out["rows"], margin)
+    if margin and not p["future"]:
+        miss, cur_m = [], p["a"].replace(day=1)
+        while cur_m <= p["b"]:
+            if bp_np.gl_missing(region, cur_m):
+                miss.append(cur_m.strftime("%b %Y"))
+            cur_m = (cur_m.replace(day=28) + timedelta(days=4)).replace(day=1)
+        out["kpis"]["np_gl_missing"] = miss
     out["kpis"]["t"] = round(tg[0]) if tg else None
     out["kpis"]["to_t"] = (out["kpis"]["v"] / tg[0] * 100) if tg and tg[0] > 0 else None
     out["quick"] = quick(region, today, f, nm, m, d)
@@ -481,8 +504,10 @@ def _kpis(rows, margin):
          "growth": ((v - ly) / ly * 100) if ly > 0 else None}
     if margin:
         gp = sum(r["gp"] for r in rows)
+        ns = sum(r.get("ns", 0.0) for r in rows)
         k["gp"] = round(gp)
-        k["gp_pct"] = (gp / v * 100) if v else None
+        k["gp_pct"] = (gp / v * 100) if v else None           # NP % on gross (revenue)
+        k["np_net_pct"] = (gp / ns * 100) if ns else None     # NP % on net sales
     return k
 
 
@@ -568,7 +593,7 @@ def to_xlsx(data: dict, title: str, filters: str) -> bytes:
     margin = data.get("margin")
     hdr = list(data["dim_labels"]) + ["Revenue", "LY", "YoY $", "YoY %", "Units", "LY units"]
     if margin:
-        hdr += ["Est. GP", "GP %"]
+        hdr += ["Net profit", "NP % on gross", "NP % on net"]
     tgt = (data.get("targets") or {}).get("rows")
     if tgt:
         hdr += ["Target", "% of target"]
@@ -587,7 +612,8 @@ def to_xlsx(data: dict, title: str, filters: str) -> bytes:
         yoy = r["v"] - r["ly"]
         vals = list(r["k"]) + [r["v"], r["ly"], yoy, (yoy / r["ly"]) if r["ly"] > 0 else None, r["q"], r["lq"]]
         if margin:
-            vals += [r["gp"], (r["gp"] / r["v"]) if r["v"] else None]
+            vals += [r["gp"], (r["gp"] / r["v"]) if r["v"] else None,
+                     (r["gp"] / r["ns"]) if r.get("ns") else None]
         if tgt:
             t = r.get("t")
             vals += [t, (r["v"] / t) if t else None]
@@ -596,7 +622,7 @@ def to_xlsx(data: dict, title: str, filters: str) -> bytes:
             c = ws.cell(row=i, column=j, value=val)
             if j in (nd + 1, nd + 2, nd + 3) or (margin and j == nd + 7) or (tgt and j == tj):
                 c.number_format = money
-            elif j == nd + 4 or (margin and j == nd + 8) or (tgt and j == tj + 1):
+            elif j == nd + 4 or (margin and j in (nd + 8, nd + 9)) or (tgt and j == tj + 1):
                 c.number_format = "0.0%"
             elif j > nd:
                 c.number_format = "#,##0"

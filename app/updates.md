@@ -9,6 +9,16 @@ st_weekly, field, ageing, items, st_table, sell_through, promos, vendor_bills) o
 Add an entry with every commit people would notice. Everything above the first
 "##" is ignored.
 
+## 2026-11-17 | Brand Profitability report | brand_profit brand_profit_settings
+- New report: net profit by PM and brand, after customer rebates, freight, vendor rebates and MDF — the CYA workbook's method, for AU and NZ, any month, quarter or year to date of the financial year. Open a brand to see its customers and the freight / vendor-rebate lines behind it; download to Excel.
+- Filter by PM; collapse to PMs, brands or customers. A PM's GP target is now their brands' targets weighted by sales, with the gap in dollars.
+- Freight and vendor rebates are coloured by their effect on profit: red reduces it, green (a vendor credit) adds to it.
+- Settings (for those who manage them): customer rebates by month, brand, item-category and SKU exceptions, store extras, MDF, GP targets, the PM for each brand (per region), and freight / vendor-rebate uploads. Every change is logged.
+
+## 2026-11-17 | Net profit instead of estimated GP | sales
+- Where the site showed estimated GP (home page, Sales Explorer, Item Explorer) it now shows net profit: revenue less cost, customer rebates, MDF, and each brand's freight and vendor rebates shared by sales — the same figures as the Brand Profitability report.
+- Net profit % is shown on gross sales and on net sales (after customer rebates). A month whose freight and vendor rebates aren't loaded yet is marked *.
+
 ## 2026-11-12 | Vendor Promos: funding split per customer | promos
 - The green / red highlight on actual sales is now readable in dark mode and the glass look.
 - Actual sales typed on a line with no 6wk avg now show their claim: once a promo has actual sales, the grid adds "Act Supp Claim" and "Act MG Claim" beside the expected ones (and the Internal Excel export has them too).

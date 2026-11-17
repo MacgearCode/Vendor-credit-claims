@@ -50,6 +50,10 @@ app.mount("/static", StaticFiles(directory=os.path.join(HERE, "static")), name="
 # Targets tool's JSON API (/targets/api/...); the page is the /targets route below
 from .targets import routes as targets_routes          # noqa: E402
 app.include_router(targets_routes.router)
+# Brand Profitability settings posts (/brand-profit/...); pages are routes below
+from .brand_profit import routes as bp_routes          # noqa: E402
+from .brand_profit import data as bp_data, export as bp_export, np as bp_np, settings as bp_settings  # noqa: E402
+app.include_router(bp_routes.router)
 templates = Jinja2Templates(directory=os.path.join(HERE, "templates"))
 
 
@@ -169,6 +173,8 @@ _TOOL_PATHS = [
     ("/reports/weekly", "st_weekly"),
     ("/reports/field", "field"),
     ("/reports/ageing", "ageing"),
+    ("/reports/brand-profit", "brand_profit"),
+    ("/brand-profit", "brand_profit_settings"),
     ("/vendor-bills", "vendor_bills"),
     ("/targets", "targets"),
     ("/promos", "promos"),
@@ -480,6 +486,8 @@ REPORTS = [
      "blurb": "Mova reps: visits, schedule, photos and display compliance (Harvey Norman core range)."},
     {"key": "ageing", "href": "/reports/ageing", "title": "Inventory Ageing", "icon": "◷",
      "blurb": "How old Macgear's stock is, day by day — by brand, product and location, at cost."},
+    {"key": "brand_profit", "href": "/reports/brand-profit", "title": "Brand Profitability", "icon": "◩",
+     "blurb": "Net profit by PM and brand after customer rebates, freight, vendor rebates and MDF."},
 ]
 TOOLS = [
     {"key": "promos", "href": "/promos", "title": "Vendor Promos", "icon": "%",
@@ -488,6 +496,8 @@ TOOLS = [
      "blurb": "Amazon Advertising invoices → NetSuite vendor bill import CSV."},
     {"key": "targets", "href": "/targets", "title": "Targets", "icon": "◎",
      "blurb": "Prepare sales targets from last year's actuals, then commit the official set."},
+    {"key": "brand_profit_settings", "href": "/brand-profit/settings", "title": "Brand Profitability settings",
+     "icon": "⚙", "blurb": "Customer rebates by month, brand exceptions, MDF, GP targets, PMs, freight & vendor rebates."},
 ]
 
 
@@ -504,7 +514,8 @@ def nav_reports(request: Request) -> list[dict]:
     # Sales Explorer is all Macgear $: list it only for people who may see them.
     caps = _caps(request)
     return [r for r in REPORTS if r["key"] in _allowed(request)
-            and (r["key"] != "sales" or "sell_in_value" in caps)]
+            and (r["key"] != "sales" or "sell_in_value" in caps)
+            and (r["key"] != "brand_profit" or "margin" in caps)]
 
 
 def my_updates(request: Request) -> list[dict]:
@@ -694,12 +705,95 @@ def _warehouse_error(e) -> str:
     return f"The reporting warehouse could not be reached ({e})."
 
 
+# ---- Brand Profitability (app/brand_profit/, built 2026-11-17) -------------------------
+def _bp_args(request: Request, region: str, fy: int | None, period: str):
+    region, regions = _region(request, region)
+    today = sales_today()
+    fy = fy or bp_data.calc.fy_of(date(today.year, today.month, 1))
+    lines = bp_data.sales_lines(region, fy)
+    period = period or bp_data.default_period(lines, today)
+    return region, regions, fy, period
+
+
+@app.get("/reports/brand-profit", response_class=HTMLResponse)
+def report_brand_profit(request: Request, region: str = "AU", fy: int | None = None, period: str = "",
+                        pm: str = ""):
+    """PM -> brand -> customer net profit, the CYA workbook's method. Needs the margin capability
+    (route-checked) on top of the brand_profit area; staff only."""
+    if "margin" not in _caps(request):
+        return templates.TemplateResponse(request, "denied.html",
+                                          {"tool": "Brand Profitability (needs the Margin capability)"},
+                                          status_code=403)
+    brands, _ = _scope(request)
+    ctx = {"rep": None, "error": "", "regions": [], "can_edit": "brand_profit_settings" in _allowed(request)}
+    try:
+        region, regions, fy, period = _bp_args(request, region, fy, period)
+        ctx["rep"] = bp_data.report(region, fy, period, brands, pm)
+        today = sales_today()
+        ctx["current_fy"] = bp_data.calc.fy_of(date(today.year, today.month, 1))
+        ctx["regions"] = regions
+    except warehouse.WarehouseUnavailable as e:
+        ctx["error"] = _warehouse_error(e)
+    except bp_data.db.NotConfigured:
+        ctx["error"] = "The brand profitability settings database isn't configured (BRAND_PROFIT_DB_URL / TARGETS_DB_URL)."
+    except ValueError as e:
+        ctx["error"] = f"That period isn't valid ({e})."
+    return templates.TemplateResponse(request, "brand_profit.html", ctx)
+
+
+@app.get("/reports/brand-profit/gl.json")
+def report_brand_profit_gl(request: Request, region: str = "AU", fy: int | None = None, period: str = "",
+                           brand: str = ""):
+    """The freight / vendor-rebate GL lines behind one brand's figures."""
+    if "margin" not in _caps(request):
+        return JSONResponse({"error": "no access"}, status_code=403)
+    brands, _ = _scope(request)
+    if brands is not None and bp_data.calc.norm_brand(brand) not in {bp_data.calc.norm_brand(b) for b in brands}:
+        return JSONResponse({"error": "no access"}, status_code=403)
+    region, _, fy, period = _bp_args(request, region, fy, period)
+    months, _ = bp_data.period_months(fy, period)
+    rows = bp_data.gl_detail(region, fy, months, brand)
+    return JSONResponse([{**r, "month": r["month"].isoformat()} for r in rows])
+
+
+@app.get("/reports/brand-profit/export.xlsx")
+def report_brand_profit_xlsx(request: Request, region: str = "AU", fy: int | None = None, period: str = "",
+                             pm: str = ""):
+    if "margin" not in _caps(request):
+        return JSONResponse({"error": "no access"}, status_code=403)
+    brands, _ = _scope(request)
+    region, _, fy, period = _bp_args(request, region, fy, period)
+    rep = bp_data.report(region, fy, period, brands, pm)
+    name = f"Brand profitability {region} {rep['label']}{' ' + rep['pm'] if rep['pm'] else ''}.xlsx"
+    return Response(bp_export.to_xlsx(rep),
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@app.get("/brand-profit/settings", response_class=HTMLResponse)
+def brand_profit_settings(request: Request, region: str = "AU", tab: str = "base", ok: str = "", err: str = ""):
+    region, regions = _region(request, region)
+    ctx = {"region": region, "regions": regions, "tab": tab, "ok": ok, "err": err, "view": None,
+           "pick": {"heads": [], "stores": [], "brands": [], "categories": []},
+           "kind_labels": bp_settings.KIND_LABELS, "error": ""}
+    try:
+        ctx["view"] = bp_data.settings_view(region)
+    except bp_data.db.NotConfigured:
+        ctx["error"] = "The settings database isn't configured (BRAND_PROFIT_DB_URL / TARGETS_DB_URL)."
+    try:
+        ctx["pick"] = bp_data.pickers(region)
+    except warehouse.WarehouseUnavailable as e:
+        ctx["err"] = ctx["err"] or (_warehouse_error(e) + " Customer and brand pickers are empty.")
+    return templates.TemplateResponse(request, "brand_profit_settings.html", ctx)
+
+
 def _weekfmt(iso: str) -> str:
     d = date.fromisoformat(iso)
     return f"{d.day} {d:%b %Y} (wk {d.isocalendar().week})"
 
 
 templates.env.filters["weekfmt"] = _weekfmt
+templates.env.filters["bp_month"] = lambda iso: date.fromisoformat(str(iso)[:10]).strftime("%b %Y")
 
 
 _ST_AREAS = ("sell_through", "items", "st_table", "st_weekly")
@@ -811,7 +905,7 @@ async def _lifespan(app):
     _check_deployment()
     # Tests and machines without a warehouse URL skip the warm-up entirely.
     if os.environ.get("REPORTING_DB_URL"):
-        warehouse.watch(sales.data_version, sales.SALES_CACHE_PREFIXES)
+        warehouse.watch(sales.data_version, sales.SALES_CACHE_PREFIXES, drop_first=bp_np.CACHE_PREFIXES)
         warehouse.watch(field.data_version, field.CACHE_PREFIXES)
         warehouse.start_refresher(lambda: _warm_reports())
     yield

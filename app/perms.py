@@ -31,8 +31,8 @@ import json
 
 # Area keys. Reports must match the `key` of each entry in main.REPORTS, tools
 # the `key` of each entry in main.TOOLS.
-REPORT_KEYS = ["sales", "sell_through", "items", "st_table", "st_weekly", "field", "ageing"]
-TOOL_KEYS = ["promos", "vendor_bills", "targets"]
+REPORT_KEYS = ["sales", "sell_through", "items", "st_table", "st_weekly", "field", "ageing", "brand_profit"]
+TOOL_KEYS = ["promos", "vendor_bills", "targets", "brand_profit_settings"]
 AREA_KEYS = REPORT_KEYS + TOOL_KEYS
 AREA_LABELS = {"sales": "Sales Explorer (needs Sell-in $)",
                "sell_through": "Sell-Through Dashboard", "items": "Item Explorer",
@@ -41,12 +41,14 @@ AREA_LABELS = {"sales": "Sales Explorer (needs Sell-in $)",
                "field": "Field Activity (reps, display compliance)",
                "ageing": "Inventory Ageing (Macgear stock at cost)",
                "promos": "Vendor Promos", "vendor_bills": "PDF Bill Upload",
-               "targets": "Targets (prepare and commit sales targets)"}
+               "targets": "Targets (prepare and commit sales targets)",
+               "brand_profit": "Brand Profitability (needs Margin)",
+               "brand_profit_settings": "Brand Profitability settings (edit rebates, MDF, targets, PMs)"}
 
 CAP_KEYS = ["sell_in", "sell_in_value", "margin"]
 CAP_LABELS = {"sell_in": "Sell-in units & Macgear stock (quantities only)",
               "sell_in_value": "Sell-in $ — Macgear's sales amounts (staff only)",
-              "margin": "Margin — estimated GP $ and % (staff only)"}
+              "margin": "Margin — net profit $ and % (staff only)"}
 
 # What a vendor may ever be granted. Tools are internal workflows over Macgear's
 # own costs and claims; Macgear's sales $ and margin are commercial — a vendor
