@@ -37,6 +37,8 @@ warehouse host in the droplet `.env` broke the warm-up — compare the host, not
 | `/promos` | Vendor Promos — promotional credit claims | sales, finance |
 | `/targets` | Targets — build sales targets on NetSuite actuals, commit the official set (Postgres `targets` schema) | staff with the area |
 | `/vendor-bills` | PDF Bill Upload — Amazon Advertising → NetSuite CSV | accounts |
+| `/reports/brand-profit` | Brand Profitability — NP by PM / brand after rebates, freight, vendor rebates, MDF (LOCAL only) | staff with the area + Margin |
+| `/brand-profit/settings` | Brand Profitability settings — rates by month, PMs, freight / VR uploads, change log (LOCAL only) | staff with the area |
 | `/admin/users` | User management | admins |
 
 **Adding a report or tool** takes three edits: a tile in `REPORTS` or `TOOLS`
@@ -480,6 +482,14 @@ workers would each warm their own (fine at this size).
 by default (light if the viewer chose it in the side menu), `r-` prefixed
 classes, a no-build SVG chart (`RPT.chart`, bars can `stack`), sparklines, the
 search box. `asset_ver` is the newest mtime of any static file.
+**Glass look (EXPERIMENT, 2026-11-10, local, uncommitted; user liked it, parked 2026-11-17):** a
+glass button beside the palette picker (`_theme_btn.html`) opens a popover — on/off, panel
+opacity, blur, glow, shine, five backgrounds. `static/glass.css` + `static/glass.js` (sync in each
+shell's head; `localStorage.glass` JSON → `html[data-glass]` + `--gl-*` vars); every rule hangs off
+`html[data-glass]`, overriding surface tokens only (never accents). Sticky table cells, dropdowns and
+inputs stay near-opaque. Not tuned: Targets, Field, item pages. To drop it: delete the two files,
+the block in `_theme_btn.html`, and the two lines in `base.html` / `_rpt_base.html` /
+`report_sell_through.html`.
 **Every page is full width (user, 2026-10-21)** — no centred max-width container (`.r-wrap`,
 `.r-top-in`, `style.css` `main`, the dashboard's `.wrap`); most use is on a computer. Phones keep
 their own padding rules. Narrow measures stay only where they help reading (forms, help text).
@@ -707,6 +717,94 @@ projection, manual lines — see memory `project_targets_budget`); front end `st
   (dropped after), actuals faked; skipped if that database isn't reachable.
 - The old `Targets/` folder + `targets.db` are untouched and now unused by the site; the user
   will recreate FY27 in the tool.
+
+## Brand Profitability — the parts worth knowing (built 2026-11-17, LOCAL ONLY)
+
+Replaces the Excel chain `CYA Sales_AU_FY27.xlsb` → `MGAU ALL Brands Profitability FY27.xlsx`.
+Full reverse-engineering, reconciliation and user decisions: `brand profitability/DERIVATION.md`.
+Not committed or deployed.
+
+- **Report** `/reports/brand-profit` (area `brand_profit` AND the `margin` capability, route-checked;
+  staff only, brand scope applied): PM → brand → head-office customer, a month / FY quarter / year-to /
+  full FY of the company financial year, region AU or NZ, Excel export, GL drill-down per brand
+  (`/gl.json`). **Settings** `/brand-profit/settings` (area `brand_profit_settings`): customer rebates,
+  brand (+ item-category) exceptions, store extras, MDF, GP targets, PM by brand, GL account mapping,
+  freight / vendor-rebate uploads, change log.
+- **Formulas** (`app/brand_profit/calc.py`, pure, tested): rebate % = base + brand exception +
+  category exception + store extra; rebate $ and MDF $ are % × GROSS; GP = net − COGS − freight − VR;
+  NP = GP − MDF. **The GP target is measured against NP % on gross** (user, 2026-11-17).
+- **Site-wide net profit (2026-11-17, user: "the GP reporting on the rest of the site should come from
+  here").** The `margin` capability now shows **net profit** on the home page, Sales Explorer and Item
+  Explorer, with NP % on gross (revenue) and on net (revenue − customer rebates). `brand_profit/np.py`
+  applies the CYA method to every sales line (account 54, intercompany out — the site's revenue
+  definition): rebate + MDF per line, plus the line's **gross share** of its brand's freight + vendor
+  rebates for the month. Callers add those deductions to their est-cost column, so the old
+  `revenue − cost` code yields NP unchanged: Sales Explorer cubes (`adjust_cube_rows`, 4th column =
+  rebates), `_items_sql`, `sales.daily` / `tops`, `items.item_detail` (weekly). Held at ≈ line grain
+  (date × customer × brand_id × item_key, AU FY27 ~0.5M rows), cached per region × FY (`bp_np`),
+  **dropped** (not just expired) by the sales watch (`warehouse.watch(..., drop_first=)`) and by every
+  settings write, which also expires the pages built from it.
+  - Checked Oct 2026: Sales Explorer NP by brand = Brand Profitability NP to the cent in AU and NZ,
+    except "(no brand)". The CYA also counts other income lines that site revenue (account 54)
+    leaves out: 3PL, customer freight, short supply, courier claims. Those were AU −$54,103 and NZ
+    −$5,686 (incl. NZ "SAMPLES" freight, which has no brand to share it over).
+  - Freight / vendor rebates no brand-month can take (no positive sales, or no brand) go in totals
+    as a row with no customer / brand. A month with no GL lines loaded is flagged (* on the home NP
+    chip, Sales Explorer card): the current month normally has none until month end.
+  - Before Apr 2026 (no settings) NP = est. GP. With no settings DB configured the deductions are
+    zero, so a deployment needs `TARGETS_DB_URL` / `BRAND_PROFIT_DB_URL` or the NP figures are just
+    est. GP. Tests: `test_np_*`, `test_cube_rows_*`.
+  **PM and total targets are sales-weighted** (user, 2026-11-17; the Excel showed the max of the
+  brands', e.g. DV 32%): Σ(brand target × gross) ÷ Σ gross over brands that have a target. That's the
+  NP % the portfolio makes if every brand hits its target, so it moves with the mix (DV Oct 2026 = 14.7%).
+  "vs target $" = NP made on those brands − Σ(target × gross). Brands with no target are excluded and
+  flagged (*). The roll-up lives in `calc.Totals` (target_np / target_gross / target_hit), test
+  `test_pm_target_is_sales_weighted_not_the_max`. What the
+  rest of the site called "GP" was NetSuite estimated GP; it now comes from here as net profit (below).
+- **Sales** (`data.py`): `fact_sales_line`, accounts 54 / 108 / 957 / 866 / 867 / 869 / 902, by
+  transaction month, head office = `dim_ns_customer.parent_id`, store = line customer, brand = line
+  class else item brand, item category = `dim_item.category`. **AU→NZ intercompany excluded**
+  (the CYA included it; the page states the amount). Grouped to rule keys, cached per region × FY
+  (`bp_lines`, expired by the sales watch).
+- **Storage** (`db.py`): Postgres schema `brand_profit` via `BRAND_PROFIT_DB_URL`, else
+  `TARGETS_DB_URL`. `rate_rule` (kinds base / brand / store / mdf / gp_target, fractions, months
+  `valid_from`..`valid_to`, NULL = open), `brand_pm`, `gl_account`, `gl_batch` / `gl_line`,
+  `change_log`. Same-key rules may never overlap (`settings.py` refuses). "New rate from" ends the old
+  row the month before. Customers are NetSuite internal ids, so the later portfolio page (rep ↔
+  customer ↔ brand, PM ↔ brand) can build on `brand_pm`.
+- **Freight / vendor rebates**: NetSuite GL lines by brand and month (positive = cost). Shown with
+  NetSuite's sign so they tie to the GL, **coloured by effect on profit** (user, 2026-11-17): red =
+  reduces profit (freight, VR accruals), green = adds to it (negative VR = vendor credit). Same in the
+  Excel (number-format colours) and the GL drill-down. Per month the
+  NetSuite extract wins (`reporting.fact_gl_cost` when it exists: not built, the user is making
+  the saved search), else seeded / uploaded lines. An upload takes the saved search's own CSV
+  (`upload.py`) and replaces earlier lines for each month it contains (kept as `superseded_by`).
+  Removing an upload restores what it replaced.
+- **Seeded locally** 2026-11-17 into the LOCAL Postgres from `brand profitability/seed_fy27_au.json`
+  (`python -m app.brand_profit.seed <file> [--replace]`): 163 AU rules, 52 PMs, 848 GL lines; then
+  the 25 EOL brands' 0% GP targets were deleted (user: no target rather than 0%; the seed file now has
+  138 rules). Every setting is per region, so a brand can have a different PM in NZ (e.g. EUFY).
+  **NZ** seeded the same day from `seed_fy27_nz.json` (the NZ CYA: 177 rules incl. 24 `sku` rules, the
+  NZ CYA's "SKU rebate" = customer × item code; 74 PMs; 651 GL lines). Account 836 Courier Claims (NZ)
+  added to the sales accounts. Settings start Apr 2026 in both regions; earlier months show a warning
+  (no rates / PMs) until earlier CYAs are loaded.
+- Report filters: region, FY (the list is always the current FY and the two before), month / quarter /
+  year-to / full year, **PM** (tiles, total and Excel follow it). Table buttons: Expand all / Brands
+  only / PMs only. AU
+  rates follow the CYA, not NetSuite's `base_rebate_pct` (user). Airport West removed from the
+  store extras (user). NZ has no settings yet (the user has an NZ CYA, not yet supplied).
+- **Reconciled** (`brand profitability/reconcile.py [AU|NZ]`, live warehouse; NZ details in DERIVATION.md): AU Apr–Oct gross, qty and COGS
+  tie to the CYA every month. Rebate / NP tie on every brand except where lines move brand:
+  **known gap**: 158 credit-memo lines (−$134.5k) on generic items ("Sales", "Sales short supply &
+  damage", "Lost in Transit", freight credits) carry their brand only on the NetSuite line's
+  Class, which `DW_fact_sales` leaves blank, so they sit under "- No Brand -". With those lines
+  treated as unbranded, every month × brand cell equals the CYA to the cent, apart from one Sep
+  EUFY credit memo ($445.40) that the CYA had unbranded and NetSuite now classes EUFY. Fix =
+  the sales export's brandkey should be the line Class.
+- Local preview: launch config `reporting-site-preview` (8032: live warehouse, `TARGETS_DB_URL` =
+  local Postgres from `.env`, auth off). Tests: `tests/test_brand_profit.py`.
+- **Before going live** (not done): the cluster role/schema as for Targets (`reporting_app` may
+  create `brand_profit`), seed there, decide who gets the two areas, add an `updates.md` entry.
 
 ## Vendor Bill Importer — the parts worth knowing
 

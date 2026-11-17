@@ -94,7 +94,7 @@
   Retail value = units × RRP in {{ cur }}.
   {% if 'sell_in' in caps %}Sell-in = Macgear's NetSuite sales to retailers (units{% if 'sell_in_value' in caps %}, and $ ex-GST{% endif %}; net of credits, intercompany excluded), grouped into the same Sunday weeks; the faded last bar is the week so far.
   Macgear stock = latest snapshot of saleable warehouse locations; its cover uses the average weekly sell-in of the last 4 weeks.{% endif %}
-  {% if 'margin' in caps %}GP = NetSuite's estimated cost, not posted COGS.{% endif %}
+  {% if 'margin' in caps %}Net profit = revenue − NetSuite estimated cost − customer rebates, MDF and the brand's freight &amp; vendor rebates (shared by sales), from the Brand Profitability settings. NP % is on gross (revenue) and on net (revenue − customer rebates).{% endif %}
   Cover = stock ÷ average weekly units over the last 4 weeks. AU and NZ are never added together.
 </p>
 {% endblock %}
@@ -133,7 +133,7 @@
     cards.push({l: "Sell-in units", v: RPT.int(K.si_units), s: K.sell_ratio == null ? "no sell-in in period" :
       "out ÷ in " + K.sell_ratio.toFixed(2) + "× since " + RPT.wk(K.ratio_from), sp: S.si_units});
     if (has("sell_in_value")) cards.push({l: "Sell-in value", v: money(K.si_value), s: CUR + " ex-GST, net", sp: S.si_value});
-    if (has("margin")) cards.push({l: "Est. gross profit", v: money(K.gp), s: K.gp_pct == null ? "—" : K.gp_pct.toFixed(1) + "% margin", sp: S.si_gp});
+    if (has("margin")) cards.push({l: "Net profit", v: money(K.gp), s: K.gp_pct == null ? "—" : K.gp_pct.toFixed(1) + "% on gross" + (K.np_net_pct == null ? "" : " · " + K.np_net_pct.toFixed(1) + "% on net"), sp: S.si_gp});
     if (D.inventory) cards.push({l: "Macgear available", v: RPT.int(D.inventory.available), s: D.inventory.weeks_cover == null ? RPT.int(D.inventory.on_hand) + " on hand" : D.inventory.weeks_cover.toFixed(1) + " weeks of sell-in"});
   }
   document.getElementById("kpis").innerHTML = cards.map(function (c) {
@@ -160,8 +160,8 @@
       {name: HIST ? "Sell-through (Macgear)" : "Sell-through units", values: withWtd(stMg, null), color: col.acc, type: "line"}]; }});
     if (has("sell_in_value")) metrics.push({k: "si_value", t: "Sell-in value", f: moneyFull, wtd: true, series: function () { return [
       {name: "Sell-in value", values: withWtd(S.si_value, wtd ? Math.round(wtd.v) : 0), color: col.amb, type: "bar"}]; }});
-    if (has("margin")) metrics.push({k: "gp", t: "Est. gross profit", f: moneyFull, wtd: true, series: function () { return [
-      {name: "Est. GP", values: withWtd(S.si_gp, wtd ? Math.round(wtd.gp) : 0), color: col.pos, type: "bar"}]; }});
+    if (has("margin")) metrics.push({k: "gp", t: "Net profit", f: moneyFull, wtd: true, series: function () { return [
+      {name: "Net profit", values: withWtd(S.si_gp, wtd ? Math.round(wtd.gp) : 0), color: col.pos, type: "bar"}]; }});
   }
   metrics.push({k: "cum", t: "Cumulative", f: RPT.int, series: function () {
     var c = 0, out = [{name: "Sell-through (cumulative)", values: S.st_units.map(function (v) { return c += v; }), color: col.acc, type: "area"}];

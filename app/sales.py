@@ -6,7 +6,10 @@ Definitions (shared with the warehouse — see Sell Through/CLAUDE.md):
   revenue = fact_sales_line.net_sales: posting account 54, intercompany
             (AU -> NZ) excluded, ex-GST, in the subsidiary's currency.
             AU and NZ are never added together.
-  est. GP = net_sales - net_sales_est_cost (NetSuite's estimate, not COGS).
+  net profit (the "margin" figures, 2026-11-17) = net_sales - est. cost - the Brand Profitability
+            deductions per line (customer rebates, MDF, the brand's freight / vendor rebates
+            shared by gross; brand_profit/np.py). Was est. GP (net_sales - est. cost). NP % is
+            shown on gross (revenue) and on net sales (revenue - customer rebates).
   periods = Macgear's financial year, April–March, named by its end year
             (FY27 = Apr 2026 – Mar 2027); quarters Q1 = Apr–Jun … Q4 = Jan–Mar.
             Same as dim_date.fy_* in the warehouse.
@@ -21,6 +24,7 @@ import calendar
 from datetime import date, timedelta
 
 from . import warehouse
+from .brand_profit import np as bp_np
 
 REGIONS = ("AU", "NZ")
 # NetSuite lands in the warehouse every 15 min (Zone export -> S3 -> Windmill);
@@ -73,7 +77,8 @@ def _from_key(k: int) -> date:
 
 # ---- data ----------------------------------------------------------------------
 def daily(start: date) -> dict:
-    """{region: {date: [revenue, est_cost, units]}} from `start` to today."""
+    """{region: {date: [revenue, cost, units, rebates]}} from `start` to today; cost = est. cost +
+    net-profit deductions (unallocated freight / vendor rebates on the month's 1st)."""
     rk = {v: k for k, v in ((c, warehouse.region_key(c)) for c in REGIONS)}
     rows = warehouse.query_summary("agg_sales_day", """
         select s.region_key, s.date_key, sum(s.net_sales), sum(s.net_sales_est_cost),
@@ -89,7 +94,17 @@ def daily(start: date) -> dict:
     out = {r: {} for r in REGIONS}
     for region_key, dk, v, c, q in rows:
         if region_key in rk:
-            out[rk[region_key]][_from_key(dk)] = [float(v or 0), float(c or 0), float(q or 0)]
+            out[rk[region_key]][_from_key(dk)] = [float(v or 0), float(c or 0), float(q or 0), 0.0]
+    hi = _key(date.today() + timedelta(days=1))
+    for r in REGIONS:
+        days = out[r]
+        for dk, (dx, dn) in bp_np.deductions(r, _key(start), hi, lambda k, c, b, i: k).items():
+            cell = days.setdefault(_from_key(dk), [0.0, 0.0, 0.0, 0.0])
+            cell[1] += dx
+            cell[3] += dn
+        for ym, amt in bp_np.unallocated(r, _key(start), hi).items():
+            cell = days.setdefault(date(ym // 100, ym % 100, 1), [0.0, 0.0, 0.0, 0.0])
+            cell[1] += amt
     return out
 
 
@@ -126,11 +141,29 @@ def tops(start: date, end: date) -> dict:
             where s.date_key between %(lo)s and %(hi)s and s.net_sales is not null
             group by 1, 2, 5""",
     }
+    # net-profit deductions by the same labels (brand_profit/np.py)
+    lab = {"customers": {}, "reps": {}, "brands": {}, "items": {}}
+    for cid, grp, rep in warehouse.query(
+            "select customer_id, coalesce(customer_group, parent_name, customer_name, 'Other'), "
+            "coalesce(account_rep, 'No account manager') from reporting.dim_ns_customer"):
+        lab["customers"][cid], lab["reps"][cid] = grp, rep
+    lab["brands"] = dict(warehouse.query("select brand_id, brand from reporting.dim_brand"))
+    ded = {}
+    for r in REGIONS:
+        ded[r] = {
+            "customers": bp_np.deductions(r, p["lo"], p["hi"], lambda k, c, b, i: lab["customers"].get(c, "Other")),
+            "reps": bp_np.deductions(r, p["lo"], p["hi"], lambda k, c, b, i: lab["reps"].get(c, "No account manager")),
+            "brands": bp_np.deductions(r, p["lo"], p["hi"], lambda k, c, b, i: lab["brands"].get(b) or "Other"),
+            "items": bp_np.deductions(r, p["lo"], p["hi"], lambda k, c, b, i: i)}
     out = {r: {} for r in REGIONS}
     with warehouse.connect() as conn, conn.cursor() as cur:
         # customers / brands / reps from the day summary when it's fresh (same sums;
         # n_net > 0 = the lines with a net_sales value); items need the line facts
         fast = "agg_sales_day" in warehouse.fresh_summaries(cur)
+        cur.execute("select macgear_code, item_key from reporting.dim_item")
+        item_key_of = {}
+        for code, ik in cur.fetchall():
+            item_key_of.setdefault(code, []).append(ik)
         for name, sql in q.items():
             if fast and name != "items":
                 sql = (sql.replace("from reporting.fact_sales_line s", "from reporting.agg_sales_day s")
@@ -141,7 +174,11 @@ def tops(start: date, end: date) -> dict:
                 region = rk.get(row[0])
                 if region:
                     v, c = float(row[2] or 0), float(row[3] or 0)
-                    item = {"name": row[1], "value": round(v), "gp": round(v - c)}
+                    if name == "items":
+                        c += sum(ded[region]["items"].get(ik, (0.0, 0.0))[0] for ik in item_key_of.get(row[4], ()))
+                    else:
+                        c += ded[region][name].get(row[1], (0.0, 0.0))[0]
+                    item = {"name": row[1], "value": round(v), "gp": round(v - c)}   # gp = net profit
                     if name == "items":
                         item["code"] = row[4]
                     per[region].append(item)
@@ -162,7 +199,7 @@ def data_version():
 # Everything built from NetSuite sales or stock: rebuilt as soon as a new load lands.
 SALES_CACHE_PREFIXES = ("sales_daily", "sales_tops", "sales_fresh", "sales_ic",
                         "sx_day", "sx_month", "sx_items", "sx_opts", "sx_ram", "item", "st_weekly",
-                        "targets_actuals", "targets_years")
+                        "targets_actuals", "targets_years", "bp_lines")
 
 
 def intercompany(start: date, end: date) -> dict:
@@ -224,10 +261,10 @@ def target_lines() -> dict:
 
 # ---- the summary -----------------------------------------------------------------
 def _sum(days: dict, a: date, b: date) -> list:
-    t = [0.0, 0.0, 0.0]
+    t = [0.0, 0.0, 0.0, 0.0]
     for d, v in days.items():
         if a <= d <= b:
-            t[0] += v[0]; t[1] += v[1]; t[2] += v[2]
+            t[0] += v[0]; t[1] += v[1]; t[2] += v[2]; t[3] += v[3] if len(v) > 3 else 0.0
     return t
 
 
@@ -238,9 +275,11 @@ def _block(days: dict, a: date, b: date, tgt: float | None, margin: bool) -> dic
            "growth": ((cur[0] - ly[0]) / abs(ly[0]) * 100) if ly[0] else None,
            "target": round(tgt) if tgt else None,
            "to_target": (cur[0] / tgt * 100) if tgt else None}
-    if margin:
+    if margin:                                       # net profit (see top)
         out["gp"] = round(cur[0] - cur[1])
         out["gp_pct"] = ((cur[0] - cur[1]) / cur[0] * 100) if cur[0] else None
+        net = cur[0] - cur[3]
+        out["np_net_pct"] = ((cur[0] - cur[1]) / net * 100) if net else None
     return out
 
 
@@ -266,6 +305,8 @@ def summary(today: date, margin: bool) -> dict:
         q_t = sum(v for k, v in t.items() if q0 <= k <= today) or None
         y_t = sum(v for k, v in t.items() if fy0 <= k <= today) or None
         mtd = _block(d, m0, today, month_t, margin)
+        if margin:
+            mtd["np_gl_missing"] = bp_np.gl_missing(r, today)
         mtd["pace"] = round(mtd["value"] / wd_done * wd_all) if wd_done else None
         if month_t:
             mtd["pace_to_target"] = mtd["pace"] / month_t * 100

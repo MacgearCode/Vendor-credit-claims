@@ -212,8 +212,11 @@ def refresh_due(now: float | None = None) -> int:
 _watches: list = []          # [probe, prefixes, last_value]
 
 
-def watch(probe, prefixes: tuple):
-    _watches.append([probe, tuple(prefixes), None])
+def watch(probe, prefixes: tuple, drop_first: tuple = ()):
+    """drop_first: prefixes DROPPED (not just expired) when the probe changes, before the rest
+    expire — for inputs other entries are built from (brand_profit np deductions), so a
+    background rebuild never reuses a stale copy of them."""
+    _watches.append([probe, tuple(prefixes), None, tuple(drop_first)])
 
 
 def expire(prefixes: tuple) -> int:
@@ -248,6 +251,8 @@ def check_watches() -> list:
             log.warning("watch probe failed: %s", e)
             continue
         if w[2] is not None and value != w[2]:
+            if len(w) > 3 and w[3]:
+                drop(w[3])
             expire(w[1])
             fired.extend(w[1])
         w[2] = value

@@ -1,0 +1,285 @@
+{% extends "base.html" %}
+{% block title %}Brand Profitability settings{% endblock %}
+{% block brandword %}Brand Profitability{% endblock %}
+{% block nav %}
+  <a href="/reports/brand-profit?region={{ region }}">Report</a>
+  <a href="/brand-profit/settings?region={{ region }}">Settings</a>
+{% endblock %}
+
+{% macro pctv(v) %}{{ ('%.4f' % (v * 100)).rstrip('0').rstrip('.') }}{% endmacro %}
+{% macro mon(d) %}{{ d.strftime('%Y-%m') if d else '' }}{% endmacro %}
+{% macro monl(d) %}{{ d.strftime('%b %Y') if d else 'open' }}{% endmacro %}
+{% macro cust(r) %}{% if r.customer_id is not none %}{{ r.customer_name }} · {{ r.customer_id }}{% endif %}{% endmacro %}
+
+{% macro rule_fields(kind, r=None) %}
+  {% if kind in ('base', 'brand', 'sku') or (kind == 'mdf') %}
+  <label class="grow">{{ 'Customer (head office)' if kind != 'mdf' else 'Customer (blank = every customer)' }}
+    <input name="customer" list="bpHeads" value="{{ cust(r) if r else '' }}" {{ 'required' if kind != 'mdf' }} placeholder="Start typing a name"></label>
+  {% elif kind == 'store' %}
+  <label class="grow">Store <input name="customer" list="bpStores" value="{{ cust(r) if r else '' }}" required placeholder="Start typing a store"></label>
+  {% endif %}
+  {% if kind in ('brand', 'mdf', 'gp_target') %}
+  <label>Brand <input name="brand" list="bpBrands" value="{{ r.brand if r else '' }}" required size="14"></label>
+  {% endif %}
+  {% if kind == 'sku' %}
+  <label>Item code <input name="item_code" value="{{ r.item_code if r else '' }}" required size="16" placeholder="e.g. HWA10-model-9"></label>
+  {% endif %}
+  {% if kind == 'brand' %}
+  <label>Item category <input name="item_category" list="bpCats" value="{{ r.item_category if r else '' }}" size="12" placeholder="all"></label>
+  {% endif %}
+  <label>{{ 'Target %' if kind == 'gp_target' else 'Rate %' }} <input name="pct" value="{{ pctv(r.pct|float) if r else '' }}" required size="6" inputmode="decimal"></label>
+  <label>From <input type="month" name="valid_from" value="{{ mon(r.valid_from) if r else '' }}" required></label>
+  <label>To <input type="month" name="valid_to" value="{{ mon(r.valid_to) if r else '' }}" title="Blank = until changed"></label>
+  <label class="grow">Note <input name="note" value="{{ r.note if r else '' }}"></label>
+{% endmacro %}
+
+{% block content %}
+<style>
+  .bp-tabs{display:flex;gap:.4rem;flex-wrap:wrap;margin:.6rem 0 1rem}
+  .bp-tbl td{vertical-align:top}
+  .bp-tbl details{display:inline-block}
+  .bp-tbl details[open]{display:block;margin-top:.4rem}
+  .bp-tbl summary{cursor:pointer;color:var(--brand);font-size:.85rem;display:inline}
+  .bp-old td{opacity:.55}
+  .bp-tools{display:flex;gap:.8rem;align-items:flex-end;flex-wrap:wrap;margin:.4rem 0 .6rem}
+  .bp-tools label{display:flex;flex-direction:column;font-size:.78rem;gap:.2rem}
+  .banner.okb{background:#d1e7dd;color:#0f5132;border:1px solid #a3cfbb}
+  .bp-mono{font-family:ui-monospace,Consolas,monospace;font-size:.78rem;white-space:pre-wrap;word-break:break-word;max-width:520px}
+</style>
+
+<h1 class="home-title">Brand Profitability settings</h1>
+<p class="hint">Rates by month, used by the <a href="/reports/brand-profit?region={{ region }}">Brand Profitability report</a>.
+  A rate applies to every month from <b>From</b> to <b>To</b> (blank To = until changed). To change a rate from a month on,
+  use <b>New rate from</b> on its row: the old row ends the month before. Every change is logged with who made it.</p>
+
+{% if regions|length > 1 %}
+<div class="bp-tabs">{% for r in regions %}<a class="tab {{ 'active' if r == region }}" href="?region={{ r }}&tab={{ tab }}">{{ 'Australia' if r == 'AU' else 'New Zealand' }}</a>{% endfor %}</div>
+{% endif %}
+{% if err %}<p class="banner error">{{ err }}</p>{% endif %}
+{% if ok %}<p class="banner okb">{{ ok }}</p>{% endif %}
+{% if error %}<p class="banner error">{{ error }}</p>{% else %}
+
+{% set tabs = [('base', 'Customer rebates'), ('brand', 'Brand exceptions'), ('sku', 'SKU exceptions'), ('store', 'Store extras'), ('mdf', 'MDF'),
+               ('gp', 'GP targets'), ('pm', 'PMs'), ('gl', 'Freight & vendor rebates'), ('log', 'Change log')] %}
+<div class="bp-tabs">{% for k, lab in tabs %}<a class="tab {{ 'active' if tab == k }}" href="?region={{ region }}&tab={{ k }}">{{ lab }}</a>{% endfor %}</div>
+
+<datalist id="bpHeads">{% for x in pick.heads %}<option value="{{ x }}">{% endfor %}</datalist>
+<datalist id="bpStores">{% for x in pick.stores %}<option value="{{ x }}">{% endfor %}</datalist>
+<datalist id="bpBrands">{% for x in pick.brands %}<option value="{{ x }}">{% endfor %}</datalist>
+<datalist id="bpCats">{% for x in pick.categories %}<option value="{{ x }}">{% endfor %}</datalist>
+
+{% set kind = {'base':'base','brand':'brand','sku':'sku','store':'store','mdf':'mdf','gp':'gp_target'}.get(tab) %}
+{% if kind %}
+{% set help = {
+  'base': "The head-office customer's rebate, as a % of gross sales (credit memos give it back). Customers with no row get 0%.",
+  'brand': "Added to the customer's rebate for one brand (negative to reduce it), e.g. JB × MOVA −10% takes 19% to 9%. With an item category, only items in that NetSuite category.",
+  'store': "Added to the head office's rebate for one store's own sales (the JB airport stores).",
+  'sku': "Added to the customer's rebate for one NetSuite item code (negative to reduce it), e.g. Noel Leeming × a Withings watch −10%.",
+  'mdf': "MDF as a % of gross, by brand. A row with a customer overrides the brand's default for that customer.",
+  'gp_target': "The brand's target for net profit % on gross sales — the report's 'vs target' column."}[kind] %}
+<div class="card">
+  <h2 style="margin-top:0">{{ kind_labels[kind] }}</h2>
+  <p class="hint">{{ help }}</p>
+  <form class="inline-form" method="post" action="/brand-profit/rule">
+    <input type="hidden" name="region" value="{{ region }}"><input type="hidden" name="kind" value="{{ kind }}">
+    {{ rule_fields(kind) }}
+    <button class="btn" type="submit">Add</button>
+  </form>
+</div>
+
+<div class="card">
+  <div class="bp-tools">
+    <label>Find <input type="search" id="bpFind" placeholder="Customer, brand, note" size="28"></label>
+    <label>In force in <input type="month" id="bpMonth"></label>
+    <span class="hint" id="bpCount"></span>
+  </div>
+  <table class="grid bp-tbl" id="bpRules">
+    <thead><tr>
+      {% if kind != 'gp_target' %}<th>{{ 'Store' if kind == 'store' else 'Customer' }}</th>{% endif %}
+      {% if kind in ('brand', 'mdf', 'gp_target') %}<th>Brand</th>{% endif %}
+      {% if kind == 'brand' %}<th>Category</th>{% endif %}
+      {% if kind == 'sku' %}<th>Item code</th>{% endif %}
+      <th class="num">{{ 'Target' if kind == 'gp_target' else 'Rate' }}</th><th>From</th><th>To</th><th>Note</th><th>Changed</th><th></th>
+    </tr></thead>
+    <tbody>
+    {% for r in view.rules[kind] %}
+      <tr data-from="{{ mon(r.valid_from) }}" data-to="{{ mon(r.valid_to) }}">
+        {% if kind != 'gp_target' %}<td>{{ r.customer_name or ('every customer' if kind == 'mdf' else '') }}{% if r.customer_id is not none %} <span class="hint">#{{ r.customer_id }}</span>{% endif %}</td>{% endif %}
+        {% if kind in ('brand', 'mdf', 'gp_target') %}<td>{{ r.brand }}</td>{% endif %}
+        {% if kind == 'brand' %}<td>{{ r.item_category or 'all' }}</td>{% endif %}
+        {% if kind == 'sku' %}<td>{{ r.item_code }}</td>{% endif %}
+        <td class="num"><b>{{ pctv(r.pct|float) }}%</b></td><td>{{ monl(r.valid_from) }}</td><td>{{ monl(r.valid_to) }}</td>
+        <td>{{ r.note }}</td>
+        <td class="hint">{{ r.updated_by }}<br>{{ r.updated_at | sydney if r.updated_at else '' }}</td>
+        <td class="row-actions">
+          <details><summary>New rate from…</summary>
+            <form class="inline-form" method="post" action="/brand-profit/rule/{{ r.id }}/change">
+              <input type="hidden" name="region" value="{{ region }}"><input type="hidden" name="kind" value="{{ kind }}">
+              <label>From <input type="month" name="month" required></label>
+              <label>Rate % <input name="pct" required size="6" inputmode="decimal"></label>
+              <label>Note <input name="note" size="18"></label>
+              <button class="btn small" type="submit">Save</button>
+            </form></details>
+          <details><summary>Edit</summary>
+            <form class="inline-form" method="post" action="/brand-profit/rule/{{ r.id }}">
+              <input type="hidden" name="region" value="{{ region }}"><input type="hidden" name="kind" value="{{ kind }}">
+              {{ rule_fields(kind, r) }}
+              <button class="btn small" type="submit">Save</button>
+            </form></details>
+          <form class="inline-delete" method="post" action="/brand-profit/rule/{{ r.id }}/delete"
+                onsubmit="return confirm('Delete this row? It stays in the change log.')">
+            <input type="hidden" name="region" value="{{ region }}"><input type="hidden" name="kind" value="{{ kind }}">
+            <button class="btn small ghost" type="submit">Delete</button></form>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="9" class="hint">None yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% elif tab == 'pm' %}
+<div class="card">
+  <h2 style="margin-top:0">Product manager by brand</h2>
+  <p class="hint">Which PM a brand's figures roll up to on the report. Effective-dated, so a brand that changes hands keeps its
+    history under the old PM. This is the start of managing portfolio assignments here rather than in NetSuite.</p>
+  <form class="inline-form" method="post" action="/brand-profit/pm">
+    <input type="hidden" name="region" value="{{ region }}">
+    <label>Brand <input name="brand" list="bpBrands" required size="14"></label>
+    <label>PM <input name="pm" required size="18"></label>
+    <label>From <input type="month" name="valid_from" required></label>
+    <label>To <input type="month" name="valid_to"></label>
+    <label class="grow">Note <input name="note"></label>
+    <button class="btn" type="submit">Add</button>
+  </form>
+</div>
+<div class="card">
+  <div class="bp-tools"><label>Find <input type="search" id="bpFind" placeholder="Brand or PM" size="28"></label>
+    <label>In force in <input type="month" id="bpMonth"></label><span class="hint" id="bpCount"></span></div>
+  <table class="grid bp-tbl" id="bpRules">
+    <thead><tr><th>Brand</th><th>PM</th><th>From</th><th>To</th><th>Note</th><th>Changed</th><th></th></tr></thead>
+    <tbody>
+    {% for p in view.pms %}
+      <tr data-from="{{ mon(p.valid_from) }}" data-to="{{ mon(p.valid_to) }}">
+        <td>{{ p.brand }}</td><td><b>{{ p.pm }}</b></td><td>{{ monl(p.valid_from) }}</td><td>{{ monl(p.valid_to) }}</td><td>{{ p.note }}</td>
+        <td class="hint">{{ p.updated_by }}<br>{{ p.updated_at | sydney if p.updated_at else '' }}</td>
+        <td class="row-actions">
+          <details><summary>New PM from…</summary>
+            <form class="inline-form" method="post" action="/brand-profit/pm/{{ p.id }}/change">
+              <input type="hidden" name="region" value="{{ region }}">
+              <label>From <input type="month" name="month" required></label>
+              <label>PM <input name="pm" required size="16"></label>
+              <button class="btn small" type="submit">Save</button></form></details>
+          <details><summary>Edit</summary>
+            <form class="inline-form" method="post" action="/brand-profit/pm/{{ p.id }}">
+              <input type="hidden" name="region" value="{{ region }}">
+              <label>Brand <input name="brand" list="bpBrands" value="{{ p.brand }}" required size="14"></label>
+              <label>PM <input name="pm" value="{{ p.pm }}" required size="16"></label>
+              <label>From <input type="month" name="valid_from" value="{{ mon(p.valid_from) }}" required></label>
+              <label>To <input type="month" name="valid_to" value="{{ mon(p.valid_to) }}"></label>
+              <label>Note <input name="note" value="{{ p.note }}"></label>
+              <button class="btn small" type="submit">Save</button></form></details>
+          <form class="inline-delete" method="post" action="/brand-profit/pm/{{ p.id }}/delete" onsubmit="return confirm('Delete this row?')">
+            <input type="hidden" name="region" value="{{ region }}"><button class="btn small ghost" type="submit">Delete</button></form>
+        </td>
+      </tr>
+    {% else %}<tr><td colspan="7" class="hint">None yet.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% elif tab == 'gl' %}
+<div class="card">
+  <h2 style="margin-top:0">Freight &amp; vendor rebates</h2>
+  <p class="hint">NetSuite GL lines on the freight / landed-cost and vendor-rebate accounts, by brand and month (positive =
+    cost, negative = a vendor credit). Upload the NetSuite saved search as CSV: an upload <b>replaces</b> the lines for every
+    month in the file and leaves other months alone. Once the automatic NetSuite extract covers a month, it replaces
+    uploads for that month.</p>
+  <form class="inline-form" method="post" action="/brand-profit/upload" enctype="multipart/form-data">
+    <input type="hidden" name="region" value="{{ region }}">
+    <label>Saved search CSV <input type="file" name="file" accept=".csv" required></label>
+    <label class="grow">Note <input name="note" placeholder="e.g. Nov 2026 month end"></label>
+    <button class="btn" type="submit">Upload</button>
+  </form>
+  <p class="hint">Columns read: Date or Period, Account, Amount (debit − credit), Class, and Document Number, Type, Name, Memo,
+    Line Unique Key if present. Every account in the file must be mapped below first.</p>
+</div>
+<div class="card">
+  <h2 style="margin-top:0">GL accounts</h2>
+  <form class="inline-form" method="post" action="/brand-profit/account">
+    <input type="hidden" name="region" value="{{ region }}">
+    <label class="grow">Account (as the saved search prints it) <input name="account" required></label>
+    <label>Type <select name="kind"><option value="freight">Freight</option><option value="vr">Vendor rebate</option></select></label>
+    <button class="btn" type="submit">Save</button>
+  </form>
+  <table class="grid compact">
+    <thead><tr><th>Account</th><th>Type</th><th>Changed</th><th></th></tr></thead>
+    <tbody>{% for a in view.accounts %}
+      <tr><td>{{ a.account }}</td><td>{{ 'Freight' if a.kind == 'freight' else 'Vendor rebate' }}</td>
+        <td class="hint">{{ a.updated_by }} {{ a.updated_at | sydney if a.updated_at else '' }}</td>
+        <td><form class="inline-delete" method="post" action="/brand-profit/account/delete">
+          <input type="hidden" name="region" value="{{ region }}"><input type="hidden" name="account" value="{{ a.account }}">
+          <button class="btn small ghost" type="submit">Remove</button></form></td></tr>
+    {% else %}<tr><td colspan="4" class="hint">No accounts mapped yet.</td></tr>{% endfor %}</tbody>
+  </table>
+</div>
+<div class="card">
+  <h2 style="margin-top:0">Loaded batches</h2>
+  <table class="grid">
+    <thead><tr><th>#</th><th>Source</th><th>File</th><th>Months</th><th class="num">Lines</th><th class="num">In force</th>
+      <th class="num">Freight</th><th class="num">Vendor rebates</th><th>Loaded</th><th></th></tr></thead>
+    <tbody>{% for b in view.batches %}
+      <tr class="{{ 'bp-old' if b.in_force == 0 }}"><td>{{ b.id }}</td><td>{{ 'CYA workbook' if b.source == 'seed' else 'Upload' }}</td>
+        <td>{{ b.filename }}<br><span class="hint">{{ b.note }}</span></td>
+        <td>{{ monl(b.first_month) }}{% if b.last_month != b.first_month %} – {{ monl(b.last_month) }}{% endif %}</td>
+        <td class="num">{{ b.lines }}</td><td class="num">{{ b.in_force }}</td>
+        <td class="num">{{ "{:,.2f}".format(b.freight|float) }}</td><td class="num">{{ "{:,.2f}".format(b.vr|float) }}</td>
+        <td class="hint">{{ b.created_by }}<br>{{ b.created_at | sydney }}</td>
+        <td>{% if b.source == 'upload' %}<form class="inline-delete" method="post" action="/brand-profit/batch/{{ b.id }}/delete"
+              onsubmit="return confirm('Remove this upload? Lines it replaced come back into force.')">
+            <input type="hidden" name="region" value="{{ region }}"><button class="btn small ghost" type="submit">Remove</button></form>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="10" class="hint">Nothing loaded.</td></tr>{% endfor %}</tbody>
+  </table>
+</div>
+
+{% elif tab == 'log' %}
+<div class="card">
+  <h2 style="margin-top:0">Change log</h2>
+  <p class="hint">Every change to these settings, newest first (last 300). Rows are never edited or removed.</p>
+  <table class="grid compact">
+    <thead><tr><th>When</th><th>Who</th><th>What</th><th>Action</th><th>Before</th><th>After</th><th>Note</th></tr></thead>
+    <tbody>{% for l in view.log %}
+      <tr><td class="hint">{{ l.at | sydney }}</td><td>{{ l.by_user }}</td><td>{{ l.entity }} {{ l.entity_id }}</td><td>{{ l.action }}</td>
+        <td class="bp-mono">{{ l.before | tojson if l.before else '' }}</td><td class="bp-mono">{{ l.after | tojson if l.after else '' }}</td>
+        <td>{{ l.note }}</td></tr>
+    {% else %}<tr><td colspan="7" class="hint">No changes yet.</td></tr>{% endfor %}</tbody>
+  </table>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const tbl = document.getElementById('bpRules');
+  if (!tbl) return;
+  const find = document.getElementById('bpFind'), month = document.getElementById('bpMonth'), count = document.getElementById('bpCount');
+  const rows = [...tbl.tBodies[0].rows].filter(r => r.dataset.from);
+  function apply() {
+    const q = (find.value || '').toLowerCase().split(/\s+/).filter(Boolean), m = month.value;
+    let n = 0;
+    for (const r of rows) {
+      const txt = r.cells[0].textContent.toLowerCase() + ' ' + r.textContent.toLowerCase();
+      const okQ = q.every(w => txt.includes(w));
+      const okM = !m || (r.dataset.from <= m && (!r.dataset.to || m <= r.dataset.to));
+      r.hidden = !(okQ && okM);
+      if (!r.hidden) n++;
+    }
+    count.textContent = `${n} of ${rows.length} rows`;
+  }
+  find.addEventListener('input', apply); month.addEventListener('input', apply); apply();
+})();
+</script>
+{% endblock %}
