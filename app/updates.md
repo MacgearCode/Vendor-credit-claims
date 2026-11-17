@@ -9,7 +9,12 @@ st_weekly, field, ageing, items, st_table, sell_through, promos, vendor_bills) o
 Add an entry with every commit people would notice. Everything above the first
 "##" is ignored.
 
-## 2026-11-17 | Brand Profitability report | brand_profit brand_profit_settings
+## 2026-11-18 | Targets is live | targets
+- Tools → Targets now works on the live site: build next year's sales targets from NetSuite actuals with growth %, monthly pacing and new lines, then Commit the final set as the official targets for that financial year.
+- Once a set is committed, the home page tiles and Sales Explorer show progress against it.
+- Scenarios made while it was being tested on a laptop weren't carried over, so the list starts empty.
+
+## 2026-11-17 | Brand Profitability report | brand_profit, brand_profit_settings
 - New report: net profit by PM and brand, after customer rebates, freight, vendor rebates and MDF — the CYA workbook's method, for AU and NZ, any month, quarter or year to date of the financial year. Open a brand to see its customers and the freight / vendor-rebate lines behind it; download to Excel.
 - Filter by PM; collapse to PMs, brands or customers. A PM's GP target is now their brands' targets weighted by sales, with the gap in dollars.
 - Freight and vendor rebates are coloured by their effect on profit: red reduces it, green (a vendor credit) adds to it.
