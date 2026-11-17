@@ -153,7 +153,7 @@
       '<div class="r-card-h" style="margin-bottom:0"><div><p class="r-eyebrow">' + NAMES[r] + " · " + cur + "</p><h2>" + S.month + " to date</h2></div>" +
       '<div class="r-meta" style="margin:0">' + '<span class="r-chip ' + (M.growth >= 0 ? "pos" : "neg") + '">' + growth(M.growth).replace(/<\/?span[^>]*>/g, "") + " vs LY</span>" +
       (MARGIN && M.gp_pct != null ? '<span class="r-chip" title="Net profit % on gross' + (M.np_net_pct != null ? ' · ' + M.np_net_pct.toFixed(1) + '% on net sales' : '') +
-        (M.np_gl_missing ? ' — this month's freight and vendor rebates aren't loaded yet, so they aren't in it' : '') + '">NP <b>&nbsp;' + M.gp_pct.toFixed(1) + "%" +
+        (M.np_gl_missing ? ' — this month’s freight and vendor rebates aren’t loaded yet, so they aren’t in it' : '') + '">NP <b>&nbsp;' + M.gp_pct.toFixed(1) + "%" +
         (M.np_gl_missing ? "*" : "") + "</b></span>" : "") + "</div></div>" +
       '<div class="big">' + RPT.money(M.value, cur, true) + "<small>LY " + RPT.money(M.ly, cur) + "</small></div>" +
       '<div class="r-meta" style="margin:0 0 10px">' + paceTxt + '<span class="r-chip">Today <b>&nbsp;' + RPT.money(R.today, cur) + "</b></span>" +
