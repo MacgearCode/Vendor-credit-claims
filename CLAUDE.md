@@ -115,6 +115,21 @@ steps) is in `3PL Portal/docs/email_delivery.md`. Tests: `tests/test_account_ema
 
 The app refuses to demote, disable or delete the last active admin.
 
+**Activity logging (2026-11-19, user's request; admin only)** — `app/audit.py`, `tests/test_audit.py`,
+pages `/admin/activity` (`admin_activity.html`, also in the side menu) and an Activity card on
+`/admin/users/<id>`; the users list shows last sign-in (ago + date, count, IP on hover), last active
+and failed sign-ins since the last success. Stored in the app's SQLite: `users.last_login` (existed) +
+`last_login_ip`, `login_count`, `last_seen_at` (written at most every 5 min per user); table
+`auth_events` (sign_in, sign_in_failed with the reason, sign_out, password_set, reset_requested,
+link_sent, account_created / changed / disabled / enabled / deleted with a before → after diff and
+the admin who did it; user_id is not a FK so history survives a deleted account; pruned after 400
+days at startup); table `usage_days` (user × Sydney day × area: page opens counted in the auth
+middleware for GET 200 text/html only — not JSON, assets or denied pages; area = the `_TOOL_PATHS`
+key, else home / admin / other). **The whole `/admin/...` prefix is admin-only in the middleware**
+(was `/admin/users`; `/admin/sync-pricing` stays token-exempt). Client IP = the LAST
+`X-Forwarded-For` entry (Caddy's; uvicorn runs without --proxy-headers). The visitor still gets one
+generic failure message — the reason is only in the admin log. Logging never raises into a request.
+
 ### Before the first real vendor account (from the 2026-09-30 design — NOT done)
 
 1. Retire the legacy `APP_PASSWORD` admin login, and make "no users + no

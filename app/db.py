@@ -49,7 +49,10 @@ _ADDED_COLUMNS = {
     "users": {"allowed_brands": "TEXT",
               "allowed_regions": "TEXT",
               "company": "VARCHAR DEFAULT ''",
-              "reset_purpose": "VARCHAR"},
+              "reset_purpose": "VARCHAR",
+              "last_login_ip": "VARCHAR",
+              "login_count": "INTEGER DEFAULT 0",
+              "last_seen_at": "DATETIME"},
 }
 
 # Reference tables that are fully re-seeded each startup. If they exist WITHOUT the

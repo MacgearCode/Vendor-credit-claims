@@ -33,7 +33,7 @@ from .service import build_promo_view, line_dates
 from .pricing_sync import sync_pricing
 from .security import (hash_password, hash_token, make_reset_token, sign,
                        unsign, verify_password)
-from . import (ageing, bill_export, bill_service, field, items, notify, open_orders, perms, promo_data,
+from . import (ageing, audit, bill_export, bill_service, field, items, notify, open_orders, perms, promo_data,
                receipts, sales,
                sales_explorer, sell_through, st_table, st_weekly, updates, warehouse, workflow)
 
@@ -41,6 +41,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 rebuild_reference_tables()   # drop legacy products/retailers so they rebuild country-scoped
 Base.metadata.create_all(engine)
 ensure_schema()
+with SessionLocal() as _s:
+    audit.prune(_s)         # sign-in history older than audit.KEEP_EVENTS_DAYS
 migrate_statuses()
 
 app = FastAPI(title="Macgear Reporting", lifespan=lambda a: _lifespan(a))
@@ -80,6 +82,19 @@ def sydney(dt):
 templates.env.filters["money"] = money
 templates.env.filters["pct"] = pct
 templates.env.filters["sydney"] = sydney
+
+
+def sydney_dt(dt):
+    """UTC timestamp as Sydney date and time: 'Thu 19 Nov 2026, 8:05am'."""
+    if dt is None:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    d = dt.astimezone(ZoneInfo("Australia/Sydney"))
+    return f"{d:%a} {d.day} {d:%b %Y}, {d.hour % 12 or 12}:{d:%M}{'am' if d.hour < 12 else 'pm'}"
+
+
+templates.env.filters["sydney_dt"] = sydney_dt
 # Repsly times are the rep's local wall-clock time (no zone), shown as they are.
 templates.env.filters["hm"] = lambda dt: "" if dt is None else dt.strftime("%H:%M")
 templates.env.filters["dmy"] = lambda d: "" if d is None else f"{d:%a} {d.day} {d:%b}"
@@ -224,7 +239,7 @@ async def require_login(request: Request, call_next):
         return RedirectResponse("/login", status_code=303)
     request.state.user = user
 
-    if path.startswith("/admin/users") and not perms.is_admin(user):
+    if (path == "/admin" or path.startswith("/admin/")) and not perms.is_admin(user):
         return templates.TemplateResponse(request, "denied.html",
                                           {"tool": "User management"}, status_code=403)
 
@@ -241,7 +256,13 @@ async def require_login(request: Request, call_next):
             request, "denied.html",
             {"tool": perms.AREA_LABELS.get(tool, tool)}, status_code=403)
 
-    return await call_next(request)
+    response = await call_next(request)
+    # Usage log (admin pages): count page opens, not data / asset / JSON calls.
+    if (request.method == "GET" and getattr(user, "id", None) and response.status_code == 200
+            and response.headers.get("content-type", "").startswith("text/html")):
+        area = tool or ("home" if path == "/" else "admin" if path.startswith("/admin") else "other")
+        audit.page_view(user.id, area)
+    return response
 
 
 def current_user(request: Request):
@@ -270,13 +291,16 @@ async def login_submit(request: Request, db: Session = Depends(get_db)):
 
     user = db.scalar(select(User).where(User.email == ident.lower()))
     if user and user.active and user.password_hash and verify_password(pw, user.password_hash):
-        user.last_login = datetime.utcnow()
-        db.commit()
+        audit.signed_in(db, user, request)
         token = sign(str(user.id), APP_SECRET)
     elif (APP_PASSWORD and hmac.compare_digest(ident, APP_USERNAME)
             and hmac.compare_digest(pw, APP_PASSWORD)):
+        audit.log(db, "sign_in", request, email=f"{APP_USERNAME} (shared login)")
         token = sign("legacy", APP_SECRET)
     else:
+        why = ("no such account" if user is None else "account disabled" if not user.active
+               else "no password set yet" if not user.password_hash else "wrong password")
+        audit.log(db, "sign_in_failed", request, user=user, email=ident.lower(), detail=why)
         # One message for every failure — a distinct "no such user" would let
         # anyone enumerate who has an account here.
         return templates.TemplateResponse(
@@ -291,7 +315,10 @@ async def login_submit(request: Request, db: Session = Depends(get_db)):
 
 
 @app.get("/logout")
-def logout():
+def logout(request: Request, db: Session = Depends(get_db)):
+    user = _user_from_cookie(request)
+    if user is not None and getattr(user, "id", None):
+        audit.log(db, "sign_out", request, user=user)
     resp = RedirectResponse("/login", status_code=303)
     resp.delete_cookie(COOKIE_NAME)
     return resp
@@ -392,6 +419,7 @@ async def forgot_submit(request: Request, db: Session = Depends(get_db)):
     user = db.scalar(select(User).where(User.email == email)) if email else None
     ip = request.client.host if request.client else "?"
     if user and user.active and _forgot_allowed(email, ip):
+        audit.log(db, "reset_requested", request, user=user)
         _issue_link(db, user, request, purpose=notify.RESET)
     # The same page whether or not the address exists, and whether or not we throttled —
     # anything else would tell a stranger who has an account here.
@@ -429,10 +457,13 @@ async def set_password_submit(request: Request, db: Session = Depends(get_db)):
             request, "set_password.html",
             {**ctx, "error": "The two passwords do not match."}, status_code=400)
 
+    purpose = user.reset_purpose or "reset"
     user.password_hash = hash_password(pw)
     user.reset_token_hash = None       # single use
     user.reset_expires_at = None
     user.reset_purpose = None
+    audit.log(db, "password_set", request, user=user, commit=False,
+              detail="from an invite" if purpose == "invite" else "from a reset link")
     db.commit()
     return RedirectResponse("/login?msg=set", status_code=303)
 
@@ -2414,10 +2445,29 @@ def vendor_bill_mark_imported(invoice_number: str, db: Session = Depends(get_db)
 # User management  —  /admin/users  (admin only; enforced in the middleware)
 # ==============================================================================
 
+@app.get("/admin/activity", response_class=HTMLResponse)
+def admin_activity(request: Request, days: int = 30, event: str = "", who: str = "",
+                   db: Session = Depends(get_db)):
+    """Sign-in and account log + report usage. Admin only (middleware: /admin/...)."""
+    days = days if days in (1, 7, 30, 90, 365) else 30
+    event = event if event in audit.EVENTS or event == "account" else ""
+    data = audit.overview(db, days, event, who.strip()[:100])
+    return templates.TemplateResponse(request, "admin_activity.html", {
+        **data, "days": days, "event": event, "who": who, "event_labels": audit.EVENTS,
+        "area_label": _area_label, "ago": audit.ago})
+
+
+def _area_label(key: str) -> str:
+    return {"home": "Home page", "admin": "Admin pages", "other": "Other pages"}.get(
+        key, perms.AREA_LABELS.get(key, key).split(" (")[0])
+
+
 @app.get("/admin/users", response_class=HTMLResponse)
 def admin_users(request: Request, db: Session = Depends(get_db)):
     users = db.scalars(select(User).order_by(User.role, User.email)).all()
-    rows = [{"u": u,
+    failed = audit.failed_since_success(db)
+    rows = [{"u": u, "failed": failed.get(u.id, 0), "ago": audit.ago(u.last_login),
+             "seen_ago": audit.ago(u.last_seen_at),
              "areas": [perms.AREA_LABELS[t] for t in perms.effective_access(u)],
              "caps": sorted(perms.effective_caps(u)),
              "brands": perms.effective_brands(u),
@@ -2454,7 +2504,19 @@ def _user_form_ctx(u: User | None, notice: str = "", link: str = "",
             "notice": notice, "set_link": link, "error": error, "emailed": emailed,
             "email_on": bool(notify.WEBHOOK_URL),
             "invite_ttl": notify.in_words(INVITE_TOKEN_TTL_MIN),
-            "reset_ttl": notify.in_words(RESET_TOKEN_TTL_MIN)}
+            "reset_ttl": notify.in_words(RESET_TOKEN_TTL_MIN),
+            "history": _history(u), "event_labels": audit.EVENTS, "area_label": _area_label,
+            "ago": audit.ago}
+
+
+def _history(u: User | None):
+    if u is None or getattr(u, "id", None) is None:
+        return None
+    db = SessionLocal()
+    try:
+        return audit.user_history(db, u)
+    finally:
+        db.close()
 
 
 @app.get("/admin/users/new", response_class=HTMLResponse)
@@ -2489,6 +2551,7 @@ async def admin_user_save(request: Request, user_id: int | None = None,
     active = form.get("active") == "on"
 
     u = db.get(User, user_id) if user_id else None
+    before = audit.snapshot(u, perms) if u is not None else None
 
     if u is None:
         if not email:
@@ -2537,6 +2600,17 @@ async def admin_user_save(request: Request, user_id: int | None = None,
     u.company = company if role == "vendor" else ""
     u.active = active
     db.commit()
+    me = current_user(request)
+    after = audit.snapshot(u, perms)
+    if before is None:
+        audit.log(db, "account_created", request, user=u, actor=me, detail=audit.changes({}, after))
+    else:
+        diff = audit.changes(before, after)
+        if before["Active"] != after["Active"]:
+            audit.log(db, "account_enabled" if u.active else "account_disabled", request, user=u,
+                      actor=me, detail=diff)
+        elif diff:
+            audit.log(db, "account_changed", request, user=u, actor=me, detail=diff)
 
     if new_account:
         # Creating emails nothing: check the access you've just set, then send the
@@ -2565,6 +2639,9 @@ async def admin_user_send_link(user_id: int, request: Request, db: Session = Dep
                                 invited_by=(getattr(me, "email", "") if me is not None
                                             and getattr(me, "id", None) else ""))
     what = "invite" if purpose == notify.INVITE else "password reset"
+    audit.log(db, "link_sent", request, user=u, actor=me,
+              detail=f"{what} " + ("emailed" if emailed else "link copied by the admin" if not send
+                                   else "email failed, link copied"))
     if not send:
         msg = f"New {what} link below — copy it to them yourself. Any earlier link is now dead."
     elif emailed:
@@ -2589,6 +2666,8 @@ def admin_user_delete(user_id: int, request: Request, db: Session = Depends(get_
                 request, "admin_user_form.html",
                 _user_form_ctx(u, error="This is the only active admin — it cannot be deleted."),
                 status_code=400)
+        audit.log(db, "account_deleted", request, user=u, actor=current_user(request), commit=False,
+                  detail=f"{u.name or u.email} ({u.role}); sign-ins {u.login_count or 0}")
         db.delete(u)
         db.commit()
     return RedirectResponse("/admin/users", status_code=303)

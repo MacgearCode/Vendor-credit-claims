@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Activity log{% endblock %}
+{% block brandword %}Users{% endblock %}
+{% block nav %}
+  <a href="/admin/users">All users</a>
+{% endblock %}
+
+{% block content %}
+<h1 class="home-title">Activity log</h1>
+<p class="hint">Who signs in, what they use, and every change made to an account. Admins only.
+  Times are Sydney time. Logging started on 19 Nov 2026; sign-in history is kept for about a year.</p>
+
+<form class="filterbar" method="get" action="/admin/activity">
+  <label>Period
+    <select name="days" onchange="this.form.submit()">
+      {% for d, t in ((1, 'Last 24 hours'), (7, 'Last 7 days'), (30, 'Last 30 days'), (90, 'Last 90 days'), (365, 'Last year')) %}
+      <option value="{{ d }}" {{ 'selected' if d == days }}>{{ t }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Event
+    <select name="event" onchange="this.form.submit()">
+      <option value="">All events</option>
+      <option value="account" {{ 'selected' if event == 'account' }}>Account changes (by admins)</option>
+      {% for k, t in event_labels.items() %}<option value="{{ k }}" {{ 'selected' if event == k }}>{{ t }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Person (email contains)
+    <input type="search" name="who" value="{{ who }}" placeholder="e.g. sam@">
+  </label>
+  <button class="btn" type="submit">Show</button>
+  {% if event or who %}<a class="clear" href="/admin/activity?days={{ days }}">Clear</a>{% endif %}
+</form>
+
+<div class="tiles">
+  <div class="tile t-blue"><span class="tlabel">Sign-ins</span><span class="tval">{{ sign_ins }}</span>
+    <span class="tsub">in the period</span></div>
+  <div class="tile t-teal"><span class="tlabel">People active</span><span class="tval">{{ active_users }}</span>
+    <span class="tsub">of {{ accounts }} active accounts opened a page</span></div>
+  <div class="tile {{ 't-amber' if failed else 't-grey' }}"><span class="tlabel">Failed sign-ins</span><span class="tval">{{ failed }}</span>
+    <span class="tsub">{% if failed_ips %}most from {{ failed_ips[0][0] or '?' }} ({{ failed_ips[0][1] }}){% else %}none{% endif %}</span></div>
+  <div class="tile t-grey"><span class="tlabel">Never signed in</span><span class="tval">{{ never|length }}</span>
+    <span class="tsub">active accounts</span></div>
+  <div class="tile t-grey"><span class="tlabel">Idle 30+ days</span><span class="tval">{{ idle|length }}</span>
+    <span class="tsub">signed in before, nothing since</span></div>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:1rem;margin-bottom:1rem">
+  <div class="card">
+    <h2 style="margin:.1rem 0 .6rem;font-size:1.05rem">Reports and tools used</h2>
+    {% if usage %}
+    <table class="grid compact">
+      <thead><tr><th>Report or tool</th><th class="num">Pages opened</th><th class="num">People</th><th>Last used</th></tr></thead>
+      <tbody>
+      {% for area, views, people, last in usage %}
+        <tr><td>{{ area_label(area) }}</td><td class="num">{{ views }}</td><td class="num">{{ people }}</td>
+          <td><span title="{{ last|sydney_dt }}">{{ ago(last) }}</span></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="hint">No pages opened in this period.</p>{% endif %}
+  </div>
+  <div class="card">
+    <h2 style="margin:.1rem 0 .6rem;font-size:1.05rem">Accounts to look at</h2>
+    {% if never or idle %}
+    <table class="grid compact">
+      <thead><tr><th>Account</th><th>Why</th></tr></thead>
+      <tbody>
+      {% for u in never %}<tr><td><a href="/admin/users/{{ u.id }}">{{ u.name or u.email }}</a><div class="hint">{{ u.email }}</div></td>
+        <td>Never signed in{% if not u.password_hash %} — {{ user_status(u)[1] }}{% endif %}</td></tr>{% endfor %}
+      {% for u in idle %}<tr><td><a href="/admin/users/{{ u.id }}">{{ u.name or u.email }}</a><div class="hint">{{ u.email }}</div></td>
+        <td>Last active {{ ago(u.last_seen_at or u.last_login) }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    <p class="hint">Disable accounts nobody uses any more — a disabled account can't sign in and its links stop working.</p>
+    {% else %}<p class="hint">Every active account has signed in and been used in the last 30 days.</p>{% endif %}
+    {% if failed_ips %}
+    <h3 style="margin:1rem 0 .4rem;font-size:.95rem">Failed sign-ins by address</h3>
+    <table class="grid compact"><tbody>
+      {% for ip, n in failed_ips %}<tr><td>{{ ip or '?' }}</td><td class="num">{{ n }}</td></tr>{% endfor %}
+    </tbody></table>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h2 style="margin:.1rem 0 .6rem;font-size:1.05rem">Events</h2>
+  {% if events %}
+  <table class="grid compact">
+    <thead><tr><th>When (Sydney)</th><th>What</th><th>Account</th><th>Detail</th><th>By</th><th>IP</th></tr></thead>
+    <tbody>
+    {% for e in events %}
+      <tr>
+        <td style="white-space:nowrap">{{ e.at|sydney_dt }}</td>
+        <td style="white-space:nowrap">{% if e.event == 'sign_in_failed' %}<span class="pill pg-red">{{ event_labels[e.event] }}</span>
+          {% elif e.event == 'sign_in' %}<span class="pill pg-green">{{ event_labels[e.event] }}</span>
+          {% else %}{{ event_labels.get(e.event, e.event) }}{% endif %}</td>
+        <td>{% if e.user_id %}<a href="/admin/users/{{ e.user_id }}">{{ e.email }}</a>{% else %}{{ e.email }}{% endif %}</td>
+        <td>{{ e.detail }}</td>
+        <td>{{ e.actor_email }}</td>
+        <td title="{{ e.user_agent }}">{{ e.ip }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if total > events|length %}<p class="hint">Showing the latest {{ events|length }} of {{ total }} — narrow the period, event or person to see more.</p>{% endif %}
+  {% else %}<p class="hint">Nothing logged in this period.</p>{% endif %}
+</div>
+{% endblock %}

@@ -154,6 +154,63 @@
   </div>
 </form>
 
+{% if u and history %}{% set h = history %}
+<div class="card" id="activity">
+  <h2 style="margin:.1rem 0 .7rem;font-size:1.1rem">Activity</h2>
+  <div class="tiles">
+    <div class="tile t-blue"><span class="tlabel">Last sign-in</span>
+      <span class="tval" style="font-size:1.15rem">{{ ago(u.last_login) if u.last_login else 'Never' }}</span>
+      <span class="tsub">{{ u.last_login|sydney_dt }}{% if u.last_login_ip %} · {{ u.last_login_ip }}{% endif %}</span></div>
+    <div class="tile t-teal"><span class="tlabel">Last active</span>
+      <span class="tval" style="font-size:1.15rem">{{ ago(u.last_seen_at) if u.last_seen_at else '—' }}</span>
+      <span class="tsub">{{ u.last_seen_at|sydney_dt }}</span></div>
+    <div class="tile t-grey"><span class="tlabel">Sign-ins</span>
+      <span class="tval" style="font-size:1.15rem">{{ u.login_count or 0 }}</span>
+      <span class="tsub">since logging began</span></div>
+    <div class="tile t-green"><span class="tlabel">Days used · 30 days</span>
+      <span class="tval" style="font-size:1.15rem">{{ h.days_30 }}</span>
+      <span class="tsub">days with at least one page opened</span></div>
+    <div class="tile {{ 't-amber' if h.failed else 't-grey' }}"><span class="tlabel">Failed sign-ins</span>
+      <span class="tval" style="font-size:1.15rem">{{ h.failed }}</span>
+      <span class="tsub">since their last successful one</span></div>
+  </div>
+
+  <h3 style="margin:.4rem 0 .4rem;font-size:.98rem">What they use · last 30 days</h3>
+  {% if h.usage %}
+  <table class="grid compact">
+    <thead><tr><th>Report or tool</th><th class="num">Pages opened</th><th class="num">Days</th><th>Last used</th></tr></thead>
+    <tbody>
+    {% for area, views, days_used, last in h.usage %}
+      <tr><td>{{ area_label(area) }}</td><td class="num">{{ views }}</td><td class="num">{{ days_used }}</td>
+        <td><span title="{{ last|sydney_dt }}">{{ ago(last) }}</span></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="hint">Nothing opened in the last 30 days.</p>{% endif %}
+
+  <h3 style="margin:1rem 0 .4rem;font-size:.98rem">Sign-in and account history</h3>
+  {% if h.events %}
+  <table class="grid compact">
+    <thead><tr><th>When (Sydney)</th><th>What</th><th>Detail</th><th>By</th><th>IP</th></tr></thead>
+    <tbody>
+    {% for e in h.events %}
+      <tr>
+        <td style="white-space:nowrap">{{ e.at|sydney_dt }}</td>
+        <td style="white-space:nowrap">{% if e.event == 'sign_in_failed' %}<span class="pill pg-red">{{ event_labels[e.event] }}</span>
+          {% elif e.event == 'sign_in' %}<span class="pill pg-green">{{ event_labels[e.event] }}</span>
+          {% else %}{{ event_labels.get(e.event, e.event) }}{% endif %}</td>
+        <td>{{ e.detail }}</td>
+        <td>{{ e.actor_email }}</td>
+        <td title="{{ e.user_agent }}">{{ e.ip }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="hint">The latest 25. Everything is on the <a href="/admin/activity?who={{ u.email|urlencode }}&amp;days=365">activity log</a>.</p>
+  {% else %}<p class="hint">Nothing logged yet — logging started on 19 Nov 2026.</p>{% endif %}
+</div>
+{% endif %}
+
 {% if u %}
 <div class="formact rowactions">
   <form method="post" action="/admin/users/{{ u.id }}/delete"

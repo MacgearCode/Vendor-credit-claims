@@ -3,6 +3,7 @@
 {% block brandword %}Users{% endblock %}
 {# base.html already puts a "Users" link here for admins — don't repeat it #}
 {% block nav %}
+  <a href="/admin/activity">Activity log</a>
   <a class="btn" href="/admin/users/new">+ New user</a>
 {% endblock %}
 
@@ -10,14 +11,16 @@
 <h1 class="home-title">Users</h1>
 <p class="hint">Tick which reports and tools each person can reach, and which brands and
   regions they see. Admins always see everything, including this page. Vendors only ever
-  see the reports and brands ticked on their account.</p>
+  see the reports and brands ticked on their account. Times are Sydney time; open a user for
+  their sign-in history and which reports they use, or the <a href="/admin/activity">activity log</a>
+  for everyone.</p>
 
 {% if rows %}
 <table class="grid">
   <thead>
     <tr>
       <th>Email</th><th>Name</th><th>Role</th><th>Reports &amp; tools</th>
-      <th>Brands</th><th>Regions</th><th>Status</th><th>Last sign-in</th><th></th>
+      <th>Brands</th><th>Regions</th><th>Status</th><th>Last sign-in</th><th>Last active</th><th></th>
     </tr>
   </thead>
   <tbody>
@@ -45,7 +48,13 @@
       <td>
         <span class="pill {{ r.status[0] }}">{{ r.status[1] }}</span>
       </td>
-      <td>{{ r.u.last_login|sydney if r.u.last_login else '—' }}</td>
+      <td style="white-space:nowrap">
+        {% if r.u.last_login %}<span title="{{ r.u.last_login|sydney_dt }}{% if r.u.last_login_ip %} · {{ r.u.last_login_ip }}{% endif %}">{{ r.ago }}</span>
+          <div class="hint">{{ r.u.last_login|sydney_dt }} · {{ r.u.login_count or 0 }} sign-in{{ '' if (r.u.login_count or 0) == 1 else 's' }}</div>
+        {% else %}<span class="hint">never</span>{% endif %}
+        {% if r.failed %}<div><span class="pill pg-red" title="Failed sign-ins with this email since their last successful one (last 30 days)">{{ r.failed }} failed</span></div>{% endif %}
+      </td>
+      <td style="white-space:nowrap">{% if r.u.last_seen_at %}<span title="{{ r.u.last_seen_at|sydney_dt }}">{{ r.seen_ago }}</span>{% else %}<span class="hint">—</span>{% endif %}</td>
       <td><a href="/admin/users/{{ r.u.id }}">Edit</a></td>
     </tr>
     {% endfor %}

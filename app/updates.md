@@ -9,6 +9,11 @@ st_weekly, field, ageing, items, st_table, sell_through, promos, vendor_bills) o
 Add an entry with every commit people would notice. Everything above the first
 "##" is ignored.
 
+## 2026-11-19 | User activity log | admin
+- Users list: last sign-in (how long ago, with the date, time and number of sign-ins), last active, and a red flag when someone has failed to sign in since their last success.
+- Each user's page has an Activity card: last sign-in and IP, days used in the last 30, which reports they open, and their sign-in and account history.
+- New Activity log (Admin menu): sign-ins, failed sign-ins (and from which address), password resets, invites, and every change an admin makes to an account with what changed; which reports are used and by how many people; accounts never signed in or idle 30+ days.
+
 ## 2026-11-19 | Open Orders | open_orders
 - New report: everything customers have ordered that the warehouse hasn't shipped yet, refreshed from NetSuite about every 30 minutes — open value, picking lines, units, and how long orders have been waiting.
 - Top 10 charts for open value and for picking lines, by retailer, account or brand. Every order and product is listed below (oldest first, click an order to see its lines); download it all as CSV.

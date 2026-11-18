@@ -198,6 +198,37 @@ class User(Base):
     # 'invite' | 'reset' — words the set-password page and decides the link's life.
     # NULL reads as 'reset' (every link minted before the column existed).
     reset_purpose: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Activity (app/audit.py). last_login above = the last successful sign-in (UTC).
+    last_login_ip: Mapped[str | None] = mapped_column(String, nullable=True)
+    login_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)   # last page opened
+
+
+class AuthEvent(Base):
+    """Sign-in and account events, newest read first on the admin pages. user_id is
+    kept as a plain number (no FK) so the history survives the account being deleted;
+    email is what was typed (failed sign-ins) or the account's address at the time."""
+    __tablename__ = "auth_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    at: Mapped[datetime] = mapped_column(DateTime, index=True)          # UTC
+    event: Mapped[str] = mapped_column(String, index=True)              # see audit.EVENTS
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    email: Mapped[str] = mapped_column(String, default="", index=True)
+    actor_email: Mapped[str] = mapped_column(String, default="")        # admin who did it
+    ip: Mapped[str] = mapped_column(String, default="")
+    user_agent: Mapped[str] = mapped_column(String, default="")
+    detail: Mapped[str] = mapped_column(Text, default="")
+
+
+class UsageDay(Base):
+    """Page opens per user x Sydney day x area (report / tool key, 'home', 'admin',
+    'other') — what people actually use, without logging every click."""
+    __tablename__ = "usage_days"
+    user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    area: Mapped[str] = mapped_column(String, primary_key=True)
+    views: Mapped[int] = mapped_column(Integer, default=0)
+    last_at: Mapped[datetime] = mapped_column(DateTime)                 # UTC
 
 
 class ProcessedInvoice(Base):
