@@ -89,6 +89,16 @@
   {% endif %}
 </div>
 
+{% if oo is not none %}
+<section class="r-card r-sec">
+  <div class="r-card-h">
+    <div><p class="r-eyebrow">Customer orders not yet shipped · {{ region }}</p><h2>Open orders</h2></div>
+    <a class="r-btn ghost" href="/reports/open-orders?region={{ region }}">Open Orders report →</a>
+  </div>
+  <div id="openOrders"></div>
+</section>
+{% endif %}
+
 <p class="r-note">
   Sell-through = what retailers report selling to shoppers each week (week ending Sunday); retailer stock and on-order are as reported for that week.
   Retail value = units × RRP in {{ cur }}.
@@ -228,6 +238,25 @@
       I.rows.map(function (r) {
         return '<tr><td class="l">' + RPT.esc(r.location) + "</td><td>" + RPT.int(r.on_hand) + "</td><td><b>" + RPT.int(r.available) + "</b></td><td>" + RPT.int(r.committed) + "</td><td>" + RPT.int(r.in_transit) + "</td></tr>";
       }).join("") + "</tbody></table>" : '<p class="r-muted">No saleable Macgear stock in ' + REGION + ".</p>";
+  }
+
+  // ---- open orders for this item ----
+  var OO = {{ oo|tojson }}, ooEl = document.getElementById("openOrders");
+  if (ooEl && OO) {
+    var CLS = {holding: "Holding", intercompany: "Intercompany", internal: "Samples"};
+    var ooTiles = [["Open units", RPT.int(OO.qty)], ["Committed (ready now)", RPT.int(OO.committed)], ["Back-ordered", RPT.int(OO.backordered)], ["Orders", RPT.int(OO.orders)]];
+    if (OO.money) ooTiles.splice(1, 0, ["Open value", moneyFull(OO.value)], ["Ready to ship now", moneyFull(OO.ready_value)]);
+    ooEl.innerHTML = OO.rows.length ? '<div class="r-stats" style="margin:0 0 14px;grid-template-columns:repeat(' + ooTiles.length + ',1fr)">' +
+      ooTiles.map(function (c) { return '<div class="r-stat" style="box-shadow:none"><div class="lbl">' + c[0] + '</div><div class="val" style="font-size:24px">' + c[1] + "</div></div>"; }).join("") + "</div>" +
+      (OO.holding ? '<p class="r-muted" style="font-size:12.5px;margin:0 0 10px">Figures above are customer orders. Holding Orders (forward orders for retailers) add <b>' + RPT.int(OO.holding) + "</b> units, listed below.</p>" : "") +
+      '<div class="r-tablewrap" style="max-height:420px"><table class="r-table"><thead><tr><th class="l">Order</th><th class="l">Customer</th><th class="l">Status</th><th class="l">Ordered</th><th>Days</th>' +
+      "<th>Open</th><th>Committed</th><th>Back-ordered</th>" + (OO.money ? "<th>Value</th>" : "") + "</tr></thead><tbody>" +
+      OO.rows.map(function (r) {
+        return '<tr><td class="l"><b>' + RPT.esc(r.doc) + "</b>" + (r.cls !== "customer" ? ' <span class="r-chip" style="padding:1px 7px;font-size:11px">' + CLS[r.cls] + "</span>" : "") + "</td>" +
+          '<td class="l"><div class="pn">' + RPT.esc(r.retailer) + '</div><div class="pc">' + RPT.esc(r.account) + "</div></td>" +
+          '<td class="l">' + RPT.esc(r.status) + '</td><td class="l">' + RPT.wk(r.date, true) + "</td><td>" + r.age + "</td><td><b>" + RPT.int(r.qty) + "</b></td><td>" +
+          RPT.int(r.committed) + "</td><td>" + RPT.int(r.backordered) + "</td>" + (OO.money ? "<td>" + moneyFull(r.value) + "</td>" : "") + "</tr>";
+      }).join("") + "</tbody></table></div>" : '<p class="r-muted">No open orders for this item in ' + REGION + ".</p>";
   }
 
   // ---- insights: plain-English read-out of what the numbers say ----

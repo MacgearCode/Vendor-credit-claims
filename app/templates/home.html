@@ -86,6 +86,40 @@
 <div class="h-st" id="stSnap"></div>
 {% endif %}
 
+{% if oo and oo.regions %}
+<div class="h-sec-h">
+  <h2>Open orders</h2>
+  <span class="r-muted" style="font-size:13px">Customer orders not yet shipped{% if oo.as_at %} · NetSuite export {{ oo.as_at }}{% endif %}{% if scoped %} · your brands{% endif %}</span>
+</div>
+<div class="h-regions">
+  {% for rg in ('AU', 'NZ') if rg in oo.regions %}{% set o = oo.regions[rg] %}{% set p = 'NZ$' if rg == 'NZ' else '$' %}
+  <a class="r-card h-region" href="/reports/open-orders?region={{ rg }}" style="text-decoration:none;color:inherit;display:block">
+    <p class="r-eyebrow">{{ 'Australia' if rg == 'AU' else 'New Zealand' }}{% if oo.money %} · {{ 'NZD' if rg == 'NZ' else 'AUD' }} ex GST{% endif %}</p>
+    {% if oo.money %}
+    <div class="big">{{ p }}{{ '{:,.0f}'.format(o.value) }}<small>open · {{ (100 - o.ready_value / o.value * 100)|round|int if o.value else 0 }}% back-ordered</small></div>
+    {% else %}
+    <div class="big">{{ '{:,}'.format(o.lines) }}<small>lines to pick</small></div>
+    {% endif %}
+    <div class="h-mini">
+      <div><div class="l">Picking lines</div><div class="v">{{ '{:,}'.format(o.lines) }}</div><div class="s r-muted">{{ '{:,}'.format(o.orders) }} orders</div></div>
+      <div><div class="l">Ready to ship now</div><div class="v" style="color:var(--r-pos)">{% if oo.money %}{{ p }}{{ '{:,.0f}'.format(o.ready_value) }}{% else %}{{ '{:,}'.format(o.ready_lines) }}{% endif %}</div>
+        <div class="s r-muted">{% if oo.money %}{{ (o.ready_value / o.value * 100)|round|int if o.value else 0 }}% committed · {{ '{:,}'.format(o.ready_lines) }} lines{% else %}lines with stock committed{% endif %}</div></div>
+      <div><div class="l">Waiting &gt; 7 days</div><div class="v">{{ '{:,}'.format(o.over_7) }}</div><div class="s r-muted">{{ '{:,}'.format(o.over_30) }} over 30 days</div></div>
+    </div>
+    {% for t in o.top %}
+    <div class="h-row"><span class="n">{{ loop.index }}</span><span class="nm">{{ t.name }}</span>
+      <span class="val">{% if oo.money %}{{ p }}{{ '{:,.0f}'.format(t.value) }}<small>{{ (t.ready_value / t.value * 100)|round|int if t.value else 0 }}% ready · {{ '{:,}'.format(t.lines) }} lines</small>{% else %}{{ '{:,}'.format(t.lines) }}<small>{{ '{:,}'.format(t.ready_lines) }} ready</small>{% endif %}</span></div>
+    {% endfor %}
+    {% if o.holding_units %}
+    <p class="r-muted" style="font-size:12.5px;margin:10px 0 0">Plus Holding Orders (forward orders for retailers, not counted above):
+      {% if oo.money %}<b>{{ p }}{{ '{:,.0f}'.format(o.holding_value) }}</b>, {% endif %}{{ '{:,}'.format(o.holding_units) }} units
+      — {% if oo.money %}{{ p }}{{ '{:,.0f}'.format(o.holding_ready_value) }}{% else %}{{ '{:,}'.format(o.holding_ready_units) }} units{% endif %} of stock committed to them.</p>
+    {% endif %}
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+
 <div class="h-sec-h"><h2>Reports</h2></div>
 {% if reports %}
 <div class="h-cards">

@@ -33,7 +33,8 @@ from .service import build_promo_view, line_dates
 from .pricing_sync import sync_pricing
 from .security import (hash_password, hash_token, make_reset_token, sign,
                        unsign, verify_password)
-from . import (ageing, bill_export, bill_service, field, items, notify, perms, promo_data, receipts, sales,
+from . import (ageing, bill_export, bill_service, field, items, notify, open_orders, perms, promo_data,
+               receipts, sales,
                sales_explorer, sell_through, st_table, st_weekly, updates, warehouse, workflow)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -174,6 +175,7 @@ _TOOL_PATHS = [
     ("/reports/field", "field"),
     ("/reports/ageing", "ageing"),
     ("/reports/brand-profit", "brand_profit"),
+    ("/reports/open-orders", "open_orders"),
     ("/brand-profit", "brand_profit_settings"),
     ("/vendor-bills", "vendor_bills"),
     ("/targets", "targets"),
@@ -488,6 +490,8 @@ REPORTS = [
      "blurb": "How old Macgear's stock is, day by day — by brand, product and location, at cost."},
     {"key": "brand_profit", "href": "/reports/brand-profit", "title": "Brand Profitability", "icon": "◩",
      "blurb": "Net profit by PM and brand after customer rebates, freight, vendor rebates and MDF."},
+    {"key": "open_orders", "href": "/reports/open-orders", "title": "Open Orders", "icon": "⧗",
+     "blurb": "What customers have ordered and the warehouse hasn't shipped: value, picking lines, age."},
 ]
 TOOLS = [
     {"key": "promos", "href": "/promos", "title": "Vendor Promos", "icon": "%",
@@ -553,14 +557,11 @@ def home(request: Request):
     ctx = {"reports": nav_reports(request), "tools": nav_tools(request),
            "first_name": ((user.name or "").split() or [""])[0] if user is not None else "",
            "sales": None, "sales_error": "", "sales_fresh": "", "margin": "margin" in caps,
-           "st": None, "st_week": "", "scoped": brands is not None}
+           "st": None, "st_week": "", "scoped": brands is not None, "oo": None}
     try:
         if "sell_in_value" in caps:
             ctx["sales"] = sales.summary(sales_today(), "margin" in caps)
-            fresh = warehouse.cached(("sales_fresh",), ttl=sales.SALES_TTL, build=lambda: warehouse.query(
-                "select max(last_modified) from reporting.fact_sales_line where date_key >= %s",
-                (int((date.today() - timedelta(days=7)).strftime("%Y%m%d")),))[0][0])
-            ctx["sales_fresh"] = _short_time(_brisbane_to_sydney(fresh))
+            ctx["sales_fresh"] = _sales_fresh()
         allowed = _allowed(request)
         if "items" in allowed or "sell_through" in allowed or "st_table" in allowed:
             st = {}
@@ -576,9 +577,24 @@ def home(request: Request):
                          "top": [{"code": i["code"], "name": i["name"], "units": i["units"]} for i in top]}
                 ctx["st_week"] = _weekfmt(board["weeks"][-1])
             ctx["st"] = st or None
+        if "open_orders" in allowed:
+            try:
+                oo = open_orders.for_user(brands, regions, "sell_in_value" in caps)
+                ctx["oo"] = {"regions": open_orders.summary(oo), "money": oo["money"],
+                             "as_at": _sydney_short((oo.get("as_at") or {}).get("loaded"))}
+            except open_orders.NotLoaded:
+                pass
     except warehouse.WarehouseUnavailable as e:
         ctx["sales_error"] = _warehouse_error(e)
     return templates.TemplateResponse(request, "home.html", ctx)
+
+
+def _sales_fresh() -> str:
+    """The newest NetSuite change in the sales data, as '16 Nov 7:47am' Sydney time."""
+    fresh = warehouse.cached(("sales_fresh",), ttl=sales.SALES_TTL, build=lambda: warehouse.query(
+        "select max(last_modified) from reporting.fact_sales_line where date_key >= %s",
+        (int((date.today() - timedelta(days=7)).strftime("%Y%m%d")),))[0][0])
+    return _short_time(_brisbane_to_sydney(fresh))
 
 
 def _brisbane_to_sydney(dt):
@@ -589,6 +605,13 @@ def _brisbane_to_sydney(dt):
     if not dt:
         return dt
     return dt.replace(tzinfo=ZoneInfo("Australia/Brisbane")).astimezone(ZoneInfo("Australia/Sydney"))
+
+
+def _sydney_short(iso) -> str:
+    """An ISO timestamp with a zone (e.g. an S3 upload time) as '19 Nov 7:49am' Sydney."""
+    if not iso:
+        return ""
+    return _short_time(datetime.fromisoformat(iso).astimezone(ZoneInfo("Australia/Sydney")))
 
 
 def _short_time(dt) -> str:
@@ -687,6 +710,26 @@ def report_ageing(request: Request):
         error = _warehouse_error(e)
     return templates.TemplateResponse(request, "ageing.html", {
         "data": data, "error": error, "regions": regions,
+        "items_link": "items" in _allowed(request)})
+
+
+@app.get("/reports/open-orders", response_class=HTMLResponse)
+def report_open_orders(request: Request, region: str = ""):
+    """Open sales orders — staff only (not in VENDOR_AREAS): Macgear's own customers'
+    orders. Brand / region scope in SQL; $ only with sell_in_value (NULL in SQL otherwise)."""
+    brands, _ = _scope(request)
+    region, regions = _region(request, region)
+    money = "sell_in_value" in _caps(request)
+    data, error = None, ""
+    try:
+        data = open_orders.for_user(brands, regions, money)
+    except open_orders.NotLoaded:
+        error = ("Open orders aren't in the reporting warehouse yet (the NetSuite export "
+                 "DW_open_sales_orders, loaded by Sell Through/netsuite_intake.py).")
+    except warehouse.WarehouseUnavailable as e:
+        error = _warehouse_error(e)
+    return templates.TemplateResponse(request, "open_orders.html", {
+        "data": data, "error": error, "regions": regions, "region": region, "money": money,
         "items_link": "items" in _allowed(request)})
 
 
@@ -840,6 +883,7 @@ def _warm_tasks() -> list:
     tasks += [lambda r=r: sales_explorer.cubes(r, t) for r in perms.REGIONS]
     tasks += [lambda: st_weekly.for_user(None, regions, True),
               lambda: ageing.for_user(None, regions),
+              lambda: open_orders.for_user(None, regions, True),
               lambda: sell_through.for_user(None, regions),
               items._units_by_item,
               lambda: receipts.status(None, regions, t),
@@ -972,7 +1016,15 @@ def report_item(request: Request, code: str, region: str = "", weeks: int = 26):
         return templates.TemplateResponse(request, "denied.html",
                                           {"message": f"No item {code} in your reports."}, status_code=404)
     img = _img_path(h["code"])
+    oo = None
+    if "open_orders" in _allowed(request):
+        try:
+            oo = open_orders.item_open(open_orders.for_user(brands, regions, "sell_in_value" in caps),
+                                       h["code"], region)
+        except (open_orders.NotLoaded, warehouse.WarehouseUnavailable):
+            pass
     return templates.TemplateResponse(request, "item.html", {
+        "oo": oo,
         "h": {k: v for k, v in h.items() if k not in ("item_key", "ns_item_id")}, "d": d,
         "region": region, "regions": regions, "weeks": weeks, "caps": sorted(caps),
         "cur": "NZD" if region == "NZ" else "AUD", "rank": items.ranks(h["code"], h["brand"], board),

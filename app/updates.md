@@ -9,6 +9,13 @@ st_weekly, field, ageing, items, st_table, sell_through, promos, vendor_bills) o
 Add an entry with every commit people would notice. Everything above the first
 "##" is ignored.
 
+## 2026-11-19 | Open Orders | open_orders
+- New report: everything customers have ordered that the warehouse hasn't shipped yet, refreshed from NetSuite about every 30 minutes — open value, picking lines, units, and how long orders have been waiting.
+- Top 10 charts for open value and for picking lines, by retailer, account or brand. Every order and product is listed below (oldest first, click an order to see its lines); download it all as CSV.
+- Every open order is split into **ready to ship now** (stock committed to it — it can be picked and invoiced today) and **back-ordered** (waiting on stock). The Top 10 bars show both (solid = ready, faded = back-ordered), and "Rank Top 10 by: Ready to ship now" puts first the customers the warehouse can actually ship.
+- Holding Orders (forward orders held for retailers), intercompany orders to NZ and samples are kept out of the figures unless you tick them in.
+- The home page has an Open orders card per country, and each item in the Item Explorer shows its open orders.
+
 ## 2026-11-18 | Targets is live | targets
 - Tools → Targets now works on the live site: build next year's sales targets from NetSuite actuals with growth %, monthly pacing and new lines, then Commit the final set as the official targets for that financial year.
 - Once a set is committed, the home page tiles and Sales Explorer show progress against it.

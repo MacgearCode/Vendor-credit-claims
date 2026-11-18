@@ -37,6 +37,7 @@ warehouse host in the droplet `.env` broke the warm-up — compare the host, not
 | `/promos` | Vendor Promos — promotional credit claims | sales, finance |
 | `/targets` | Targets — build sales targets on NetSuite actuals, commit the official set (Postgres `targets` schema) | staff with the area |
 | `/vendor-bills` | PDF Bill Upload — Amazon Advertising → NetSuite CSV | accounts |
+| `/reports/open-orders` | Open Orders — open sales order lines: value, picking lines, age, Top 10s, order / product list (LOCAL only) | staff with the area ($ needs Sell-in $) |
 | `/reports/brand-profit` | Brand Profitability — NP by PM / brand after rebates, freight, vendor rebates, MDF (LOCAL only) | staff with the area + Margin |
 | `/brand-profit/settings` | Brand Profitability settings — rates by month, PMs, freight / VR uploads, change log (LOCAL only) | staff with the area |
 | `/admin/users` | User management | admins |
@@ -357,6 +358,37 @@ browser builds the tree.
   to S3 + a loader in `netsuite_intake.py` would make it automatic. Local preview: launch config
   `reporting-site-localdb-2` (port 8033 — 8031 was in use by another session).
 
+**Open Orders** (`app/open_orders.py`, `templates/open_orders.html`, `tests/test_open_orders.py`;
+built 2026-11-19, user's request, **local only**). Data = `reporting.fact_open_so` (`Sell Through/
+db/15_open_so.sql`; Zone export `dw_open_sales_orders.csv`, a whole snapshot each run, loaded by
+`netsuite_intake.py` — live on the cluster since 2026-11-19). Area key `open_orders`, **staff only**
+(Macgear's customers' orders; not in `VENDOR_AREAS`); brand scope = line class else item brand, in
+SQL; **$ only with `sell_in_value`** (the SQL selects NULL otherwise). One cached payload per scope
+(TTL 10 min; orders + lines pointing at a per-region item list; ~0.3 s), warmed at startup.
+- Headline figures = `order_class = 'customer'`. Holding Orders (6870, forward orders — A$9.99m on
+  19 Nov), intercompany (6871 / 9459) and samples (6889) are out unless ticked on the page; the home
+  card shows Holding apart. A **picking line** = one open order line. Age = days since the order date
+  (Ship Date is NetSuite's default rolling forward — shown, never used to call an order late).
+  Retailer = Sales Explorer's (customer group → head office → account).
+- **Ready to ship vs back-ordered (user, 2026-11-19 — "what can we invoice NOW", and don't prioritise a
+  customer that is mostly back-ordered):** every open unit is committed (stock allocated: pickable /
+  invoiceable now) or back-ordered — `quantity_committed + quantity_backordered = open_qty` on every
+  line (checked on the cluster). Ready value = committed × rate (`r_value`; back-ordered = open − ready);
+  a ready line = committed > 0. Top 10 bars are split (solid = ready, faded = back-ordered) with a
+  "Rank Top 10 by: All open / Ready to ship now" switch; Ready tile, Ready column in both lists, CSV has
+  committed / back-ordered values; home card + item page show it. 19 Nov: AU customer A$2.60m of A$5.88m
+  ready (44%), NZ NZ$0.24m of NZ$3.07m (8%); **Holding Orders hold A$8.99m of committed stock**.
+- Page: region switch, include toggles, tiles (value, lines, units with committed / back-ordered,
+  waiting > 7 days, Holding apart), **Top 10 open value and Top 10 picking lines** by retailer /
+  account / brand (user), age profile chart (lines / units / value), Orders or Products list (find,
+  sort, click an order for its lines, 400 rows shown, CSV = every line).
+- **Home:** "Open orders" card per region (customer value or lines, lines / units / > 7 days, top 5
+  retailers, Holding apart) for users with the area. **Item Explorer:** an Open orders card on the item
+  page (customer figures, every line listed incl. Holding) for users with the area.
+- Checked 2026-11-19 on the local copy of the 19 Nov 07:49 export: AU customer A$5,875,744.45 / 10,617
+  lines / 2,155 orders, NZ NZ$3,070,458.66 / 4,764 = the loader's figures (which equal NetSuite's
+  status counts on the 13 Nov sample).
+
 **Receipt strip** (`app/receipts.py`, `templates/_st_status.html`, 2026-10-15) —
 "who have we received" for sell-through, a one-line collapsible bar at the top
 of home, Item Explorer (landing + item), the table and the dashboard: "w/e 11 Oct
@@ -482,7 +514,7 @@ workers would each warm their own (fine at this size).
 by default (light if the viewer chose it in the side menu), `r-` prefixed
 classes, a no-build SVG chart (`RPT.chart`, bars can `stack`), sparklines, the
 search box. `asset_ver` is the newest mtime of any static file.
-**Glass look (EXPERIMENT, 2026-11-10, local, uncommitted; user liked it, parked 2026-11-17):** a
+**Glass look (experimental, off by default; committed + pushed in ebed8a5; user happy with it 2026-11-17):** a
 glass button beside the palette picker (`_theme_btn.html`) opens a popover — on/off, panel
 opacity, blur, glow, shine, five backgrounds. `static/glass.css` + `static/glass.js` (sync in each
 shell's head; `localStorage.glass` JSON → `html[data-glass]` + `--gl-*` vars); every rule hangs off
@@ -542,6 +574,7 @@ Shared shell:
 | `app/sales.py` | Home page internal sales (FY periods, pace, targets hook) |
 | `app/field.py` | Field Activity (Repsly): loads + the display-compliance rules |
 | `app/ageing.py` | Inventory Ageing: scoped warehouse queries → the page's JSON |
+| `app/open_orders.py` | Open Orders: scoped open SO lines → page JSON, home summary, item view |
 | `app/security.py` | PBKDF2 hashing, cookie signing, set-password tokens |
 | `app/db.py` | Engine, session, additive column migrations |
 | `app/models.py` | SQLAlchemy models for both tools, plus `User` |
@@ -803,8 +836,13 @@ Not committed or deployed.
   the sales export's brandkey should be the line Class.
 - Local preview: launch config `reporting-site-preview` (8032: live warehouse, `TARGETS_DB_URL` =
   local Postgres from `.env`, auth off). Tests: `tests/test_brand_profit.py`.
-- **Before going live** (not done): the cluster role/schema as for Targets (`reporting_app` may
-  create `brand_profit`), seed there, decide who gets the two areas, add an `updates.md` entry.
+- **Cluster (2026-11-17):** role `reporting_app` created by doadmin (CONNECT + CREATE on
+  `macgear_reporting`; its URL is `REPORTING_APP_DB_URL` in `Sell Through/.env`). `brand_profit` was
+  created and seeded through it (AU 138 rules / 52 PMs / 848 GL lines, NZ 177 / 74 / 651). Checked:
+  identical to the local copy, same Oct 2026 figures. **Still to do:** the droplet's `deploy/.env`
+  `TARGETS_DB_URL=` that URL (brand_profit falls back to it; compose already passes it), redeploy,
+  merge the PR, tick the two areas. The Targets schema will create itself empty on the cluster at first
+  use. The local scenarios aren't copied.
 
 ## Vendor Bill Importer — the parts worth knowing
 

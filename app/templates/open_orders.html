@@ -1,0 +1,406 @@
+{% extends "_rpt_base.html" %}
+{% block title %}Open Orders · Macgear Reporting{% endblock %}
+{% block pagename %}Open Orders{% endblock %}
+{% block home_href %}/reports/open-orders{% endblock %}
+
+{% block head %}
+<style>
+  .oo-2{display:grid;gap:18px;grid-template-columns:1fr 1fr}
+  @media (max-width:900px){.oo-2{grid-template-columns:1fr}}
+  .oo-top{display:flex;flex-direction:column;gap:9px;margin-top:6px}
+  .oo-row{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:10px;align-items:center;font-size:13.5px}
+  .oo-rk{color:var(--r-faint);font-weight:700;font-size:12px;text-align:right}
+  .oo-nm{min-width:0}
+  .oo-nm span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+  .oo-bar{height:8px;border-radius:4px;background:var(--r-card-2);margin-top:4px;overflow:hidden}
+  .oo-bar{display:flex}
+  .oo-bar i,.oo-bar b{display:block;height:100%;flex:none}
+  .oo-bar i{background:var(--r-accent)}
+  .oo-bar b{background:var(--r-accent);opacity:.28}
+  .oo-bar.l i,.oo-bar.l b{background:var(--r-amber)}
+  .oo-key{display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--r-ink-2);vertical-align:-1px}
+  .oo-key.bo{opacity:.3}
+  .r-stat.ready .val{color:var(--r-pos)}
+  .r-seg [aria-pressed="true"]:hover{color:var(--r-bg)}   /* report.css hover would match the pressed background */
+  .oo-rd{display:inline-block;width:38px;height:6px;border-radius:3px;background:var(--r-card-2);overflow:hidden;vertical-align:1px;margin-left:6px}
+  .oo-rd i{display:block;height:100%;background:var(--r-pos)}
+  .oo-v{font-weight:700;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+  .oo-v small{display:block;font-weight:500;color:var(--r-muted);font-size:11.5px}
+  .oo-lede{font-size:15px;color:var(--r-ink-2);max-width:100ch;margin:12px 0 0}
+  .oo-lede b{color:var(--r-ink)}
+  .oo-hint{font-size:12px;color:var(--r-faint);margin:10px 0 0}
+  .oo-cls{font-size:10.5px;font-weight:700;letter-spacing:.04em;padding:1px 6px;border-radius:999px;
+    background:var(--r-card-2);border:1px solid var(--r-line);color:var(--r-muted);margin-left:6px;white-space:nowrap}
+  .oo-age{font-weight:700}.oo-age.a1{color:var(--r-amber)}.oo-age.a2{color:var(--r-neg)}
+  #ooTable tr.ord{cursor:pointer} #ooTable tr.ord:hover td{background:var(--r-card-2)}
+  #ooTable tr.sub td{font-size:12.5px;color:var(--r-ink-2);background:var(--r-card-2)}
+  #ooTable tr.sub td.l{padding-left:34px}
+  #ooTable th[data-k]{cursor:pointer;user-select:none}
+  .oo-tw{display:inline-block;width:14px;color:var(--r-muted)}
+</style>
+{% endblock %}
+
+{% block content %}
+{% if error %}
+<div class="r-card"><p class="r-eyebrow">Open orders</p><h2 style="margin:0 0 8px">Not available</h2>
+  <p class="r-muted">{{ error }}</p></div>
+{% else %}
+<section class="r-card">
+  <div class="r-card-h" style="margin-bottom:4px">
+    <div>
+      <p class="r-eyebrow">NetSuite sales orders not yet shipped · picked from the warehouse</p>
+      <h2>Open Orders</h2>
+    </div>
+    <div class="r-filters">
+      {% if regions|length > 1 %}
+      <div class="r-seg" id="ooRegion" role="group" aria-label="Region">
+        {% for r in regions %}<button type="button" data-region="{{ r }}" aria-pressed="{{ 'true' if r == region else 'false' }}">{{ 'Australia' if r == 'AU' else 'New Zealand' }}</button>{% endfor %}
+      </div>
+      {% endif %}
+      <span class="r-chip" id="ooAsAt"></span>
+    </div>
+  </div>
+  <div class="r-filters" style="margin-top:10px" id="ooInc">
+    <span class="r-muted" style="font-size:12.5px">Also count:</span>
+    <button type="button" class="r-tab" data-cls="holding" aria-pressed="false">Holding orders</button>
+    <button type="button" class="r-tab" data-cls="intercompany" aria-pressed="false">Intercompany to NZ</button>
+    <button type="button" class="r-tab" data-cls="internal" aria-pressed="false">Samples</button>
+    <span class="r-muted" style="font-size:12.5px;margin-left:12px">Rank Top 10 by:</span>
+    <div class="r-seg" id="ooRank" role="group" aria-label="Rank by">
+      <button type="button" data-rank="open" aria-pressed="true">All open</button>
+      <button type="button" data-rank="ready" aria-pressed="false">Ready to ship now</button>
+    </div>
+  </div>
+  <p class="oo-lede" id="ooLede"></p>
+  <div class="r-stats" id="ooTiles"></div>
+</section>
+
+<div class="oo-2 r-sec">
+  <section class="r-card">
+    <div class="r-card-h">
+      <div><p class="r-eyebrow" id="ooTopVEye">Top 10 · open value</p><h2>Where the money is waiting</h2></div>
+      <div class="r-seg" data-by role="group" aria-label="Group by">
+        <button type="button" data-by="retailer" aria-pressed="true">Retailer</button>
+        <button type="button" data-by="account" aria-pressed="false">Account</button>
+        <button type="button" data-by="brand" aria-pressed="false">Brand</button>
+      </div>
+    </div>
+    <div class="oo-top" id="ooTopV"></div>
+  </section>
+  <section class="r-card">
+    <div class="r-card-h">
+      <div><p class="r-eyebrow" id="ooTopLEye">Top 10 · picking lines</p><h2>Where the warehouse work is</h2></div>
+      <div class="r-seg" data-by role="group" aria-label="Group by">
+        <button type="button" data-by="retailer" aria-pressed="true">Retailer</button>
+        <button type="button" data-by="account" aria-pressed="false">Account</button>
+        <button type="button" data-by="brand" aria-pressed="false">Brand</button>
+      </div>
+    </div>
+    <div class="oo-top" id="ooTopL"></div>
+  </section>
+</div>
+
+<section class="r-card r-sec">
+  <div class="r-card-h">
+    <div><p class="r-eyebrow">Days since the order was entered</p><h2>How long orders have been waiting</h2></div>
+    <div class="r-seg" id="ooAgeM" role="group" aria-label="Measure">
+      <button type="button" data-m="lines" aria-pressed="true">Picking lines</button>
+      <button type="button" data-m="units" aria-pressed="false">Units</button>
+      {% if money %}<button type="button" data-m="value" aria-pressed="false">Value</button>{% endif %}
+    </div>
+  </div>
+  <div class="r-chart" id="ooAge" style="height:240px"></div>
+  <p class="oo-hint">Ship dates are mostly NetSuite's default rolling forward to today, so age is measured from the order date, not against a promised date.</p>
+</section>
+
+<section class="r-card r-sec">
+  <div class="r-card-h">
+    <div><p class="r-eyebrow" id="ooListEye"></p><h2 id="ooListTitle">Orders</h2></div>
+    <div class="r-filters">
+      <div class="r-seg" id="ooView" role="group" aria-label="List">
+        <button type="button" data-v="orders" aria-pressed="true">Orders</button>
+        <button type="button" data-v="items" aria-pressed="false">Products</button>
+      </div>
+      <input type="search" class="r-input" id="ooFind" placeholder="Find order, PO, customer, product…" style="min-width:240px">
+      <button type="button" class="r-btn" id="ooCsv">⬇ Download CSV</button>
+    </div>
+  </div>
+  <div class="r-tablewrap" style="max-height:640px">
+    <table class="r-table" id="ooTable"></table>
+  </div>
+  <p class="oo-hint" id="ooMore"></p>
+</section>
+
+<p class="r-note">
+  Open orders = NetSuite sales order lines in Pending Approval, Pending Fulfillment or Partially Fulfilled with quantity still to ship
+  (ordered − fulfilled), refreshed from NetSuite about every 30 minutes. A picking line is one such order line.
+  {% if money %}Open value = open quantity × the line's rate, ex GST, in {{ 'NZD' if region == 'NZ' else 'AUD' }} for the region shown.{% endif %}
+  Headline figures are customer orders only: <b>Holding Orders</b> (forward / placeholder orders held for retailers, retailer named in the PO),
+  <b>intercompany</b> orders to MacGear NZ and <b>samples</b> are left out unless ticked above. AU and NZ are never added together.
+  Every open unit is either <b>committed</b> (NetSuite has allocated stock to it: it can be picked, shipped and invoiced now — "ready to ship now")
+  or <b>back-ordered</b> (waiting on stock); the two always add up to the open quantity. In the Top 10 bars the solid part is committed, the faded part back-ordered;
+  "Rank Top 10 by: Ready to ship now" orders them by what the warehouse can actually ship. Committed value = committed units × the line's rate.
+</p>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if not error %}
+<script>
+(function () {
+  "use strict";
+  var D = {{ data|tojson }}, MONEY = !!D.money, ITEMS_LINK = {{ items_link|tojson }};
+  var region = {{ region|tojson }}, inc = {customer: true, holding: false, intercompany: false, internal: false};
+  var rank = "open", byV = "retailer", byL = "retailer", ageM = "lines", view = "orders", sortK = null, sortD = -1, open = {};
+  var CLS = {holding: "Holding", intercompany: "Intercompany", internal: "Samples"};
+  var $ = function (id) { return document.getElementById(id); };
+  var cur = function () { return region === "NZ" ? "NZD" : "AUD"; };
+  var money = function (v) { return RPT.money(v, cur()); }, moneyF = function (v) { return RPT.money(v, cur(), true); };
+  var R = function () { return D.regions[region] || {orders: [], lines: [], items: []}; };
+  var ORD = {};
+  function index() { ORD = {}; R().orders.forEach(function (o) { ORD[o.doc] = o; }); }
+
+  function orders() { return R().orders.filter(function (o) { return inc[o.cls]; }); }
+  function lines() { return R().lines.filter(function (l) { var o = ORD[l[0]]; return o && inc[o.cls]; }); }
+
+  // ---- header ----
+  function header() {
+    var os = orders(), all = R().orders;
+    var t = {orders: os.length, lines: 0, units: 0, value: 0, rv: 0, rl: 0, ru: 0, rOrders: 0, a7: 0, a30: 0, a7l: 0};
+    os.forEach(function (o) { t.lines += o.lines; t.units += o.units; t.value += o.value || 0;
+      t.rv += o.r_value || 0; t.rl += o.r_lines; t.ru += o.r_units; if (o.r_lines) t.rOrders++;
+      if (o.age > 7) { t.a7++; t.a7l += o.lines; } if (o.age > 30) t.a30++; });
+    var hold = all.filter(function (o) { return o.cls === "holding"; });
+    var hv = hold.reduce(function (s, o) { return s + (o.value || 0); }, 0), hu = hold.reduce(function (s, o) { return s + o.units; }, 0);
+    var hrv = hold.reduce(function (s, o) { return s + (o.r_value || 0); }, 0), hru = hold.reduce(function (s, o) { return s + o.r_units; }, 0);
+    var bo = t.units - t.ru;
+    var tiles = [];
+    if (MONEY) tiles.push({l: "Open value", v: money(t.value), s: cur() + " ex GST · " + share(t.value - t.rv, t.value) + " back-ordered"});
+    tiles.push({l: "Ready to ship now", v: MONEY ? money(t.rv) : RPT.int(t.rl), cls: "ready",
+      s: (MONEY ? RPT.int(t.rl) + " lines · " : "lines · ") + RPT.int(t.ru) + " units committed from stock"});
+    tiles.push({l: "Picking lines", v: RPT.int(t.lines), s: RPT.int(t.orders) + " orders · " + RPT.int(t.lines - t.rl) + " lines wholly back-ordered"});
+    tiles.push({l: "Units to ship", v: RPT.int(t.units), s: RPT.int(t.ru) + " committed · " + RPT.int(bo) + " back-ordered"});
+    tiles.push({l: "Waiting over 7 days", v: RPT.int(t.a7), s: RPT.int(t.a7l) + " lines · " + RPT.int(t.a30) + " orders over 30 days"});
+    if (hold.length && !inc.holding) tiles.push({l: "Holding orders (apart)", v: MONEY ? money(hv) : RPT.int(hu),
+      s: RPT.int(hold.length) + " orders · " + (MONEY ? money(hrv) : RPT.int(hru) + " units") + " of stock committed to them"});
+    $("ooTiles").innerHTML = tiles.map(function (c) {
+      return '<div class="r-stat' + (c.cls ? " " + c.cls : "") + '"><div class="lbl">' + c.l + '</div><div class="val">' + c.v + '</div><div class="sub">' + c.s + "</div></div>";
+    }).join("");
+    var top = group(os, "retailer", rankKey(MONEY ? "value" : "lines"))[0];
+    $("ooLede").innerHTML = os.length ? "<b>" + RPT.int(t.orders) + "</b> orders with <b>" + RPT.int(t.lines) + "</b> lines open" +
+      (MONEY ? ", worth <b>" + moneyF(t.value) + "</b>. <b>" + moneyF(t.rv) + "</b> (" + share(t.rv, t.value) + ") is committed from stock and can ship and be invoiced now; the rest is back-ordered" :
+        ". <b>" + RPT.int(t.rl) + "</b> lines have stock committed and can be picked now") +
+      (top ? ". " + (rank === "ready" ? "Most ready to ship" : "Largest") + ": <b>" + RPT.esc(top.name) + "</b>." : ".") : "No open orders in this view.";
+    var a = D.as_at || {};
+    $("ooAsAt").textContent = a.loaded ? "NetSuite export " + stamp(a.loaded) : "";
+    var ex = []; ["holding", "intercompany", "internal"].forEach(function (k) { if (!inc[k]) ex.push(CLS[k].toLowerCase()); });
+    $("ooListEye").textContent = region + (ex.length ? " · excludes " + ex.join(", ") : " · every order");
+  }
+  function stamp(iso) {
+    var d = new Date(iso);
+    return d.toLocaleString("en-AU", {timeZone: "Australia/Sydney", day: "numeric", month: "short", hour: "numeric", minute: "2-digit"});
+  }
+
+  // ---- top 10 ----
+  function share(part, whole) { return whole ? Math.round(part / whole * 100) + "%" : "0%"; }
+  function rankKey(m) { return rank === "ready" ? "r_" + m : m; }     // value / lines, or their committed part
+  function group(os, by, measure) {
+    var g = {};
+    function add(name, v, l, rv, rl) {
+      name = name || "(unknown)";
+      var x = g[name] || (g[name] = {name: name, value: 0, lines: 0, r_value: 0, r_lines: 0, orders: 0});
+      x.value += v; x.lines += l; x.r_value += rv; x.r_lines += rl; return x;
+    }
+    if (by === "brand") {
+      var it = R().items;
+      lines().forEach(function (l) { add(it[l[1]][2], l[5] || 0, 1, l[6] || 0, l[3] > 0 ? 1 : 0); });
+    } else {
+      os.forEach(function (o) { add(o[by], o.value || 0, o.lines, o.r_value || 0, o.r_lines).orders++; });
+    }
+    return Object.keys(g).map(function (k) { return g[k]; })
+      .sort(function (a, b) { return b[measure] - a[measure] || a.name.localeCompare(b.name); });
+  }
+  // Bar = the whole open amount; the solid part is committed (ships now), the faded part back-ordered.
+  function bars(el, rows, m) {
+    var key = rankKey(m), top = rows.slice(0, 10);
+    var max = top.length ? Math.max.apply(null, top.map(function (r) { return r[m]; }).concat([1])) : 1;
+    var tot = rows.reduce(function (s, r) { return s + r[key]; }, 0) || 1;
+    var f = m === "value" ? money : RPT.int;
+    el.innerHTML = top.length ? top.map(function (r, i) {
+      var main = rank === "ready" ? f(r["r_" + m]) : f(r[m]);
+      var sub = rank === "ready" ? "of " + f(r[m]) + " open" : share(r["r_" + m], r[m]) + " ready now";
+      return '<div class="oo-row"><span class="oo-rk">' + (i + 1) + '</span><div class="oo-nm"><span title="' + RPT.esc(r.name) + '">' + RPT.esc(r.name) +
+        '</span><div class="oo-bar' + (m === "lines" ? " l" : "") + '" title="' + f(r["r_" + m]) + " ready · " + f(r[m] - r["r_" + m]) + ' back-ordered">' +
+        '<i style="width:' + (r["r_" + m] / max * 100).toFixed(1) + '%"></i><b style="width:' + ((r[m] - r["r_" + m]) / max * 100).toFixed(1) + '%"></b></div></div>' +
+        '<span class="oo-v">' + main + "<small>" + sub + "</small></span></div>";
+    }).join("") + '<p class="oo-hint"><span class="oo-key"></span> committed, can ship now · <span class="oo-key bo"></span> back-ordered' +
+      (rows.length > 10 ? " · Top 10 = " + share(top.reduce(function (s, r) { return s + r[key]; }, 0), tot) + " of the total, " + RPT.int(rows.length) + " in all." : "") + "</p>"
+      : '<p class="r-muted">Nothing open.</p>';
+  }
+  function tops() {
+    var os = orders();
+    $("ooTopVEye").textContent = "Top 10 · " + (rank === "ready" ? "value ready to ship" : "open value");
+    $("ooTopLEye").textContent = "Top 10 · " + (rank === "ready" ? "lines ready to pick" : "picking lines");
+    if (MONEY) bars($("ooTopV"), group(os, byV, rankKey("value")), "value");
+    else $("ooTopV").innerHTML = '<p class="r-muted">Open value needs the Sell-in $ access.</p>';
+    bars($("ooTopL"), group(os, byL, rankKey("lines")), "lines");
+  }
+
+  // ---- age profile ----
+  var BUCKETS = [[0, 2, "0–2 days"], [3, 7, "3–7"], [8, 14, "8–14"], [15, 30, "15–30"], [31, 60, "31–60"], [61, 90, "61–90"], [91, 1e9, "90+"]];
+  function ages() {
+    var v = BUCKETS.map(function () { return 0; });
+    orders().forEach(function (o) {
+      for (var i = 0; i < BUCKETS.length; i++) if (o.age >= BUCKETS[i][0] && o.age <= BUCKETS[i][1]) {
+        v[i] += ageM === "lines" ? o.lines : ageM === "units" ? o.units : (o.value || 0); break; }
+    });
+    var f = ageM === "value" ? moneyF : RPT.int;
+    RPT.chart($("ooAge"), {labels: BUCKETS.map(function (b) { return b[2]; }), series: [{name: ageM === "lines" ? "Picking lines" : ageM === "units" ? "Units" : "Open value",
+      values: v, color: RPT.css(ageM === "lines" ? "--r-amber" : "--r-accent"), type: "bar"}],
+      fmt: f, axis: ageM === "value" ? money : null, xLabel: function (l) { return l; }, tipLabel: function (l) { return l; }});
+  }
+
+  // ---- list ----
+  var MAXROWS = 400;
+  function readyBar(part, whole) {          // share of the open amount committed from stock
+    var p = whole ? Math.max(0, Math.min(1, part / whole)) : 0;
+    return '<span class="oo-rd" title="' + Math.round(p * 100) + '% ready now"><i style="width:' + (p * 100).toFixed(0) + '%"></i></span>';
+  }
+  function matches(o, q) { return !q || (o.doc + " " + o.po + " " + o.retailer + " " + o.account + " " + o.status).toLowerCase().indexOf(q) >= 0; }
+  function itemRows() {
+    var it = R().items, g = {};
+    lines().forEach(function (l) {
+      var x = g[l[1]] || (g[l[1]] = {code: it[l[1]][0], name: it[l[1]][1], brand: it[l[1]][2], qty: 0, committed: 0, bo: 0, value: 0, r_value: 0, lines: 0, oldest: 0});
+      x.qty += l[2]; x.committed += l[3]; x.bo += l[4]; x.value += l[5] || 0; x.r_value += l[6] || 0; x.lines++; x.oldest = Math.max(x.oldest, ORD[l[0]].age);
+    });
+    return Object.keys(g).map(function (k) { return g[k]; });
+  }
+  function sorted(rows, def) {
+    var k = sortK || def;
+    return rows.sort(function (a, b) {
+      var x = a[k], y = b[k];            // sortD -1 = descending, 1 = ascending
+      var c = (typeof x === "string" || typeof y === "string") ? String(x || "").localeCompare(String(y || "")) : (x || 0) - (y || 0);
+      return sortD * c;
+    });
+  }
+  function th(k, t, l) { return '<th data-k="' + k + '"' + (l ? ' class="l"' : "") + ">" + t + (sortK === k ? (sortD < 0 ? " ▾" : " ▴") : "") + "</th>"; }
+  function list() {
+    var q = $("ooFind").value.trim().toLowerCase(), tb = $("ooTable"), h, rows, out = [];
+    $("ooListTitle").textContent = view === "orders" ? "Orders" : "Products waiting to ship";
+    if (view === "orders") {
+      rows = sorted(orders().filter(function (o) {
+        if (matches(o, q)) return true;
+        if (!q) return false;
+        var it = R().items;
+        return R().lines.some(function (l) { return l[0] === o.doc && (it[l[1]][0] + " " + it[l[1]][1]).toLowerCase().indexOf(q) >= 0; });
+      }), "age");
+      h = "<thead><tr>" + th("doc", "Order", true) + th("retailer", "Customer", true) + th("status", "Status", true) + th("date", "Ordered", true) + th("age", "Days") +
+        th("lines", "Lines") + th("units", "Units") + (MONEY ? th("value", "Value") + th("r_value", "Ready now") : th("r_units", "Ready units")) +
+        th("ship", "Ship date", true) + th("po", "PO", true) + "</tr></thead>";
+      rows.slice(0, MAXROWS).forEach(function (o) {
+        var isOpen = open[o.doc];
+        out.push('<tr class="ord" data-doc="' + RPT.esc(o.doc) + '"><td class="l"><span class="oo-tw">' + (isOpen ? "▾" : "▸") + "</span><b>" + RPT.esc(o.doc) + "</b>" +
+          (o.cls !== "customer" ? '<span class="oo-cls">' + CLS[o.cls] + "</span>" : "") + '</td><td class="l"><div class="pn">' + RPT.esc(o.retailer) + '</div><div class="pc">' + RPT.esc(o.account) + "</div></td>" +
+          '<td class="l">' + RPT.esc(o.status) + '</td><td class="l">' + RPT.wk(o.date, true) + '</td><td><span class="oo-age ' + (o.age > 30 ? "a2" : o.age > 7 ? "a1" : "") + '">' + o.age + "</span></td>" +
+          "<td>" + RPT.int(o.lines) + "</td><td>" + RPT.int(o.units) + "</td>" + (MONEY ? "<td><b>" + moneyF(o.value) + "</b></td>" : "") +
+          "<td>" + (MONEY ? moneyF(o.r_value) : RPT.int(o.r_units)) + readyBar(MONEY ? o.r_value : o.r_units, MONEY ? o.value : o.units) + "</td>" +
+          '<td class="l">' + (o.ship ? RPT.wk(o.ship, true) : "—") + '</td><td class="l">' + RPT.esc(o.po) + "</td></tr>");
+        if (isOpen) {
+          var it = R().items;
+          R().lines.filter(function (l) { return l[0] === o.doc; }).forEach(function (l) {
+            var item = it[l[1]];
+            out.push('<tr class="sub"><td class="l" colspan="2">' + (ITEMS_LINK ? '<a href="' + RPT.itemUrl(item[0]) + "?region=" + region + '">' : "") + "<b>" + RPT.esc(item[0]) + "</b>" + (ITEMS_LINK ? "</a>" : "") +
+              " · " + RPT.esc(item[1]) + '</td><td class="l">' + RPT.esc(item[2]) + '</td><td class="l" colspan="2">' + RPT.int(l[3]) + " committed · " + RPT.int(l[4]) + " back-ordered</td><td></td><td>" + RPT.int(l[2]) + "</td>" +
+              (MONEY ? "<td>" + moneyF(l[5]) + "</td><td>" + moneyF(l[6]) + "</td>" : "<td>" + RPT.int(l[3]) + "</td>") + '<td colspan="2"></td></tr>');
+          });
+        }
+      });
+    } else {
+      rows = sorted(itemRows().filter(function (r) { return !q || (r.code + " " + r.name + " " + r.brand).toLowerCase().indexOf(q) >= 0; }), MONEY ? "value" : "qty");
+      h = "<thead><tr>" + th("code", "Product", true) + th("brand", "Brand", true) + th("lines", "Lines") + th("qty", "Open units") + th("committed", "Committed") +
+        th("bo", "Back-ordered") + (MONEY ? th("value", "Value") + th("r_value", "Ready now") : "") + th("oldest", "Oldest (days)") + "</tr></thead>";
+      rows.slice(0, MAXROWS).forEach(function (r) {
+        out.push('<tr><td class="l"><div class="pn">' + (ITEMS_LINK ? '<a href="' + RPT.itemUrl(r.code) + "?region=" + region + '">' + RPT.esc(r.code) + "</a>" : RPT.esc(r.code)) +
+          '</div><div class="pc">' + RPT.esc(r.name) + '</div></td><td class="l">' + RPT.esc(r.brand) + "</td><td>" + RPT.int(r.lines) + "</td><td><b>" + RPT.int(r.qty) + "</b></td><td>" +
+          RPT.int(r.committed) + readyBar(r.committed, r.qty) + "</td><td>" + (r.bo ? '<span class="oo-age a1">' + RPT.int(r.bo) + "</span>" : "0") + "</td>" +
+          (MONEY ? "<td>" + moneyF(r.value) + "</td><td>" + moneyF(r.r_value) + "</td>" : "") +
+          '<td><span class="oo-age ' + (r.oldest > 30 ? "a2" : r.oldest > 7 ? "a1" : "") + '">' + r.oldest + "</span></td></tr>");
+      });
+    }
+    tb.innerHTML = h + "<tbody>" + (out.length ? out.join("") : '<tr><td colspan="10" class="l r-muted">Nothing matches.</td></tr>') + "</tbody>";
+    $("ooMore").textContent = rows.length > MAXROWS ? "Showing " + MAXROWS + " of " + RPT.int(rows.length) + " — use Find or the CSV for the rest." :
+      RPT.int(rows.length) + (view === "orders" ? " orders" : " products") + ".";
+    list.rows = rows;
+  }
+
+  function csv() {
+    var cell = function (v) { v = v == null ? "" : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    var out = [], it = R().items;
+    out.push(["Region", "Order", "Status", "Class", "Ordered", "Days", "Retailer", "Account", "PO", "Ship date", "Product", "Description", "Brand",
+      "Open units", "Committed", "Back-ordered"].concat(MONEY ? ["Open value " + cur(), "Committed value " + cur(), "Back-ordered value " + cur()] : []));
+    lines().forEach(function (l) {
+      var o = ORD[l[0]], item = it[l[1]];
+      out.push([region, o.doc, o.status, o.cls, o.date, o.age, o.retailer, o.account, o.po, o.ship || "", item[0], item[1], item[2], l[2], l[3], l[4]]
+        .concat(MONEY ? [l[5], l[6], Math.round(((l[5] || 0) - (l[6] || 0)) * 100) / 100] : []));
+    });
+    var blob = new Blob(["﻿" + out.map(function (r) { return r.map(cell).join(","); }).join("\r\n")], {type: "text/csv"});
+    var a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+    a.download = "open_orders_" + region + "_" + D.today + ".csv"; a.click();
+  }
+
+  function all() { index(); header(); tops(); ages(); list(); }
+
+  // ---- events ----
+  var reg = $("ooRegion");
+  if (reg) reg.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-region]"); if (!b) return;
+    region = b.getAttribute("data-region"); open = {};
+    reg.querySelectorAll("[data-region]").forEach(function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+    try { history.replaceState(null, "", "?region=" + region); } catch (err) {}
+    all();
+  });
+  $("ooInc").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-cls]"); if (!b) return;
+    var k = b.getAttribute("data-cls"); inc[k] = !inc[k]; b.setAttribute("aria-pressed", inc[k] ? "true" : "false"); all();
+  });
+  $("ooRank").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-rank]"); if (!b) return; rank = b.getAttribute("data-rank");
+    this.querySelectorAll("[data-rank]").forEach(function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+    header(); tops();
+  });
+  document.querySelectorAll("[data-by]").forEach(function (seg, i) {
+    if (seg.tagName === "BUTTON") return;
+    seg.addEventListener("click", function (e) {
+      var b = e.target.closest("button[data-by]"); if (!b) return;
+      seg.querySelectorAll("button").forEach(function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+      if (seg.closest(".r-card").querySelector("#ooTopV")) byV = b.getAttribute("data-by"); else byL = b.getAttribute("data-by");
+      tops();
+    });
+  });
+  $("ooAgeM").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-m]"); if (!b) return; ageM = b.getAttribute("data-m");
+    this.querySelectorAll("[data-m]").forEach(function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); }); ages();
+  });
+  $("ooView").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-v]"); if (!b) return; view = b.getAttribute("data-v"); sortK = null; sortD = -1;
+    this.querySelectorAll("[data-v]").forEach(function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); }); list();
+  });
+  var t; $("ooFind").addEventListener("input", function () { clearTimeout(t); t = setTimeout(list, 150); });
+  $("ooTable").addEventListener("click", function (e) {
+    var h = e.target.closest("th[data-k]");
+    if (h) {
+      var k = h.getAttribute("data-k");
+      if (sortK === k) sortD = -sortD;
+      else { sortK = k; sortD = h.classList.contains("l") ? 1 : -1; }   // text A→Z first, numbers largest first
+      list(); return;
+    }
+    if (e.target.closest("a")) return;
+    var r = e.target.closest("tr.ord"); if (!r) return;
+    var d = r.getAttribute("data-doc"); open[d] = !open[d]; list();
+  });
+  $("ooCsv").addEventListener("click", csv);
+  all();
+})();
+</script>
+{% endif %}
+{% endblock %}
