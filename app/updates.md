@@ -9,6 +9,18 @@ st_weekly, field, ageing, items, st_table, sell_through, promos, vendor_bills) o
 Add an entry with every commit people would notice. Everything above the first
 "##" is ignored.
 
+## 2026-11-20 | Freight and vendor rebates straight from NetSuite | brand_profit, brand_profit_settings
+- Brand Profitability now takes freight and vendor rebates from NetSuite automatically, about every 30 minutes — no more uploading the saved search at month end.
+- New on the settings page (Freight & vendor rebates tab): **Manual adjustments**, for amounts finance adds that never post in NetSuite, like the CYA's "RPP only (Non-GL posting)" customer-rebate and MDF accruals. Enter them row by row (month, brand, type, amount, memo); they're added on top of the NetSuite lines, show as "Manual adjustment" in the report's drill-down, and every change is in the change log. September and October's rows from the CYA are already in.
+- Freight and vendor rebates sit on the brand NetSuite has on each line. Where the CYA moved a line to another brand by hand, fix the line's brand (class) in NetSuite.
+- **Download all settings (Excel)** on the settings page, for audit: every rate with the months it covers and whether it's in force now, PMs, GL accounts, manual adjustments, attached documents and the full change log. The change log tab also downloads on its own.
+- Attach a supporting PDF (e.g. the customer contract, up to 10 MB) when you enter a **New rate from**, add a rate, or to any existing row with **Attach PDF**. It's listed on the row, opens from there, and is never deleted.
+
+## 2026-11-20 | GL Accounts for PMs | gl_mova, gl_anker
+- New reports: every NetSuite transaction on the balance-sheet accounts PMs look after, so you can check them during the month instead of waiting for finance at month end. One for Mova (recoverables, MDF accruals) and one for Anker / Eufy / Soundcore (recoverables, rebate and returns claims, CMF accruals by retailer, the EUFY MDF buffer).
+- Each account shows its opening balance, the movement in the months you pick and its closing balance (which matches NetSuite), and lists every transaction with its date, type, document, name, memo, brand and a running balance.
+- Pick any months (This month, Financial year to date or All history are one click), switch Australia / New Zealand, download to Excel. Refreshed from NetSuite about every 30 minutes.
+
 ## 2026-11-19 | User activity log | admin
 - Users list: last sign-in (how long ago, with the date, time and number of sign-ins), last active, and a red flag when someone has failed to sign in since their last success.
 - Each user's page has an Activity card: last sign-in and IP, days used in the last 30, which reports they open, and their sign-in and account history.

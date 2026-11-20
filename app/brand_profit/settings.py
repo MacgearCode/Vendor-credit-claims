@@ -150,6 +150,49 @@ def delete_rule(conn, rid: int, by: str):
         db.log(conn, by, "rate_rule", rid, "delete", before=before)
 
 
+# ---- supporting documents (PDFs in Spaces) --------------------------------------------
+def month_range(vf, vt) -> str:
+    return f"{vf:%b %Y} – {vt:%b %Y}" if vt else f"{vf:%b %Y} – open (until changed)"
+
+
+def rule_label(r) -> str:
+    """One line that says what a rule is: 'Customer rebate · JB HI-FI - AU (#2374) · 19% · Sep 2026 – open'."""
+    parts = [KIND_LABELS.get(r["kind"], r["kind"])]
+    if r.get("customer_id") is not None:
+        parts.append(f"{r['customer_name']} (#{r['customer_id']})")
+    elif r["kind"] == "mdf":
+        parts.append("every customer")
+    if r.get("brand"):
+        parts.append(r["brand"] + (f" / {r['item_category']}" if r.get("item_category") else ""))
+    if r.get("item_code"):
+        parts.append(r["item_code"])
+    parts.append(f"{float(r['pct']) * 100:g}%")
+    parts.append(month_range(r["valid_from"], r["valid_to"]))
+    return " · ".join(parts)
+
+
+def attach_document(conn, rule_id: int, meta: dict, key: str, note: str, by: str) -> int:
+    """Record a PDF already stored at `key` against rule_id (logged)."""
+    with conn.transaction():
+        r = _get(conn, "rate_rule", rule_id)
+        row = conn.execute(
+            "INSERT INTO document (region, rule_table, rule_id, rule_label, filename, size_bytes, sha256, "
+            "object_key, note, uploaded_by) VALUES (%s, 'rate_rule', %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *",
+            (r["region"], rule_id, rule_label(r), meta["filename"], meta["size"], meta["sha256"], key,
+             (note or "").strip(), by)).fetchone()
+        db.log(conn, by, "document", row["id"], "upload",
+               after={k: row[k] for k in ("rule_id", "rule_label", "filename", "size_bytes", "sha256", "note")})
+    return row["id"]
+
+
+def documents_by_rule(conn, region: str) -> dict:
+    out = {}
+    for d in conn.execute("SELECT * FROM document WHERE region = %s AND rule_table = 'rate_rule' "
+                          "ORDER BY uploaded_at", (region,)).fetchall():
+        out.setdefault(d["rule_id"], []).append(d)
+    return out
+
+
 # ---- brand -> PM -------------------------------------------------------------------
 def save_pm(conn, f: dict, by: str, pid: int | None = None) -> int:
     region = f.get("region", "")
@@ -223,6 +266,83 @@ def delete_account(conn, region: str, account: str, by: str):
         if before:
             conn.execute("DELETE FROM gl_account WHERE region=%s AND account=%s", (region, account))
             db.log(conn, by, "gl_account", f"{region}:{account}", "delete", before=before)
+
+
+# ---- manual adjustments (not in the NetSuite GL) ---------------------------------------
+def parse_amount(v) -> float:
+    s = str(v or "").strip().replace("$", "").replace(",", "")
+    neg = s.startswith("(") and s.endswith(")")
+    try:
+        x = float(s.strip("()"))
+    except ValueError:
+        raise Invalid(f"'{v}' isn't an amount.")
+    return -x if neg else x
+
+
+def _adjustment_fields(f: dict) -> dict:
+    region, kind = f.get("region", ""), f.get("kind", "")
+    brand = calc.norm_brand(f.get("brand", ""))
+    memo = (f.get("memo") or "").strip()
+    if region not in db.REGIONS or kind not in db.GL_KINDS:
+        raise Invalid("Region and type (freight / vendor rebate) are needed.")
+    if not brand:
+        raise Invalid("A brand is needed.")
+    if not memo:
+        raise Invalid("Say what the adjustment is in the memo (it shows on the report's drill-down).")
+    amount = parse_amount(f.get("amount"))
+    if amount == 0:
+        raise Invalid("The amount can't be zero.")
+    return {"region": region, "month": parse_month(f.get("month")), "brand": brand, "kind": kind,
+            "amount": round(amount, 2), "memo": memo}
+
+
+def add_adjustment(conn, f: dict, by: str):
+    v = _adjustment_fields(f)
+    with conn.transaction():
+        after = conn.execute(
+            "INSERT INTO manual_adjustment (region, month, brand, kind, amount, memo, created_by, updated_by) "
+            "VALUES (%(region)s, %(month)s, %(brand)s, %(kind)s, %(amount)s, %(memo)s, %(by)s, %(by)s) RETURNING *",
+            {**v, "by": by}).fetchone()
+        db.log(conn, by, "manual_adjustment", after["id"], "add", after=after)
+
+
+def edit_adjustment(conn, aid: int, f: dict, by: str):
+    v = _adjustment_fields(f)
+    with conn.transaction():
+        before = _get(conn, "manual_adjustment", aid)
+        after = conn.execute(
+            "UPDATE manual_adjustment SET region=%(region)s, month=%(month)s, brand=%(brand)s, kind=%(kind)s, "
+            "amount=%(amount)s, memo=%(memo)s, updated_by=%(by)s, updated_at=now() WHERE id=%(id)s RETURNING *",
+            {**v, "by": by, "id": aid}).fetchone()
+        db.log(conn, by, "manual_adjustment", aid, "edit", before=before, after=after)
+
+
+def delete_adjustment(conn, aid: int, by: str):
+    with conn.transaction():
+        before = _get(conn, "manual_adjustment", aid)
+        conn.execute("DELETE FROM manual_adjustment WHERE id = %s", (aid,))
+        db.log(conn, by, "manual_adjustment", aid, "delete", before=before)
+
+
+def move_non_gl_seed_rows(conn, by: str = "migration") -> dict:
+    """One-off: the seeded CYA rows marked "Non-GL posting" become manual adjustments (and leave
+    gl_line), so they survive the switch to the NetSuite GL feed, which never carries them."""
+    moved = {}
+    with conn.transaction():
+        rows = conn.execute("SELECT * FROM gl_line WHERE memo ILIKE %s ORDER BY region, month, id",
+                            ("%non-gl posting%",)).fetchall()
+        for r in rows:
+            after = conn.execute(
+                "INSERT INTO manual_adjustment (region, month, brand, kind, amount, memo, created_by, updated_by) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING *",
+                (r["region"], r["month"], calc.norm_brand(r["brand"]), r["kind"], r["amount"],
+                 r["memo"].strip(), by, by)).fetchone()
+            conn.execute("DELETE FROM gl_line WHERE id = %s", (r["id"],))
+            db.log(conn, by, "manual_adjustment", after["id"], "add", before={"gl_line": r}, after=after,
+                   note="moved from the seeded CYA rows (Non-GL posting)")
+            k = (r["region"], r["month"].strftime("%Y-%m"))
+            moved[k] = round(moved.get(k, 0.0) + float(r["amount"]), 2)
+    return moved
 
 
 def delete_batch(conn, bid: int, by: str):

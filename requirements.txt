@@ -8,3 +8,4 @@ pdfplumber
 tzdata
 segno
 psycopg[binary]
+boto3>=1.34

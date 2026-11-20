@@ -9,6 +9,7 @@
 {% macro pctv(v) %}{{ ('%.4f' % (v * 100)).rstrip('0').rstrip('.') }}{% endmacro %}
 {% macro mon(d) %}{{ d.strftime('%Y-%m') if d else '' }}{% endmacro %}
 {% macro monl(d) %}{{ d.strftime('%b %Y') if d else 'open' }}{% endmacro %}
+{% macro pdf_field() %}{% if view.docs_ready %}<label>Supporting PDF <input type="file" name="document" accept="application/pdf,.pdf" title="Optional, up to 10 MB"></label>{% endif %}{% endmacro %}
 {% macro cust(r) %}{% if r.customer_id is not none %}{{ r.customer_name }} · {{ r.customer_id }}{% endif %}{% endmacro %}
 
 {% macro rule_fields(kind, r=None) %}
@@ -44,13 +45,17 @@
   .bp-tools{display:flex;gap:.8rem;align-items:flex-end;flex-wrap:wrap;margin:.4rem 0 .6rem}
   .bp-tools label{display:flex;flex-direction:column;font-size:.78rem;gap:.2rem}
   .banner.okb{background:#d1e7dd;color:#0f5132;border:1px solid #a3cfbb}
+  .bp-doc{font-size:.82rem;margin-top:.2rem}
   .bp-mono{font-family:ui-monospace,Consolas,monospace;font-size:.78rem;white-space:pre-wrap;word-break:break-word;max-width:520px}
 </style>
 
 <h1 class="home-title">Brand Profitability settings</h1>
 <p class="hint">Rates by month, used by the <a href="/reports/brand-profit?region={{ region }}">Brand Profitability report</a>.
   A rate applies to every month from <b>From</b> to <b>To</b> (blank To = until changed). To change a rate from a month on,
-  use <b>New rate from</b> on its row: the old row ends the month before. Every change is logged with who made it.</p>
+  use <b>New rate from</b> on its row: the old row ends the month before. Every change is logged with who made it.
+  A supporting PDF (e.g. the customer contract) can be attached to a new rate or any row.</p>
+<p><a class="btn" href="/brand-profit/settings/export.xlsx">Download all settings (Excel)</a>
+  <span class="hint">Every rate with the months it covers and its status, PMs, GL accounts, manual adjustments, documents and the full change log — for audit.</span></p>
 
 {% if regions|length > 1 %}
 <div class="bp-tabs">{% for r in regions %}<a class="tab {{ 'active' if r == region }}" href="?region={{ r }}&tab={{ tab }}">{{ 'Australia' if r == 'AU' else 'New Zealand' }}</a>{% endfor %}</div>
@@ -79,10 +84,11 @@
   'gp_target': "The brand's target for net profit % on gross sales — the report's 'vs target' column."}[kind] %}
 <div class="card">
   <h2 style="margin-top:0">{{ kind_labels[kind] }}</h2>
-  <p class="hint">{{ help }}</p>
-  <form class="inline-form" method="post" action="/brand-profit/rule">
+  <p class="hint">{{ help }}{% if not view.docs_ready %} <i>Attaching PDFs isn't available until document storage is set up.</i>{% endif %}</p>
+  <form class="inline-form" method="post" action="/brand-profit/rule" enctype="multipart/form-data">
     <input type="hidden" name="region" value="{{ region }}"><input type="hidden" name="kind" value="{{ kind }}">
     {{ rule_fields(kind) }}
+    {{ pdf_field() }}
     <button class="btn" type="submit">Add</button>
   </form>
 </div>
@@ -109,17 +115,26 @@
         {% if kind == 'brand' %}<td>{{ r.item_category or 'all' }}</td>{% endif %}
         {% if kind == 'sku' %}<td>{{ r.item_code }}</td>{% endif %}
         <td class="num"><b>{{ pctv(r.pct|float) }}%</b></td><td>{{ monl(r.valid_from) }}</td><td>{{ monl(r.valid_to) }}</td>
-        <td>{{ r.note }}</td>
+        <td>{{ r.note }}
+          {% for d in view.docs.get(r.id, []) %}<div class="bp-doc"><a href="/brand-profit/document/{{ d.id }}" target="_blank" rel="noopener" title="{{ d.uploaded_by }}, {{ d.uploaded_at | sydney }}{% if d.note %} — {{ d.note }}{% endif %}">&#128206; {{ d.filename }}</a></div>{% endfor %}</td>
         <td class="hint">{{ r.updated_by }}<br>{{ r.updated_at | sydney if r.updated_at else '' }}</td>
         <td class="row-actions">
           <details><summary>New rate from…</summary>
-            <form class="inline-form" method="post" action="/brand-profit/rule/{{ r.id }}/change">
+            <form class="inline-form" method="post" action="/brand-profit/rule/{{ r.id }}/change" enctype="multipart/form-data">
               <input type="hidden" name="region" value="{{ region }}"><input type="hidden" name="kind" value="{{ kind }}">
               <label>From <input type="month" name="month" required></label>
               <label>Rate % <input name="pct" required size="6" inputmode="decimal"></label>
               <label>Note <input name="note" size="18"></label>
+              {{ pdf_field() }}
               <button class="btn small" type="submit">Save</button>
             </form></details>
+          {% if view.docs_ready %}<details><summary>Attach PDF</summary>
+            <form class="inline-form" method="post" action="/brand-profit/rule/{{ r.id }}/document" enctype="multipart/form-data">
+              <input type="hidden" name="region" value="{{ region }}"><input type="hidden" name="kind" value="{{ kind }}">
+              <label>PDF (up to 10 MB) <input type="file" name="document" accept="application/pdf,.pdf" required></label>
+              <label>Note <input name="doc_note" size="18" placeholder="e.g. signed contract"></label>
+              <button class="btn small" type="submit">Attach</button>
+            </form></details>{% endif %}
           <details><summary>Edit</summary>
             <form class="inline-form" method="post" action="/brand-profit/rule/{{ r.id }}">
               <input type="hidden" name="region" value="{{ region }}"><input type="hidden" name="kind" value="{{ kind }}">
@@ -193,9 +208,11 @@
 <div class="card">
   <h2 style="margin-top:0">Freight &amp; vendor rebates</h2>
   <p class="hint">NetSuite GL lines on the freight / landed-cost and vendor-rebate accounts, by brand and month (positive =
-    cost, negative = a vendor credit). Upload the NetSuite saved search as CSV: an upload <b>replaces</b> the lines for every
-    month in the file and leaves other months alone. Once the automatic NetSuite extract covers a month, it replaces
-    uploads for that month.</p>
+    cost, negative = a vendor credit). They come from NetSuite automatically, about every 30 minutes (accounts 51010 Duty,
+    51040 Importation Costs, 51050 Freight &amp; Courier Imports, 51080 Rebate Claims on Suppliers, 51085 Brand Rebate recovery,
+    plus any mapped below). Uploading the saved search as CSV is only for a month the automatic feed doesn't have: an upload
+    <b>replaces</b> the lines for every month in the file, and the automatic feed replaces uploads once it covers a month.
+    Anything that isn't in the NetSuite GL goes in <b>Manual adjustments</b> below.</p>
   <form class="inline-form" method="post" action="/brand-profit/upload" enctype="multipart/form-data">
     <input type="hidden" name="region" value="{{ region }}">
     <label>Saved search CSV <input type="file" name="file" accept=".csv" required></label>
@@ -205,8 +222,55 @@
   <p class="hint">Columns read: Date or Period, Account, Amount (debit − credit), Class, and Document Number, Type, Name, Memo,
     Line Unique Key if present. Every account in the file must be mapped below first.</p>
 </div>
+<div class="card" id="adjustments">
+  <h2 style="margin-top:0">Manual adjustments (not in NetSuite)</h2>
+  <p class="hint">Amounts finance adds by hand that never post in the NetSuite GL — the CYA's "RPP only (Non-GL posting)" rows,
+    e.g. customer-rebate accruals funded by the vendor, or an internal MDF accrual. Each is added on top of the NetSuite lines for
+    its brand and month and shows as "Manual adjustment" in the report's drill-down. <b>Positive = a cost to Macgear</b>, negative =
+    income (the CYA's VR $ / Freight $ sign). Don't enter anything that's already posted in NetSuite — it would count twice.</p>
+  <form class="inline-form" method="post" action="/brand-profit/adjustment">
+    <input type="hidden" name="region" value="{{ region }}">
+    <label>Month <input type="month" name="month" required></label>
+    <label>Brand <input name="brand" list="bpBrands" required size="14"></label>
+    <label>Type <select name="kind"><option value="vr">Vendor rebate</option><option value="freight">Freight</option></select></label>
+    <label>Amount <input name="amount" required size="12" inputmode="decimal" placeholder="e.g. -131510.18"></label>
+    <label class="grow">Memo <input name="memo" required placeholder="e.g. MGNZ EUFY Customer Rebates Accrual - Oct 2026 (US$72,329.88 @ 1.8182)"></label>
+    <button class="btn" type="submit">Add</button>
+  </form>
+  {% set adj = view.adjustments %}
+  <table class="grid bp-tbl" style="margin-top:.8rem">
+    <thead><tr><th>Month</th><th>Brand</th><th>Type</th><th class="num">Amount</th><th>Memo</th><th>Changed</th><th></th></tr></thead>
+    <tbody>
+    {% for m, rows in adj|groupby('month')|reverse %}
+      {% for a in rows %}
+      <tr><td>{{ a.month.strftime('%b %Y') }}</td><td>{{ a.brand }}</td><td>{{ 'Freight' if a.kind == 'freight' else 'Vendor rebate' }}</td>
+        <td class="num">{{ "{:,.2f}".format(a.amount|float) }}</td><td>{{ a.memo }}</td>
+        <td class="hint">{{ a.updated_by }}<br>{{ a.updated_at | sydney if a.updated_at else '' }}</td>
+        <td class="row-actions">
+          <details><summary>Edit</summary>
+            <form class="inline-form" method="post" action="/brand-profit/adjustment/{{ a.id }}">
+              <input type="hidden" name="region" value="{{ region }}">
+              <label>Month <input type="month" name="month" value="{{ a.month.strftime('%Y-%m') }}" required></label>
+              <label>Brand <input name="brand" list="bpBrands" value="{{ a.brand }}" required size="14"></label>
+              <label>Type <select name="kind"><option value="vr" {{ 'selected' if a.kind == 'vr' }}>Vendor rebate</option>
+                <option value="freight" {{ 'selected' if a.kind == 'freight' }}>Freight</option></select></label>
+              <label>Amount <input name="amount" value="{{ '%.2f' % (a.amount|float) }}" required size="12"></label>
+              <label class="grow">Memo <input name="memo" value="{{ a.memo }}" required></label>
+              <button class="btn small" type="submit">Save</button></form></details>
+          <form class="inline-delete" method="post" action="/brand-profit/adjustment/{{ a.id }}/delete" onsubmit="return confirm('Delete this adjustment?')">
+            <input type="hidden" name="region" value="{{ region }}"><button class="btn small ghost" type="submit">Delete</button></form>
+        </td></tr>
+      {% endfor %}
+      <tr class="bp-old"><td colspan="3" class="hint">{{ m.strftime('%b %Y') }} total</td>
+        <td class="num hint">{{ "{:,.2f}".format(rows|sum(attribute='amount')|float) }}</td><td colspan="3"></td></tr>
+    {% else %}<tr><td colspan="7" class="hint">No manual adjustments.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
 <div class="card">
   <h2 style="margin-top:0">GL accounts</h2>
+  <p class="hint">Extra accounts to count as freight or vendor rebates, on top of the five above (for the automatic feed, the
+    account must also be in the NetSuite saved search DW_gl_lines). Also used to read an uploaded CSV.</p>
   <form class="inline-form" method="post" action="/brand-profit/account">
     <input type="hidden" name="region" value="{{ region }}">
     <label class="grow">Account (as the saved search prints it) <input name="account" required></label>
@@ -246,7 +310,8 @@
 {% elif tab == 'log' %}
 <div class="card">
   <h2 style="margin-top:0">Change log</h2>
-  <p class="hint">Every change to these settings, newest first (last 300). Rows are never edited or removed.</p>
+  <p class="hint">Every change to these settings, newest first (last 300). Rows are never edited or removed.
+    <a class="btn small" href="/brand-profit/settings/changelog.xlsx">Download the full change log (Excel)</a></p>
   <table class="grid compact">
     <thead><tr><th>When</th><th>Who</th><th>What</th><th>Action</th><th>Before</th><th>After</th><th>Note</th></tr></thead>
     <tbody>{% for l in view.log %}

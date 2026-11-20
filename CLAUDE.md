@@ -38,6 +38,7 @@ warehouse host in the droplet `.env` broke the warm-up — compare the host, not
 | `/targets` | Targets — build sales targets on NetSuite actuals, commit the official set (Postgres `targets` schema) | staff with the area |
 | `/vendor-bills` | PDF Bill Upload — Amazon Advertising → NetSuite CSV | accounts |
 | `/reports/open-orders` | Open Orders — open sales order lines: value, picking lines, age, Top 10s, order / product list (LOCAL only) | staff with the area ($ needs Sell-in $) |
+| `/reports/gl/mova`, `/reports/gl/anker` | GL Accounts — every posting on the PMs' balance-sheet accounts, balances + lines (LOCAL only) | staff with that group's area |
 | `/reports/brand-profit` | Brand Profitability — NP by PM / brand after rebates, freight, vendor rebates, MDF (LOCAL only) | staff with the area + Margin |
 | `/brand-profit/settings` | Brand Profitability settings — rates by month, PMs, freight / VR uploads, change log (LOCAL only) | staff with the area |
 | `/admin/users` | User management | admins |
@@ -404,6 +405,32 @@ SQL; **$ only with `sell_in_value`** (the SQL selects NULL otherwise). One cache
   lines / 2,155 orders, NZ NZ$3,070,458.66 / 4,764 = the loader's figures (which equal NetSuite's
   status counts on the 13 Nov sample).
 
+**GL Accounts** (`app/gl_accounts.py`, `templates/gl_accounts.html`, `tests/test_gl_accounts.py`; built
+2026-11-20, CFO Jonathan Lee's request "GL access" 2026-11-11, **local only**). PMs see the transactions on
+the balance-sheet accounts they manage during the month instead of asking finance (a NetSuite role can't be
+limited to some accounts, so it's here). Data = `reporting.fact_gl_line` (`Sell Through/db/16_gl_lines.sql`;
+Zone export `DW_gl_lines`, a whole snapshot of ALL dates each run, loaded by `netsuite_intake.py`). **Two
+reports, two area keys** (Jonathan: one for Mova, one for Eufy / Anker): `gl_mova` → `/reports/gl/mova`
+(Rachel, Jeffrey: 11546 / 11547 recoverables, 22195 / 22196 MDF accruals) and `gl_anker` →
+`/reports/gl/anker` (David, Kenneth, Dale: 11540–11545, 22191 / 22192 / 22193 CMF accruals with every
+per-retailer sub-account, 22194 EUFY MDF buffer). Staff only (not in `VENDOR_AREAS`); region scope applies,
+brand scope doesn't (the accounts are the scope). The account list (internal id, number, name, parent) lives
+in `GROUPS` — DW_dim_account has no account numbers. A new account = a row there AND in the saved search.
+- **Amounts are in the account's natural sign** (NetSuite transaction-search Amount): receivable positive =
+  vendor owes Macgear, accrual positive = Macgear has accrued / owes it. Receivables and accruals are never
+  added together; a parent (22191…) = the sum of its sub-accounts. AU / NZ never summed.
+- Opening = all lines before the first month shown, closing = to the end of the last (the export carries all
+  history since 2019, so closing = NetSuite's balance). Month = posting period. Lines with a running balance;
+  Excel = Summary + Transactions. "Open in NetSuite" links only when `NETSUITE_ACCOUNT_ID` is set (env; not
+  a credential). Cached 10 min per group × regions.
+- Checked 2026-11-20 on the local copy of the 20 Nov sample (`DWGLLinesResults608.csv`, 9,303 lines): every
+  account × region closing (62, incl. parents) = the raw file's sum; AU 22195 MDF Accrual – Mova Spacewalker
+  A$2,897,112.68. Not yet compared with a NetSuite balance (asked the user for 22195).
+- **Before going live:** apply `16_gl_lines.sql` to the cluster, publish `netsuite_intake` to Windmill (user's
+  OK), the Zone schedule for `DW_gl_lines` (the S3 file has no duplicate Internal ID / total row; the loader
+  copes either way), deploy, tick `gl_mova` / `gl_anker` for the PMs, set `NETSUITE_ACCOUNT_ID` in the
+  droplet `.env` for links.
+
 **Receipt strip** (`app/receipts.py`, `templates/_st_status.html`, 2026-10-15) —
 "who have we received" for sell-through, a one-line collapsible bar at the top
 of home, Item Explorer (landing + item), the table and the dashboard: "w/e 11 Oct
@@ -590,6 +617,7 @@ Shared shell:
 | `app/field.py` | Field Activity (Repsly): loads + the display-compliance rules |
 | `app/ageing.py` | Inventory Ageing: scoped warehouse queries → the page's JSON |
 | `app/open_orders.py` | Open Orders: scoped open SO lines → page JSON, home summary, item view |
+| `app/gl_accounts.py` | GL Accounts: account groups, opening / movement / closing, Excel |
 | `app/security.py` | PBKDF2 hashing, cookie signing, set-password tokens |
 | `app/db.py` | Engine, session, additive column migrations |
 | `app/models.py` | SQLAlchemy models for both tools, plus `User` |
@@ -820,6 +848,37 @@ Not committed or deployed.
   `change_log`. Same-key rules may never overlap (`settings.py` refuses). "New rate from" ends the old
   row the month before. Customers are NetSuite internal ids, so the later portfolio page (rep ↔
   customer ↔ brand, PM ↔ brand) can build on `brand_pm`.
+- **NetSuite GL feed + manual adjustments (2026-11-20, LOCAL only):** freight / VR now come from
+  `reporting.fact_gl_line` (the GL Accounts feed, `DW_gl_lines`) on accounts `data.GL_KIND` = 630 / 632 / 633
+  freight, 637 / 953 VR (+ any mapped on the settings page, matched on id / name). A month the feed has
+  replaces seeded / uploaded lines for that month (old rule). **`manual_adjustment`** (settings → Freight &
+  vendor rebates → Manual adjustments, form row by row, logged) holds what finance adds that never posts in
+  NetSuite — the CYA's "RPP only (Non-GL posting)" rows (user + accounts, 2026-11-20); always added on top,
+  source "manual" in the drill-down. One-off `python -m app.brand_profit.seed --move-non-gl` moved the seeded
+  Non-GL rows into it (local: AU Oct −323,704.92; NZ Sep −208,001.00, Oct −163,087.66 = NZ CYA rows 648–652).
+  Checked on the local warehouse copy: freight and VR month totals = the CYA for Apr–Sep 2026 in AU and NZ to
+  the cent; Oct differs only by later NetSuite postings (AU JE006811 amended 281,834 → 261,834 and a Withings
+  credit −152,502.75; NZ a Withings credit −34,542.84). **Brand level differs** where the CYA re-branded GL
+  lines by hand (AU ~$200k moved Apr–Sep, e.g. Apr: NetSuite has −$144,042 VR with no class that the CYA put
+  on MOVA; NZ ~$47k) — the feed keeps NetSuite's line class; fix the class in NetSuite. JE006636 (NZ CMF pass
+  through, 51080 ↔ 11541) posts normally and is in both. **Go-live order** (so no month loses its Non-GL
+  rows): deploy this code → `--move-non-gl` on the cluster → apply `16_gl_lines.sql` + load the GL export.
+- **Audit export + supporting PDFs (2026-11-20, user's request, LOCAL only).** Settings page → "Download all
+  settings (Excel)" = `GET /brand-profit/settings/export.xlsx` (`brand_profit/settings_export.py`): About (how
+  to read it, sheet counts), one sheet per rule kind (Rate, From, To, Months covered, Status as at this month
+  — In force / Ended / Starts later, note, last changed by/at, supporting documents), PMs, GL accounts (built-in
+  `GL_KIND` + mapped), Manual adjustments, Documents (rule as it read when attached, size, SHA-256, uploader)
+  and the FULL change log (a readable "Changes" column: `pct: 19% → 17.5%`, plus raw before / after JSON);
+  regions = the viewer's. `/brand-profit/settings/changelog.xlsx` = the log alone (button on the Change log
+  tab). **PDFs** (≤ 10 MB, `%PDF-` header checked, not just the name) on "New rate from", Add, or "Attach PDF"
+  on any rule row → DigitalOcean Spaces via `app/doc_store.py` (boto3 — added to requirements; env
+  `SPACES_ENDPOINT / REGION / BUCKET / ACCESS_KEY / SECRET_KEY`, a PRIVATE bucket of its own with a key scoped
+  to it; unset = the file inputs are hidden and a PDF post is refused), key `brand-profit/<region>/<sha16>_<name>`;
+  table `document` (rule id, rule label snapshot, size, sha256, object key; no FK, never deleted) + a change-log
+  "upload" row. The object is stored FIRST, then the rate change and the document row in one transaction; a
+  refused change deletes the object again. `GET /brand-profit/document/{id}` streams it back (inline) — the
+  `/brand-profit` prefix = settings users only. **To go live:** create the bucket + key (user), put the five
+  values in the droplet `deploy/.env`.
 - **Freight / vendor rebates**: NetSuite GL lines by brand and month (positive = cost). Shown with
   NetSuite's sign so they tie to the GL, **coloured by effect on profit** (user, 2026-11-17): red =
   reduces profit (freight, VR accruals), green = adds to it (negative VR = vendor credit). Same in the

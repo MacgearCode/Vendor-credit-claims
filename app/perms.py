@@ -32,7 +32,7 @@ import json
 # Area keys. Reports must match the `key` of each entry in main.REPORTS, tools
 # the `key` of each entry in main.TOOLS.
 REPORT_KEYS = ["sales", "sell_through", "items", "st_table", "st_weekly", "field", "ageing", "brand_profit",
-               "open_orders"]
+               "open_orders", "gl_mova", "gl_anker"]
 TOOL_KEYS = ["promos", "vendor_bills", "targets", "brand_profit_settings"]
 AREA_KEYS = REPORT_KEYS + TOOL_KEYS
 AREA_LABELS = {"sales": "Sales Explorer (needs Sell-in $)",
@@ -45,6 +45,8 @@ AREA_LABELS = {"sales": "Sales Explorer (needs Sell-in $)",
                "targets": "Targets (prepare and commit sales targets)",
                "brand_profit": "Brand Profitability (needs Margin)",
                "open_orders": "Open Orders (what customers are waiting on; $ needs Sell-in $)",
+               "gl_mova": "GL Accounts — Mova (recoverables, MDF accruals)",
+               "gl_anker": "GL Accounts — Anker / Eufy / Soundcore (recoverables, claims, CMF accruals)",
                "brand_profit_settings": "Brand Profitability settings (edit rebates, MDF, targets, PMs)"}
 
 CAP_KEYS = ["sell_in", "sell_in_value", "margin"]

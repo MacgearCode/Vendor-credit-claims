@@ -34,6 +34,13 @@ services:
       - REPORTING_DB_URL=${REPORTING_DB_URL:-}
       # Targets tool: role that owns / writes the `targets` schema (same database).
       - TARGETS_DB_URL=${TARGETS_DB_URL:-}
+      - NETSUITE_ACCOUNT_ID=${NETSUITE_ACCOUNT_ID:-}
+      # Brand Profitability supporting PDFs: private DigitalOcean Spaces bucket (app/doc_store.py)
+      - SPACES_ENDPOINT=${SPACES_ENDPOINT:-}
+      - SPACES_REGION=${SPACES_REGION:-}
+      - SPACES_BUCKET=${SPACES_BUCKET:-}
+      - SPACES_ACCESS_KEY=${SPACES_ACCESS_KEY:-}
+      - SPACES_SECRET_KEY=${SPACES_SECRET_KEY:-}
       # Account emails (invites, password resets) go through the SAME n8n workflow as the
       # 3PL Portal: http://n8n:5678/webhook/3pl-account-email on the shared docker network,
       # with the same X-Sync-Token. Unset = no email; admins get a link to copy instead.

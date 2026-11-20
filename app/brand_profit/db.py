@@ -18,6 +18,14 @@ Holds what the CYA workbook hard-coded and the finance team pasted by hand:
               the region's earlier lines for every month it contains (they are kept, marked
               superseded_by); once the NetSuite extract covers a month, it replaces all of
               these for that month (see data.py).
+  manual_adjustment  freight / vendor-rebate amounts finance adds by hand that are NOT in the
+              NetSuite GL (the CYA's "RPP only (Non-GL posting)" rows: customer-rebate accruals,
+              internal MDF accruals). Entered row by row on the settings page; always added on top
+              of whichever GL source a month uses, never replaced by it.
+  document    supporting PDFs (a customer contract behind a rate change, …): the file lives in
+              DigitalOcean Spaces (app/doc_store.py), this row says which rule it backs, with a
+              snapshot of the rule as it read at upload, its size and SHA-256. Never deleted —
+              it outlives the rule (audit).
   change_log  every add / edit / delete: who, when, before -> after (append-only)
 
 Percentages are stored as fractions (0.19 = 19%). Months are DATE, the 1st. A rule applies to
@@ -131,6 +139,37 @@ CREATE TABLE IF NOT EXISTS gl_line (
                                                    -- a later upload covering the same month
 );
 CREATE INDEX IF NOT EXISTS gl_line_month ON gl_line (region, month);
+
+CREATE TABLE IF NOT EXISTS manual_adjustment (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    region      TEXT   NOT NULL CHECK (region IN ('AU', 'NZ')),
+    month       DATE   NOT NULL,                   -- the 1st
+    brand       TEXT   NOT NULL,                   -- upper-case class name
+    kind        TEXT   NOT NULL CHECK (kind IN ('freight', 'vr')),
+    amount      NUMERIC(14, 2) NOT NULL,           -- positive = cost to Macgear (the CYA's sign)
+    memo        TEXT   NOT NULL DEFAULT '',
+    created_by  TEXT   NOT NULL DEFAULT '',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_by  TEXT   NOT NULL DEFAULT '',
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS manual_adjustment_month ON manual_adjustment (region, month);
+
+CREATE TABLE IF NOT EXISTS document (
+    id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    region       TEXT   NOT NULL CHECK (region IN ('AU', 'NZ')),
+    rule_table   TEXT   NOT NULL DEFAULT 'rate_rule',
+    rule_id      BIGINT NOT NULL,                  -- not a FK: the document outlives the rule
+    rule_label   TEXT   NOT NULL DEFAULT '',       -- the rule as it read when the file was attached
+    filename     TEXT   NOT NULL,
+    size_bytes   INTEGER NOT NULL,
+    sha256       TEXT   NOT NULL,
+    object_key   TEXT   NOT NULL,                  -- in SPACES_BUCKET
+    note         TEXT   NOT NULL DEFAULT '',
+    uploaded_by  TEXT   NOT NULL DEFAULT '',
+    uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS document_rule ON document (rule_table, rule_id);
 
 CREATE TABLE IF NOT EXISTS change_log (
     id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

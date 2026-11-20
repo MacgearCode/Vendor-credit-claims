@@ -174,7 +174,7 @@
   the targets ask for (target % × gross, brand by brand). Brands with no target are left out of both (marked *). Freight and vendor rebates are NetSuite GL lines by brand (positive = cost, negative =
   a vendor credit, shown green); they sit on the brand, not on a customer. The numbers keep NetSuite's sign so they tie to the GL; colour shows the effect on profit (red = reduces it, green = adds to it).<br>
   Freight / vendor-rebate source by month:
-  {% for m, src in rep.gl_source.items() %}{{ m | bp_month }} <span class="bp-src">{{ {'netsuite':'NetSuite extract','upload':'uploaded','seed':'CYA workbook'}.get(src, 'none') }}</span>{{ ', ' if not loop.last }}{% endfor %}.<br>
+  {% for m, src in rep.gl_source.items() %}{{ m | bp_month }} <span class="bp-src">{{ {'netsuite':'NetSuite extract','upload':'uploaded','seed':'CYA workbook'}.get(src, 'none') }}</span>{{ ', ' if not loop.last }}{% endfor %}. Manual adjustments (amounts finance adds that aren't in the NetSuite GL) are added on top in every month.<br>
   Known gap: credit memos on generic items ("Sales", "Sales short supply &amp; damage", "Lost in Transit") carry their brand only
   on the NetSuite line's class, which the sales export doesn't include yet, so they show under "- No Brand -".
 </p>
@@ -230,7 +230,7 @@
     const r = await fetch('/reports/brand-profit/gl.json?' + q);
     const lines = await r.json();
     if (!Array.isArray(lines)) { body.innerHTML = '<tr><td class="l" colspan="6">Not available.</td></tr>'; return; }
-    const src = {netsuite: 'NetSuite', upload: 'uploaded', seed: 'CYA workbook'};
+    const src = {netsuite: 'NetSuite', upload: 'uploaded', seed: 'CYA workbook', manual: 'Manual adjustment'};
     body.innerHTML = lines.map(g => `<tr><td class="l">${esc(g.month.slice(0, 7))}</td><td class="l">${g.kind === 'freight' ? 'Freight' : 'Vendor rebate'}</td>
       <td class="${g.amount > 0 ? 'bp-cost' : (g.amount < 0 ? 'bp-inc' : '')}">${fmt(g.amount)}</td><td class="l">${esc(g.document_number)}</td><td class="l">${esc(src[g.source] || g.source)}</td>
       <td class="l" style="white-space:normal;min-width:420px">${esc(g.memo)}</td></tr>`).join('') || '<tr><td class="l" colspan="6">None.</td></tr>';

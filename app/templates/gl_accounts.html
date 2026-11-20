@@ -1,0 +1,161 @@
+{% extends "_rpt_base.html" %}
+{% block title %}GL Accounts — {{ g.title }} · Macgear Reporting{% endblock %}
+{% block pagename %}GL Accounts — {{ g.title }}{% endblock %}
+{% block home_href %}/reports/gl/{{ slug }}{% endblock %}
+
+{% block head %}
+<style>
+  .gl-lede{font-size:14.5px;color:var(--r-ink-2);max-width:110ch;margin:10px 0 0}
+  .gl-hint{font-size:12px;color:var(--r-faint);margin:10px 0 0;max-width:120ch}
+  .gl-num{font-variant-numeric:tabular-nums}
+  .gl-neg{color:var(--r-neg)}
+  .gl-sum td.l a{color:inherit;text-decoration:none}
+  .gl-sum td.l a:hover{text-decoration:underline}
+  .gl-sum tr.par td{font-weight:700}
+  .gl-sum tr.sub td.l.nm{padding-left:28px}
+  .gl-sum tr.tot td{font-weight:800;border-top:2px solid var(--r-line-2)}
+  .gl-acc{margin-top:14px;border:1px solid var(--r-line);border-radius:12px;background:var(--r-card)}
+  .gl-acc > summary{cursor:pointer;list-style:none;display:flex;gap:14px;align-items:baseline;flex-wrap:wrap;padding:12px 16px}
+  .gl-acc > summary::-webkit-details-marker{display:none}
+  .gl-acc > summary::before{content:"▸";color:var(--r-muted);width:12px}
+  .gl-acc[open] > summary::before{content:"▾"}
+  .gl-acc .an{font-weight:700}
+  .gl-acc .ab{margin-left:auto;font-size:13px;color:var(--r-muted)}
+  .gl-acc .ab b{color:var(--r-ink)}
+  .gl-acc .r-tablewrap{border:0;border-top:1px solid var(--r-line);border-radius:0 0 12px 12px;max-height:60vh}
+  .gl-acc td.memo{white-space:normal;min-width:260px;max-width:520px;text-align:left}
+  .gl-acc tr.ob td{color:var(--r-muted);font-style:italic}
+  .r-seg [aria-pressed="true"]:hover{color:var(--r-bg)}
+</style>
+{% endblock %}
+
+{% block content %}
+{% if error %}
+<div class="r-card"><p class="r-eyebrow">GL Accounts</p><h2 style="margin:0 0 8px">Not available</h2>
+  <p class="r-muted">{{ error }}</p></div>
+{% else %}
+{% set cur = 'A$' if region == 'AU' else 'NZ$' %}
+{% macro amt(x) %}<span class="gl-num {{ 'gl-neg' if x < -0.004 }}">{{ x|money }}</span>{% endmacro %}
+{% set q = 'region=' ~ region ~ '&frm=' ~ first.strftime('%Y-%m') ~ '&to=' ~ last.strftime('%Y-%m') %}
+<section class="r-card">
+  <div class="r-card-h" style="margin-bottom:4px">
+    <div>
+      <p class="r-eyebrow">NetSuite general ledger · every posting on these accounts</p>
+      <h2>{{ g.title }}</h2>
+    </div>
+    <div class="r-filters">
+      {% if regions|length > 1 %}
+      <div class="r-seg" role="group" aria-label="Region">
+        {% for r in regions %}<a href="?region={{ r }}&frm={{ first.strftime('%Y-%m') }}&to={{ last.strftime('%Y-%m') }}" aria-pressed="{{ 'true' if r == region else 'false' }}">{{ 'Australia' if r == 'AU' else 'New Zealand' }}</a>{% endfor %}
+      </div>
+      {% endif %}
+      {% if data and data.loaded %}<span class="r-chip">NetSuite as at <b>{{ data.loaded|sydney_dt }}</b></span>{% endif %}
+    </div>
+  </div>
+  <form class="r-filters" method="get" style="margin-top:12px">
+    <input type="hidden" name="region" value="{{ region }}">
+    <label>From
+      <select class="r-select" name="frm" onchange="this.form.submit()">
+        {% for m in months|reverse %}<option value="{{ m.strftime('%Y-%m') }}" {{ 'selected' if m == first }}>{{ m.strftime('%b %Y') }}</option>{% endfor %}
+      </select></label>
+    <label>To
+      <select class="r-select" name="to" onchange="this.form.submit()">
+        {% for m in months %}<option value="{{ m.strftime('%Y-%m') }}" {{ 'selected' if m == last }}>{{ m.strftime('%b %Y') }}</option>{% endfor %}
+      </select></label>
+    <span class="r-tabs" style="align-self:flex-end">
+      <a class="r-tab {{ 'on' if first == this_month and last == this_month }}" href="?region={{ region }}&frm={{ this_month.strftime('%Y-%m') }}&to={{ this_month.strftime('%Y-%m') }}">This month</a>
+      <a class="r-tab {{ 'on' if first == fy_start and last == this_month }}" href="?region={{ region }}">Financial year to date</a>
+      {% if v.first_month %}<a class="r-tab {{ 'on' if first == v.first_month and last == this_month }}" href="?region={{ region }}&frm={{ v.first_month.strftime('%Y-%m') }}&to={{ this_month.strftime('%Y-%m') }}">All history</a>{% endif %}
+    </span>
+    <a class="r-btn ghost" style="align-self:flex-end;margin-left:auto" href="/reports/gl/{{ slug }}/export.xlsx?{{ q }}">Excel</a>
+  </form>
+  <p class="gl-lede">{{ g.blurb }} <b>{{ first.strftime('%b %Y') }}{% if last != first %} – {{ last.strftime('%b %Y') }}{% endif %}</b>,
+    {{ 'Australia' if region == 'AU' else 'New Zealand' }}, {{ cur }} ex GST. {{ v.count }} transaction line{{ 's' if v.count != 1 }} in the period.</p>
+  <p class="gl-hint">Balances are in each account's normal sign: a <b>receivable</b> (115xx) is positive when the vendor owes Macgear;
+    an <b>accrual</b> (221xx) is positive when Macgear has accrued it and still owes it. A negative figure is the other way round.
+    Opening = everything posted before {{ first.strftime('%b %Y') }}; closing = to the end of {{ last.strftime('%b %Y') }}, so it matches NetSuite's balance.
+    Updated from NetSuite about every 30 minutes.</p>
+</section>
+
+<section class="r-card r-sec">
+  <div class="r-card-h"><div><p class="r-eyebrow">Balances</p><h2>Accounts</h2></div></div>
+  <div class="r-tablewrap" style="max-height:none">
+    <table class="r-table gl-sum">
+      <thead><tr><th class="l">Account</th><th class="l">Name</th><th>Opening</th><th>Movement</th><th>Closing</th><th>Lines</th></tr></thead>
+      <tbody>
+      {% for a in v.accounts %}
+        {% set nl = a.lines|length + (a.children|sum(attribute='lines', start=[])|length) %}
+        {% set tgt = 'a' ~ (a.children[0].id if a.children else a.id) %}
+        <tr class="{{ 'par' if a.children }}">
+          <td class="l"><a href="#{{ tgt }}" data-open="{{ tgt }}">{{ a.number }}</a></td>
+          <td class="l nm"><a href="#{{ tgt }}" data-open="{{ tgt }}">{{ a.name }}{% if a.children %} <span class="r-faint" style="font-weight:500">(total of the {{ a.children|length }} below)</span>{% endif %}</a></td>
+          <td>{{ amt(a.open) }}</td><td>{{ amt(a.move) }}</td><td>{{ amt(a.close) }}</td><td>{{ nl or '' }}</td>
+        </tr>
+        {% for c in a.children %}
+        <tr class="sub">
+          <td class="l"><a href="#a{{ c.id }}" data-open="a{{ c.id }}">{{ c.number }}</a></td>
+          <td class="l nm"><a href="#a{{ c.id }}" data-open="a{{ c.id }}">{{ c.name }}</a></td>
+          <td>{{ amt(c.open) }}</td><td>{{ amt(c.move) }}</td><td>{{ amt(c.close) }}</td><td>{{ c.lines|length or '' }}</td>
+        </tr>
+        {% endfor %}
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="gl-hint">Click an account for its transactions. Receivables and accruals aren't added together — they're different sides of the balance sheet.</p>
+</section>
+
+<section class="r-sec">
+{% for top in v.accounts %}
+  {% for a in ([top] if not top.children else top.children) %}
+  <details class="gl-acc" id="a{{ a.id }}" {{ 'open' if v.accounts|length == 1 }}>
+    <summary>
+      <span class="an">{{ a.number }}</span><span>{{ a.name }}</span>
+      <span class="ab">Opening <b>{{ amt(a.open) }}</b> · movement <b>{{ amt(a.move) }}</b> · closing <b>{{ amt(a.close) }}</b> · {{ a.lines|length }} line{{ 's' if a.lines|length != 1 }}</span>
+    </summary>
+    {% if a.lines %}
+    <div class="r-tablewrap">
+      <table class="r-table">
+        <thead><tr><th class="l">Date</th><th class="l">Period</th><th class="l">Type</th><th class="l">Document</th>
+          <th class="l">Name</th><th class="l">Memo</th><th class="l">Brand</th><th>Amount</th><th>Balance</th></tr></thead>
+        <tbody>
+          <tr class="ob"><td class="l" colspan="8">Opening balance</td><td>{{ amt(a.open) }}</td></tr>
+          {% for ln in a.lines %}
+          {% set href = ns_link(ln.tran_id) %}
+          <tr>
+            <td class="l">{{ ln.date.strftime('%d/%m/%Y') }}</td>
+            <td class="l">{{ ln.month.strftime('%b %Y') }}</td>
+            <td class="l">{{ ln.type }}</td>
+            <td class="l">{% if href %}<a href="{{ href }}" target="_blank" rel="noopener">{{ ln.doc or ln.tran_id }}</a>{% else %}{{ ln.doc }}{% endif %}</td>
+            <td class="l">{{ ln.entity }}</td>
+            <td class="memo">{{ ln.memo }}</td>
+            <td class="l">{{ ln.brand }}</td>
+            <td>{{ amt(ln.amount) }}</td>
+            <td>{{ amt(ln.balance) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="r-muted" style="margin:0;padding:0 16px 14px">Nothing posted in {{ first.strftime('%b %Y') }}{% if last != first %} – {{ last.strftime('%b %Y') }}{% endif %}.</p>
+    {% endif %}
+  </details>
+  {% endfor %}
+{% endfor %}
+</section>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // a click on an account in the summary opens its transactions
+  document.querySelectorAll('[data-open]').forEach(function(a){
+    a.addEventListener('click', function(){
+      var d = document.getElementById(a.getAttribute('data-open'));
+      if (d && d.tagName === 'DETAILS') d.open = true;
+    });
+  });
+  if (location.hash) { var d = document.querySelector(location.hash); if (d && d.tagName === 'DETAILS') d.open = true; }
+</script>
+{% endblock %}

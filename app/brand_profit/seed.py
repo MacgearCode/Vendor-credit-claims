@@ -2,6 +2,9 @@
 
     .\\.venv\\Scripts\\python.exe -m app.brand_profit.seed "brand profitability\\seed_fy27_au.json"
     ... --replace     clear that region's rules, PMs and seeded GL lines first
+    .\\.venv\\Scripts\\python.exe -m app.brand_profit.seed --move-non-gl
+                      one-off (2026-11-20): seeded rows marked "Non-GL posting" become manual
+                      adjustments, so they survive the switch to the NetSuite GL feed
 
 The FY27 AU file was built from the CYA workbook on 2026-11-17 (rate sheets with duplicate rows
 summed as Excel's SUMIFS did, customers mapped to NetSuite internal ids, Airport West dropped
@@ -61,6 +64,11 @@ def load(path: str, replace: bool = False, by: str = "seed") -> dict:
 
 
 if __name__ == "__main__":
+    if "--move-non-gl" in sys.argv:
+        from .settings import move_non_gl_seed_rows
+        with db.connect() as conn:
+            print(move_non_gl_seed_rows(conn))
+        raise SystemExit(0)
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if not args:
         raise SystemExit(__doc__)

@@ -18,13 +18,19 @@ brand, item category, item code), so one FY is some tens of thousands of rows, c
 expired by the sales watch (prefix "bp_lines" in sales.SALES_CACHE_PREFIXES).
 
 Freight / vendor rebates, per region x month, first source that has the month wins:
-  1. reporting.fact_gl_cost — the NetSuite GL extract once it exists (Zone -> S3 -> Windmill;
-     columns month, subsidiary_id, brand, kind, amount, document_number, memo, vendor, account);
+  1. reporting.fact_gl_line — the NetSuite GL lines (Zone export DW_gl_lines -> S3 -> Windmill,
+     Sell Through/db/16_gl_lines.sql), on the accounts in GL_KIND (else mapped on the settings
+     page); amount in the account's natural sign = positive is a cost for these COGS accounts;
   2. brand_profit.gl_line rows not superseded (seeded from the workbook, or uploaded).
+Plus, always, brand_profit.manual_adjustment: what finance adds by hand that never posts in
+NetSuite (the CYA's "Non-GL posting" rows). Checked 2026-11-20: the feed equals the seeded CYA
+lines month by month (AU + NZ, Apr-Sep 2026, freight and VR); Oct differs only by postings
+made after the CYA; brand-level cells differ where the CYA re-branded a line by hand (the
+feed keeps NetSuite's line class).
 """
 from datetime import date
 
-from .. import warehouse
+from .. import doc_store, warehouse
 from . import calc, db
 
 SUBSIDIARY = {"AU": 2, "NZ": 3}
@@ -32,7 +38,11 @@ SUBSIDIARY = {"AU": 2, "NZ": 3}
 # 957 Sales short supply & damage, 866 / 867 / 869 / 902 3PL income (Spacewalker), 836 Courier
 # Claims (NZ) (the NZ CYA carries it; AU has none in FY27).
 ACCOUNTS = [54, 108, 957, 866, 867, 869, 902, 836]
-INTERCOMPANY = (6871, 9459)          # MacGear AU -> MacGear NZ (same rule as the warehouse views)
+INTERCOMPANY = (6871, 9459)
+# NetSuite GL accounts (internal id) Brand Profitability takes from the GL feed, matching the CYA:
+# 51010 Duty, 51050 Freight & Courier Imports, 51040 Importation Costs; 51080 Rebate Claims on
+# Suppliers, 51085 Brand Rebate recovery - EUFY / Anker. The settings page's GL accounts add to these.
+GL_KIND = {630: "freight", 632: "freight", 633: "freight", 637: "vr", 953: "vr"}          # MacGear AU -> MacGear NZ (same rule as the warehouse views)
 LINES_TTL = 30 * 60
 
 
@@ -78,23 +88,43 @@ def sales_lines(region: str, fy: int) -> dict:
     return warehouse.cached(("bp_lines", region, fy), lambda: _build_lines(region, fy), ttl=LINES_TTL)
 
 
-def _netsuite_gl(region: str, fy: int) -> list[dict]:
-    """The NetSuite GL extract, if the warehouse has it yet (else [])."""
-    if not warehouse.query("select to_regclass('reporting.fact_gl_cost') is not null")[0][0]:
+def _gl_kind(account_id: int, account: str, mapped: dict) -> str | None:
+    """freight / vr for a GL line's account: GL_KIND by internal id, else the settings page's
+    mapping matched on the id, the full NetSuite name or its last part ('... : Duty')."""
+    if account_id in GL_KIND:
+        return GL_KIND[account_id]
+    name = (account or "").upper()
+    for key in (str(account_id), name, name.split(":")[-1].strip()):
+        if key and key in mapped:
+            return mapped[key]
+    return None
+
+
+def _netsuite_gl(region: str, fy: int, mapped: dict | None = None) -> list[dict]:
+    """The NetSuite GL lines for the FY's months, if the warehouse has them yet (else [])."""
+    if not warehouse.query("select to_regclass('reporting.fact_gl_line') is not null")[0][0]:
         return []
     first, last = calc.fy_months(fy)[0], calc.fy_months(fy)[-1]
-    return [{"month": m, "brand": b or "", "kind": k, "amount": float(a), "document_number": d,
-             "memo": memo, "vendor": v, "account": acc, "source": "netsuite"}
-            for m, b, k, a, d, memo, v, acc in warehouse.query(
-                "select month, upper(coalesce(brand, '')), kind, amount, document_number, memo, vendor, account "
-                "from reporting.fact_gl_cost where subsidiary_id = %s and month between %s and %s",
-                (SUBSIDIARY[region], first, last))]
+    out = []
+    for m, b, acc_id, acc, a, d, t, memo, v in warehouse.query(
+            "select month, upper(coalesce(brand, '')), account_id, account, amount, document_number, "
+            "tran_type, coalesce(nullif(memo, ''), memo_main, ''), coalesce(entity, '') "
+            "from reporting.fact_gl_line where subsidiary_id = %s and month between %s and %s",
+            (SUBSIDIARY[region], first, last)):
+        kind = _gl_kind(acc_id, acc, mapped or {})
+        if kind:
+            out.append({"month": m, "brand": b, "kind": kind, "amount": float(a),
+                        "document_number": d or t or "", "memo": memo, "vendor": v,
+                        "account": acc or str(acc_id), "source": "netsuite"})
+    return out
 
 
 def gl_lines(conn, region: str, fy: int) -> tuple[list[dict], dict]:
     """(lines in force, {month: source}) — per month the NetSuite extract wins over local lines."""
     first, last = calc.fy_months(fy)[0], calc.fy_months(fy)[-1]
-    ns = _netsuite_gl(region, fy)
+    mapped = {r["account"].upper(): r["kind"] for r in
+              conn.execute("SELECT account, kind FROM gl_account WHERE region = %s", (region,)).fetchall()}
+    ns = _netsuite_gl(region, fy, mapped)
     ns_months = {g["month"] for g in ns}
     local = conn.execute(
         "SELECT l.*, b.source FROM gl_line l JOIN gl_batch b ON b.id = l.batch_id "
@@ -110,6 +140,11 @@ def gl_lines(conn, region: str, fy: int) -> tuple[list[dict], dict]:
                       "memo": r["memo"], "vendor": r["vendor"], "account": r["account"],
                       "source": r["source"]})
         source.setdefault(r["month"], r["source"])
+    for r in conn.execute("SELECT * FROM manual_adjustment WHERE region = %s AND month BETWEEN %s AND %s",
+                          (region, first, last)).fetchall():
+        lines.append({"month": r["month"], "brand": r["brand"], "kind": r["kind"],
+                      "amount": float(r["amount"]), "document_number": "", "memo": r["memo"],
+                      "vendor": "", "account": "", "source": "manual"})
     return lines, source
 
 
@@ -234,8 +269,13 @@ def settings_view(region: str) -> dict:
             FROM gl_batch b LEFT JOIN gl_line l ON l.batch_id = b.id
             WHERE b.region = %s GROUP BY b.id ORDER BY b.id DESC""", (region,)).fetchall()
         log = conn.execute("SELECT * FROM change_log ORDER BY id DESC LIMIT 300").fetchall()
+        adjustments = conn.execute("SELECT * FROM manual_adjustment WHERE region = %s "
+                                   "ORDER BY month DESC, brand, id", (region,)).fetchall()
+        from .settings import documents_by_rule
+        docs = documents_by_rule(conn, region)
     by_kind = {k: [r for r in rules if r["kind"] == k] for k in db.KINDS}
-    return {"rules": by_kind, "pms": pms, "accounts": accounts, "batches": batches, "log": log}
+    return {"rules": by_kind, "pms": pms, "accounts": accounts, "batches": batches, "log": log,
+            "adjustments": adjustments, "docs": docs, "docs_ready": doc_store.configured()}
 
 
 def gl_detail(region: str, fy: int, months: list[date], brand: str) -> list[dict]:

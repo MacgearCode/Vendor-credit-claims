@@ -350,3 +350,201 @@ def test_cube_rows_get_deductions_in_cost_and_a_rebates_column(monkeypatch):
     assert out[1] == (202610, None, None, None, 0.0, 25.0, 0.0, 0.0)            # unallocated freight row
     # revenue - cost over the month = 1000 - 790 - 25 = 185 net profit
     assert sum(r[4] - r[5] for r in out) == pytest.approx(185.0)
+
+
+# ---- manual adjustments + the NetSuite GL feed (2026-11-20) -------------------------------
+def test_gl_kind_by_account_id_then_the_settings_mapping():
+    from app.brand_profit import data
+    assert data._gl_kind(632, "Cost of Goods Sold - Other : Freight & Courier Imports", {}) == "freight"
+    assert data._gl_kind(637, "", {}) == "vr"
+    assert data._gl_kind(960, "Other Receivables : Mova Spacewalker Marketing Recoverable", {}) is None  # a PM account
+    assert data._gl_kind(887, "Cost of Goods Sold - Other : Freight Out", {"FREIGHT OUT": "freight"}) == "freight"
+    assert data._gl_kind(887, "x", {"887": "freight"}) == "freight"
+
+
+def _adj(**kw):
+    return {"region": "NZ", "month": "2026-10", "brand": "eufy", "kind": "vr", "amount": "-131,510.18",
+            "memo": "MGNZ EUFY Customer Rebates Accrual - Oct 2026", **kw}
+
+
+@needs_db
+def test_manual_adjustments_are_validated_logged_and_editable(conn):
+    for bad, msg in ((_adj(memo=""), "memo"), (_adj(brand=""), "brand"), (_adj(amount="0"), "zero"),
+                     (_adj(amount="abc"), "amount"), (_adj(kind="mdf"), "type")):
+        with pytest.raises(settings.Invalid, match=msg):
+            settings.add_adjustment(conn, bad, "a@x")
+    settings.add_adjustment(conn, _adj(), "a@x")
+    a = conn.execute("SELECT * FROM manual_adjustment").fetchone()
+    assert (a["brand"], float(a["amount"]), a["month"]) == ("EUFY", -131510.18, O)
+    settings.edit_adjustment(conn, a["id"], _adj(amount="(39,495.02)"), "b@x")
+    assert float(conn.execute("SELECT amount FROM manual_adjustment").fetchone()["amount"]) == -39495.02
+    settings.delete_adjustment(conn, a["id"], "c@x")
+    log = conn.execute("SELECT by_user, entity, action FROM change_log ORDER BY id").fetchall()
+    assert [(l["by_user"], l["action"]) for l in log] == [("a@x", "add"), ("b@x", "edit"), ("c@x", "delete")]
+    assert {l["entity"] for l in log} == {"manual_adjustment"}
+
+
+@needs_db
+def test_manual_adjustments_add_on_top_of_whichever_gl_source(conn, monkeypatch):
+    from app.brand_profit import data
+    seeded = [{"month": O, "tran_date": None, "line_key": "", "document_number": "S", "tran_type": "", "account": "",
+               "brand": "EUFY", "vendor": "", "memo": "seeded", "kind": "vr", "amount": 10.0}]
+    upload.import_lines(conn, "NZ", seeded, "seed.csv", "", "a@x")
+    settings.add_adjustment(conn, _adj(), "a@x")
+    monkeypatch.setattr(data, "_netsuite_gl", lambda region, fy, mapped=None: [])
+    gl, src = data.gl_lines(conn, "NZ", 2027)
+    assert sorted((g["source"], g["amount"]) for g in gl) == [("manual", -131510.18), ("upload", 10.0)]
+    feed = [{"month": O, "brand": "EUFY", "kind": "vr", "amount": 2541.0, "document_number": "JE1", "memo": "",
+             "vendor": "", "account": "51080", "source": "netsuite"}]
+    monkeypatch.setattr(data, "_netsuite_gl", lambda region, fy, mapped=None: feed)
+    gl, src = data.gl_lines(conn, "NZ", 2027)     # the feed replaces the upload for October, not the adjustment
+    assert sorted((g["source"], g["amount"]) for g in gl) == [("manual", -131510.18), ("netsuite", 2541.0)]
+    assert src[O] == "netsuite"
+
+
+@needs_db
+def test_non_gl_seed_rows_move_to_manual_adjustments(conn):
+    rows = [{"month": O, "tran_date": None, "line_key": "", "document_number": d, "tran_type": "", "account": "",
+             "brand": "EUFY", "vendor": "", "memo": memo, "kind": "vr", "amount": amt}
+            for d, memo, amt in (("", "EUFY Rebates - RPP Only (Non-GL posting)  MGNZ accrual", -131510.18),
+                                 ("JE1", "JE006636 CMF pass through", 324638.03))]
+    upload.import_lines(conn, "NZ", rows, "seed.csv", "", "seed")
+    assert settings.move_non_gl_seed_rows(conn) == {("NZ", "2026-10"): -131510.18}
+    assert [r["memo"] for r in conn.execute("SELECT memo FROM gl_line").fetchall()] == ["JE006636 CMF pass through"]
+    m = conn.execute("SELECT * FROM manual_adjustment").fetchall()
+    assert len(m) == 1 and m[0]["memo"].startswith("EUFY Rebates - RPP Only")
+    assert settings.move_non_gl_seed_rows(conn) == {}            # nothing left to move
+
+
+@needs_db
+def test_adjustment_form_posts_and_lists(conn, monkeypatch):
+    from app import main
+    from app.brand_profit import data
+    from app.db import SessionLocal
+    from app.models import User
+    s = SessionLocal(); s.query(User).delete(); s.commit(); s.close()   # no users = auth off
+    monkeypatch.setattr(data, "pickers", lambda region: {"heads": [], "stores": [], "brands": ["EUFY"], "categories": []})
+    client = TestClient(main.app)
+    r = client.post("/brand-profit/adjustment", data=_adj(), follow_redirects=False)
+    assert r.status_code == 303 and "ok=" in r.headers["location"]
+    r = client.post("/brand-profit/adjustment", data=_adj(memo=""), follow_redirects=False)
+    assert "err=" in r.headers["location"]
+    page = client.get("/brand-profit/settings?region=NZ&tab=gl")
+    assert page.status_code == 200 and "MGNZ EUFY Customer Rebates Accrual" in page.text and "-131,510.18" in page.text
+
+
+# ---- supporting PDFs (Spaces) + the audit export (2026-11-20) ------------------------------
+PDF = b"%PDF-1.4\n%test\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n"
+
+
+def test_only_small_real_pdfs_are_accepted():
+    from app import doc_store
+    meta = doc_store.check_pdf("C:\fakepath\JB contract 2026.pdf", PDF)
+    assert meta["filename"] == "JB contract 2026.pdf" and meta["size"] == len(PDF) and len(meta["sha256"]) == 64
+    for name, data, msg in (("x.pdf", b"", "empty"), ("x.docx", PDF, "PDF"), ("x.pdf", b"PK\x03\x04 zip", "PDF"),
+                            ("x.pdf", PDF + b"0" * doc_store.MAX_BYTES, "limit")):
+        with pytest.raises(doc_store.Rejected, match=msg):
+            doc_store.check_pdf(name, data)
+    assert doc_store.object_key("brand-profit/AU", "ab" * 32, "JB contract (v2).pdf") == \
+        "brand-profit/AU/" + "ab" * 8 + "_JB_contract_v2_.pdf"
+
+
+@pytest.fixture()
+def spaces(monkeypatch):
+    """An in-memory bucket in place of DigitalOcean Spaces."""
+    from app import doc_store
+    store = {}
+    monkeypatch.setattr(doc_store, "configured", lambda: True)
+    monkeypatch.setattr(doc_store, "put", lambda key, data: store.__setitem__(key, data))
+    monkeypatch.setattr(doc_store, "get", lambda key: store[key])
+    monkeypatch.setattr(doc_store, "delete", lambda key: store.pop(key, None))
+    return store
+
+
+def _client(monkeypatch):
+    from app import main
+    from app.brand_profit import data
+    from app.db import SessionLocal
+    from app.models import User
+    s = SessionLocal(); s.query(User).delete(); s.commit(); s.close()   # no users = auth off
+    monkeypatch.setattr(data, "pickers", lambda region: {"heads": [], "stores": [], "brands": [], "categories": []})
+    return TestClient(main.app)
+
+
+@needs_db
+def test_new_rate_from_with_a_pdf_stores_it_and_logs_it(conn, spaces, monkeypatch):
+    client = _client(monkeypatch)
+    rid = settings.add_rule(conn, _form(), "a@x")
+    r = client.post(f"/brand-profit/rule/{rid}/change", data={"region": "AU", "kind": "base", "month": "2026-09",
+                                                             "pct": "17.5", "note": "new deal", "doc_note": "signed"},
+                    files={"document": ("JB contract.pdf", PDF, "application/pdf")}, follow_redirects=False)
+    assert "ok=" in r.headers["location"]
+    new = conn.execute("SELECT id FROM rate_rule WHERE valid_from = '2026-09-01'").fetchone()["id"]
+    d = conn.execute("SELECT * FROM document").fetchone()
+    assert d["rule_id"] == new and d["filename"] == "JB contract.pdf" and d["note"] == "signed"
+    assert "17.5% · Sep 2026 – open" in d["rule_label"] and d["object_key"] in spaces
+    assert conn.execute("SELECT count(*) AS n FROM change_log WHERE entity = 'document' AND action = 'upload'"
+                        ).fetchone()["n"] == 1
+    got = client.get(f"/brand-profit/document/{d['id']}")
+    assert got.status_code == 200 and got.content == PDF and got.headers["content-type"] == "application/pdf"
+    page = client.get("/brand-profit/settings?region=AU&tab=base")
+    assert "JB contract.pdf" in page.text
+
+
+@needs_db
+def test_a_rejected_file_or_a_refused_change_leaves_nothing_behind(conn, spaces, monkeypatch):
+    client = _client(monkeypatch)
+    rid = settings.add_rule(conn, _form(), "a@x")
+    r = client.post(f"/brand-profit/rule/{rid}/change", data={"region": "AU", "kind": "base", "month": "2026-09", "pct": "17"},
+                    files={"document": ("contract.docx", b"PK\x03\x04", "application/octet-stream")}, follow_redirects=False)
+    assert "err=" in r.headers["location"]
+    assert conn.execute("SELECT count(*) AS n FROM rate_rule").fetchone()["n"] == 1      # rate not changed
+    # a change the rules refuse (month before the row starts): the PDF already stored is removed again
+    r = client.post(f"/brand-profit/rule/{rid}/change", data={"region": "AU", "kind": "base", "month": "2026-01", "pct": "17"},
+                    files={"document": ("c.pdf", PDF, "application/pdf")}, follow_redirects=False)
+    assert "err=" in r.headers["location"] and spaces == {}
+    assert conn.execute("SELECT count(*) AS n FROM document").fetchone()["n"] == 0
+
+
+@needs_db
+def test_without_storage_a_pdf_is_refused_but_plain_changes_work(conn, monkeypatch):
+    from app import doc_store
+    monkeypatch.setattr(doc_store, "configured", lambda: False)
+    client = _client(monkeypatch)
+    rid = settings.add_rule(conn, _form(), "a@x")
+    r = client.post(f"/brand-profit/rule/{rid}/change", data={"region": "AU", "kind": "base", "month": "2026-09", "pct": "17"},
+                    files={"document": ("c.pdf", PDF, "application/pdf")}, follow_redirects=False)
+    assert "err=" in r.headers["location"] and "storage" in r.headers["location"]
+    r = client.post(f"/brand-profit/rule/{rid}/change", data={"region": "AU", "kind": "base", "month": "2026-09", "pct": "17"},
+                    follow_redirects=False)
+    assert "ok=" in r.headers["location"]
+
+
+@needs_db
+def test_audit_export_has_every_setting_with_periods_status_documents_and_the_log(conn, spaces, monkeypatch):
+    from io import BytesIO
+    from openpyxl import load_workbook
+    from app.brand_profit import settings_export
+    rid = settings.add_rule(conn, _form(), "a@x")
+    new = settings.change_from(conn, rid, "2026-09", "17.5", "b@x", "new deal")
+    settings.add_rule(conn, _form(kind="gp_target", customer_id=None, brand="MOVA", pct="13"), "a@x")
+    settings.attach_document(conn, new, {"filename": "c.pdf", "size": 2048, "sha256": "f" * 64}, "k", "signed", "b@x")
+    settings.add_adjustment(conn, _adj(region="AU"), "a@x")
+    body, name = settings_export.build(["AU"], "auditor@x", today=date(2026, 11, 20))
+    assert name.startswith("Brand_Profitability_settings_AU_")
+    wb = load_workbook(BytesIO(body))
+    assert wb.sheetnames == ["About", "Customer rebates", "Brand exceptions", "SKU exceptions", "Store extras", "MDF",
+                             "GP targets", "PMs", "GL accounts", "Manual adjustments", "Documents", "Change log"]
+    rows = [[c.value for c in r] for r in wb["Customer rebates"].iter_rows()]
+    h = rows[0]
+    by = {r[h.index("Months covered")]: r for r in rows[1:]}
+    old, cur = by["Apr 2026 – Aug 2026"], by["Sep 2026 – open (until changed)"]
+    assert old[h.index("Rate")] == 0.19 and old[h.index("Status (Nov 2026)")] == "Ended"
+    assert cur[h.index("Rate")] == 0.175 and cur[h.index("Status (Nov 2026)")] == "In force"
+    assert cur[h.index("Supporting documents")] == "c.pdf" and cur[h.index("Note")] == "new deal"
+    assert wb["GP targets"].max_row == 2 and wb["Documents"]["F2"].value == "f" * 64
+    log = [[c.value for c in r] for r in wb["Change log"].iter_rows()]
+    assert any(r[4] == "edit" and "valid_to: open → 2026-08-01" in (r[5] or "") for r in log)
+    assert {r[2] for r in log[1:]} >= {"rate_rule", "document", "manual_adjustment"}
+    body, name = settings_export.build(["AU"], "auditor@x", log_only=True)
+    assert load_workbook(BytesIO(body)).sheetnames == ["About", "Change log"] and "change_log" in name

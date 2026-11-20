@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
-from fastapi import Depends, FastAPI, File, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
                                RedirectResponse, StreamingResponse)
 from fastapi.staticfiles import StaticFiles
@@ -33,7 +33,7 @@ from .service import build_promo_view, line_dates
 from .pricing_sync import sync_pricing
 from .security import (hash_password, hash_token, make_reset_token, sign,
                        unsign, verify_password)
-from . import (ageing, audit, bill_export, bill_service, field, items, notify, open_orders, perms, promo_data,
+from . import (ageing, audit, bill_export, bill_service, field, gl_accounts, items, notify, open_orders, perms, promo_data,
                receipts, sales,
                sales_explorer, sell_through, st_table, st_weekly, updates, warehouse, workflow)
 
@@ -191,6 +191,8 @@ _TOOL_PATHS = [
     ("/reports/ageing", "ageing"),
     ("/reports/brand-profit", "brand_profit"),
     ("/reports/open-orders", "open_orders"),
+    ("/reports/gl/mova", "gl_mova"),
+    ("/reports/gl/anker", "gl_anker"),
     ("/brand-profit", "brand_profit_settings"),
     ("/vendor-bills", "vendor_bills"),
     ("/targets", "targets"),
@@ -523,6 +525,10 @@ REPORTS = [
      "blurb": "Net profit by PM and brand after customer rebates, freight, vendor rebates and MDF."},
     {"key": "open_orders", "href": "/reports/open-orders", "title": "Open Orders", "icon": "⧗",
      "blurb": "What customers have ordered and the warehouse hasn't shipped: value, picking lines, age."},
+    {"key": "gl_mova", "href": "/reports/gl/mova", "title": "GL Accounts — Mova", "icon": "≡",
+     "blurb": "Every NetSuite transaction on the Mova recoverable and MDF accrual accounts, with balances."},
+    {"key": "gl_anker", "href": "/reports/gl/anker", "title": "GL Accounts — Anker / Eufy / Soundcore", "icon": "≡",
+     "blurb": "Every NetSuite transaction on the Anker / Eufy / Soundcore recoverable, claim and CMF accounts."},
 ]
 TOOLS = [
     {"key": "promos", "href": "/promos", "title": "Vendor Promos", "icon": "%",
@@ -762,6 +768,59 @@ def report_open_orders(request: Request, region: str = ""):
     return templates.TemplateResponse(request, "open_orders.html", {
         "data": data, "error": error, "regions": regions, "region": region, "money": money,
         "items_link": "items" in _allowed(request)})
+
+
+# ---- GL Accounts (app/gl_accounts.py, built 2026-11-20) ----------------------------------
+def _gl_args(request: Request, slug: str, region: str, frm: str, to: str):
+    group = gl_accounts.BY_SLUG.get(slug)
+    if group is None:
+        raise HTTPException(status_code=404)
+    region, regions = _region(request, region)
+    today = sales_today()
+    last = gl_accounts.parse_month(to, date(today.year, today.month, 1))
+    first = gl_accounts.parse_month(frm, gl_accounts.fy_start(today))
+    if first > last:
+        first, last = last, first
+    return group, region, regions, first, last, today
+
+
+@app.get("/reports/gl/{slug}", response_class=HTMLResponse)
+def report_gl(request: Request, slug: str, region: str = "", frm: str = "", to: str = ""):
+    """The transactions on one group of balance-sheet accounts (Mova, or Anker / Eufy /
+    Soundcore) — staff only, each group its own area key (gl_mova / gl_anker, matched on the
+    URL prefix in the middleware). Region scope applies; brand scope doesn't (accounts are
+    the scope)."""
+    group, region, regions, first, last, today = _gl_args(request, slug, region, frm, to)
+    data = v = None
+    error = ""
+    try:
+        data = gl_accounts.for_user(group, regions)
+        v = gl_accounts.view(group, data, region, first, last)
+    except gl_accounts.NotLoaded:
+        error = ("GL lines aren't in the reporting warehouse yet (the NetSuite export "
+                 "DW_gl_lines, loaded by Sell Through/netsuite_intake.py).")
+    except warehouse.WarehouseUnavailable as e:
+        error = _warehouse_error(e)
+    ns = os.environ.get("NETSUITE_ACCOUNT_ID", "")
+    return templates.TemplateResponse(request, "gl_accounts.html", {
+        "g": gl_accounts.GROUPS[group], "slug": slug, "v": v, "data": data, "error": error,
+        "region": region, "regions": regions, "first": first, "last": last,
+        "months": gl_accounts.month_options(today, v["first_month"] if v else None),
+        "fy_start": gl_accounts.fy_start(today), "this_month": date(today.year, today.month, 1),
+        "ns_link": lambda tid: gl_accounts.netsuite_link(ns, tid)})
+
+
+@app.get("/reports/gl/{slug}/export.xlsx")
+def report_gl_export(request: Request, slug: str, region: str = "", frm: str = "", to: str = ""):
+    group, region, regions, first, last, _ = _gl_args(request, slug, region, frm, to)
+    try:
+        v = gl_accounts.view(group, gl_accounts.for_user(group, regions), region, first, last)
+    except (gl_accounts.NotLoaded, warehouse.WarehouseUnavailable) as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    body = gl_accounts.to_xlsx(group, region, first, last, v)
+    fname = f"GL_{slug}_{region}_{first:%Y%m}-{last:%Y%m}.xlsx"
+    return Response(body, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
 
 def _caps(request: Request) -> set:
