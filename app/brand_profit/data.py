@@ -119,12 +119,64 @@ def _netsuite_gl(region: str, fy: int, mapped: dict | None = None) -> list[dict]
     return out
 
 
+POSTED_TOLERANCE = 10.0      # dollars, or 0.1% of the amount if larger
+
+
+def posted_matches(adjustments, ns_lines) -> dict:
+    """{manual adjustment id: [NetSuite GL lines that look like the same entry]}: same month, brand
+    and type, amount within POSTED_TOLERANCE (or 0.1%). Accounts post some of the CYA's non-GL
+    accruals in NetSuite later (51085 Brand Rebate recovery, from Nov 2026), and the manual row
+    then counts twice (user, 2026-11-20: EUFY Oct −1,169,671.18 vs EUMG031126AU −1,169,663.45).
+    A line cancelled by an exact opposite in the same month / brand / type is ignored — it nets to
+    nothing (NZ Sep: JE006476 +45,157.00 reversed by JE006628; EUMG081026NZ by JE006636)."""
+    idx = {}
+    for g in ns_lines:
+        idx.setdefault((g["month"], calc.norm_brand(g["brand"]), g["kind"]), []).append(g)
+    for key, group in idx.items():
+        left = list(group)
+        for g in group:
+            if g in left:
+                opp = next((h for h in left if h is not g and round(h["amount"] + g["amount"], 2) == 0), None)
+                if opp is not None:
+                    left = [h for h in left if h is not g and h is not opp]
+        idx[key] = left
+    out = {}
+    for a in adjustments:
+        amt = float(a["amount"])
+        tol = max(POSTED_TOLERANCE, abs(amt) * 0.001)
+        hits = [g for g in idx.get((a["month"], calc.norm_brand(a["brand"]), a["kind"]), [])
+                if abs(g["amount"] - amt) <= tol]
+        if hits:
+            out[a["id"]] = hits
+    return out
+
+
+def _mapped(conn, region: str) -> dict:
+    return {r["account"].upper(): r["kind"] for r in
+            conn.execute("SELECT account, kind FROM gl_account WHERE region = %s", (region,)).fetchall()}
+
+
+def adjustment_matches(conn, region: str, adjustments) -> dict:
+    """posted_matches over every FY the adjustments touch; {} if the warehouse can't be reached."""
+    if not adjustments:
+        return {}
+    mapped, ns = _mapped(conn, region), []
+    try:
+        for fy in sorted({calc.fy_of(a["month"]) for a in adjustments}):
+            ns += _netsuite_gl(region, fy, mapped)
+    except warehouse.WarehouseUnavailable:
+        return {}
+    return posted_matches(adjustments, ns)
+
+
+def posted_label(g: dict) -> str:
+    return f"{g['document_number'] or 'a NetSuite line'} {g['amount']:,.2f} ({g['account'].split(':')[-1].strip()})"
+
+
 def gl_lines(conn, region: str, fy: int) -> tuple[list[dict], dict]:
     """(lines in force, {month: source}) — per month the NetSuite extract wins over local lines."""
     first, last = calc.fy_months(fy)[0], calc.fy_months(fy)[-1]
-    mapped = {r["account"].upper(): r["kind"] for r in
-              conn.execute("SELECT account, kind FROM gl_account WHERE region = %s", (region,)).fetchall()}
-    ns = _netsuite_gl(region, fy, mapped)
+    ns = _netsuite_gl(region, fy, _mapped(conn, region))
     ns_months = {g["month"] for g in ns}
     local = conn.execute(
         "SELECT l.*, b.source FROM gl_line l JOIN gl_batch b ON b.id = l.batch_id "
@@ -140,11 +192,14 @@ def gl_lines(conn, region: str, fy: int) -> tuple[list[dict], dict]:
                       "memo": r["memo"], "vendor": r["vendor"], "account": r["account"],
                       "source": r["source"]})
         source.setdefault(r["month"], r["source"])
-    for r in conn.execute("SELECT * FROM manual_adjustment WHERE region = %s AND month BETWEEN %s AND %s",
-                          (region, first, last)).fetchall():
+    adjustments = conn.execute("SELECT * FROM manual_adjustment WHERE region = %s AND month BETWEEN %s AND %s",
+                               (region, first, last)).fetchall()
+    posted = posted_matches(adjustments, ns)
+    for r in adjustments:
         lines.append({"month": r["month"], "brand": r["brand"], "kind": r["kind"],
                       "amount": float(r["amount"]), "document_number": "", "memo": r["memo"],
-                      "vendor": "", "account": "", "source": "manual"})
+                      "vendor": "", "account": "", "source": "manual",
+                      "posted_as": "; ".join(posted_label(g) for g in posted.get(r["id"], []))})
     return lines, source
 
 
@@ -273,9 +328,11 @@ def settings_view(region: str) -> dict:
                                    "ORDER BY month DESC, brand, id", (region,)).fetchall()
         from .settings import documents_by_rule
         docs = documents_by_rule(conn, region)
+        posted = {aid: "; ".join(posted_label(g) for g in hits)
+                  for aid, hits in adjustment_matches(conn, region, adjustments).items()}
     by_kind = {k: [r for r in rules if r["kind"] == k] for k in db.KINDS}
     return {"rules": by_kind, "pms": pms, "accounts": accounts, "batches": batches, "log": log,
-            "adjustments": adjustments, "docs": docs, "docs_ready": doc_store.configured()}
+            "adjustments": adjustments, "posted": posted, "docs": docs, "docs_ready": doc_store.configured()}
 
 
 def gl_detail(region: str, fy: int, months: list[date], brand: str) -> list[dict]:

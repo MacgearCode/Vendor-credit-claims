@@ -362,6 +362,35 @@ def test_gl_kind_by_account_id_then_the_settings_mapping():
     assert data._gl_kind(887, "x", {"887": "freight"}) == "freight"
 
 
+def test_manual_adjustment_already_posted_in_netsuite_is_flagged():
+    """The real case (2026-11-20): the CYA's EUFY Oct rebate accrual −1,169,671.18 vs the bill credit
+    accounts then posted on 51085, −1,169,663.45. Same month + brand + type, within $10 / 0.1%."""
+    from app.brand_profit import data
+    oct_, sep = date(2026, 10, 1), date(2026, 9, 1)
+    ns = [{"month": oct_, "brand": "EUFY", "kind": "vr", "amount": -1169663.45, "document_number": "EUMG031126AU",
+           "account": "Cost of Goods Sold - Other : Brand Rebate recovery - EUFY / Anker"},
+          {"month": oct_, "brand": "ANKER", "kind": "vr", "amount": -20224.43, "document_number": "ANMG031126AU",
+           "account": "x : Brand Rebate recovery - EUFY / Anker"},
+          {"month": oct_, "brand": "EUFY", "kind": "freight", "amount": 526779.76, "document_number": "F1", "account": "x : Duty"}]
+    adjs = [{"id": 1, "month": oct_, "brand": "eufy", "kind": "vr", "amount": -1169671.18},   # 7.73 apart: flagged
+            {"id": 2, "month": oct_, "brand": "ANKER", "kind": "vr", "amount": -20224.71},    # 0.28 apart: flagged
+            {"id": 3, "month": sep, "brand": "EUFY", "kind": "vr", "amount": -1169663.45},    # other month
+            {"id": 4, "month": oct_, "brand": "EUFY", "kind": "vr", "amount": 526779.76},     # other type
+            {"id": 5, "month": oct_, "brand": "ANKER", "kind": "vr", "amount": -20254.43}]    # $30 apart (> $20.22 = 0.1%)
+    hits = data.posted_matches(adjs, ns)
+    assert set(hits) == {1, 2}
+    assert data.posted_label(hits[1][0]) == "EUMG031126AU -1,169,663.45 (Brand Rebate recovery - EUFY / Anker)"
+    # a NetSuite line reversed in the same month nets to nothing: not a match (NZ Sep 2026, JE006476 / JE006628)
+    rev = [{"month": sep, "brand": "EUFY", "kind": "vr", "amount": 45157.00, "document_number": "JE006476", "account": "x"},
+           {"month": sep, "brand": "EUFY", "kind": "vr", "amount": -45157.00, "document_number": "JE006628", "account": "x"},
+           {"month": sep, "brand": "EUFY", "kind": "vr", "amount": -324638.03, "document_number": "EUMG081026NZ", "account": "x"},
+           {"month": sep, "brand": "EUFY", "kind": "vr", "amount": 324638.03, "document_number": "JE006636", "account": "x"},
+           {"month": sep, "brand": "EUFY", "kind": "vr", "amount": -324638.03, "document_number": "JE006653", "account": "x"}]
+    hits = data.posted_matches([{"id": 8, "month": sep, "brand": "EUFY", "kind": "vr", "amount": 45157.00},
+                                {"id": 9, "month": sep, "brand": "EUFY", "kind": "vr", "amount": -324638.03}], rev)
+    assert set(hits) == {9} and [g["document_number"] for g in hits[9]] == ["JE006653"]
+
+
 def _adj(**kw):
     return {"region": "NZ", "month": "2026-10", "brand": "eufy", "kind": "vr", "amount": "-131,510.18",
             "memo": "MGNZ EUFY Customer Rebates Accrual - Oct 2026", **kw}

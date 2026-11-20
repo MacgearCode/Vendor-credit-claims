@@ -232,7 +232,7 @@
     if (!Array.isArray(lines)) { body.innerHTML = '<tr><td class="l" colspan="6">Not available.</td></tr>'; return; }
     const src = {netsuite: 'NetSuite', upload: 'uploaded', seed: 'CYA workbook', manual: 'Manual adjustment'};
     body.innerHTML = lines.map(g => `<tr><td class="l">${esc(g.month.slice(0, 7))}</td><td class="l">${g.kind === 'freight' ? 'Freight' : 'Vendor rebate'}</td>
-      <td class="${g.amount > 0 ? 'bp-cost' : (g.amount < 0 ? 'bp-inc' : '')}">${fmt(g.amount)}</td><td class="l">${esc(g.document_number)}</td><td class="l">${esc(src[g.source] || g.source)}</td>
+      <td class="${g.amount > 0 ? 'bp-cost' : (g.amount < 0 ? 'bp-inc' : '')}">${fmt(g.amount)}</td><td class="l">${esc(g.document_number)}</td><td class="l">${esc(src[g.source] || g.source)}${g.posted_as ? `<div style="color:#dc3545;font-weight:600;font-size:.8rem;white-space:normal">⚠ Looks posted in NetSuite too: ${esc(g.posted_as)} — counted twice; delete it in settings</div>` : ''}</td>
       <td class="l" style="white-space:normal;min-width:420px">${esc(g.memo)}</td></tr>`).join('') || '<tr><td class="l" colspan="6">None.</td></tr>';
   }
 })();

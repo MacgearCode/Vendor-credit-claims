@@ -46,6 +46,7 @@
   .bp-tools label{display:flex;flex-direction:column;font-size:.78rem;gap:.2rem}
   .banner.okb{background:#d1e7dd;color:#0f5132;border:1px solid #a3cfbb}
   .bp-doc{font-size:.82rem;margin-top:.2rem}
+  .bp-posted{font-size:.82rem;margin-top:.25rem;color:#b02a37;font-weight:600}
   .bp-mono{font-family:ui-monospace,Consolas,monospace;font-size:.78rem;white-space:pre-wrap;word-break:break-word;max-width:520px}
 </style>
 
@@ -227,7 +228,8 @@
   <p class="hint">Amounts finance adds by hand that never post in the NetSuite GL — the CYA's "RPP only (Non-GL posting)" rows,
     e.g. customer-rebate accruals funded by the vendor, or an internal MDF accrual. Each is added on top of the NetSuite lines for
     its brand and month and shows as "Manual adjustment" in the report's drill-down. <b>Positive = a cost to Macgear</b>, negative =
-    income (the CYA's VR $ / Freight $ sign). Don't enter anything that's already posted in NetSuite — it would count twice.</p>
+    income (the CYA's VR $ / Freight $ sign). Don't enter anything that's already posted in NetSuite — it would count twice.
+    When accounts later post one in NetSuite (e.g. a rebate reimbursement on 51085), the row is marked ⚠ here: delete it then.</p>
   <form class="inline-form" method="post" action="/brand-profit/adjustment">
     <input type="hidden" name="region" value="{{ region }}">
     <label>Month <input type="month" name="month" required></label>
@@ -238,13 +240,19 @@
     <button class="btn" type="submit">Add</button>
   </form>
   {% set adj = view.adjustments %}
+  {% if view.posted %}
+  <div class="banner error" style="margin-top:.8rem">⚠ {{ view.posted|length }} manual adjustment{{ 's look' if view.posted|length > 1 else ' looks' }}
+    already posted in NetSuite (same month, brand and type, amount within $10 or 0.1%), so {{ 'they count' if view.posted|length > 1 else 'it counts' }}
+    twice in the report. If it's the same entry, delete the manual row — marked ⚠ below.</div>
+  {% endif %}
   <table class="grid bp-tbl" style="margin-top:.8rem">
     <thead><tr><th>Month</th><th>Brand</th><th>Type</th><th class="num">Amount</th><th>Memo</th><th>Changed</th><th></th></tr></thead>
     <tbody>
     {% for m, rows in adj|groupby('month')|reverse %}
       {% for a in rows %}
       <tr><td>{{ a.month.strftime('%b %Y') }}</td><td>{{ a.brand }}</td><td>{{ 'Freight' if a.kind == 'freight' else 'Vendor rebate' }}</td>
-        <td class="num">{{ "{:,.2f}".format(a.amount|float) }}</td><td>{{ a.memo }}</td>
+        <td class="num">{{ "{:,.2f}".format(a.amount|float) }}</td><td>{{ a.memo }}
+          {% if view.posted.get(a.id) %}<div class="bp-posted">⚠ Looks posted in NetSuite: {{ view.posted[a.id] }}</div>{% endif %}</td>
         <td class="hint">{{ a.updated_by }}<br>{{ a.updated_at | sydney if a.updated_at else '' }}</td>
         <td class="row-actions">
           <details><summary>Edit</summary>

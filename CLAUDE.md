@@ -38,7 +38,7 @@ warehouse host in the droplet `.env` broke the warm-up — compare the host, not
 | `/targets` | Targets — build sales targets on NetSuite actuals, commit the official set (Postgres `targets` schema) | staff with the area |
 | `/vendor-bills` | PDF Bill Upload — Amazon Advertising → NetSuite CSV | accounts |
 | `/reports/open-orders` | Open Orders — open sales order lines: value, picking lines, age, Top 10s, order / product list (LOCAL only) | staff with the area ($ needs Sell-in $) |
-| `/reports/gl/mova`, `/reports/gl/anker` | GL Accounts — every posting on the PMs' balance-sheet accounts, balances + lines (LOCAL only) | staff with that group's area |
+| `/reports/gl/mova`, `/reports/gl/anker` | GL Accounts — every posting on the PMs' balance-sheet accounts, balances + lines (live 2026-11-20) | staff with that group's area |
 | `/reports/brand-profit` | Brand Profitability — NP by PM / brand after rebates, freight, vendor rebates, MDF (LOCAL only) | staff with the area + Margin |
 | `/brand-profit/settings` | Brand Profitability settings — rates by month, PMs, freight / VR uploads, change log (LOCAL only) | staff with the area |
 | `/admin/users` | User management | admins |
@@ -406,7 +406,7 @@ SQL; **$ only with `sell_in_value`** (the SQL selects NULL otherwise). One cache
   status counts on the 13 Nov sample).
 
 **GL Accounts** (`app/gl_accounts.py`, `templates/gl_accounts.html`, `tests/test_gl_accounts.py`; built
-2026-11-20, CFO Jonathan Lee's request "GL access" 2026-11-11, **local only**). PMs see the transactions on
+2026-11-20, CFO Jonathan Lee's request "GL access" 2026-11-11; **LIVE 2026-11-20**, commit 1dadd62). PMs see the transactions on
 the balance-sheet accounts they manage during the month instead of asking finance (a NetSuite role can't be
 limited to some accounts, so it's here). Data = `reporting.fact_gl_line` (`Sell Through/db/16_gl_lines.sql`;
 Zone export `DW_gl_lines`, a whole snapshot of ALL dates each run, loaded by `netsuite_intake.py`). **Two
@@ -426,10 +426,12 @@ in `GROUPS` — DW_dim_account has no account numbers. A new account = a row the
 - Checked 2026-11-20 on the local copy of the 20 Nov sample (`DWGLLinesResults608.csv`, 9,303 lines): every
   account × region closing (62, incl. parents) = the raw file's sum; AU 22195 MDF Accrual – Mova Spacewalker
   A$2,897,112.68. Not yet compared with a NetSuite balance (asked the user for 22195).
-- **Before going live:** apply `16_gl_lines.sql` to the cluster, publish `netsuite_intake` to Windmill (user's
-  OK), the Zone schedule for `DW_gl_lines` (the S3 file has no duplicate Internal ID / total row; the loader
-  copes either way), deploy, tick `gl_mova` / `gl_anker` for the PMs, set `NETSUITE_ACCOUNT_ID` in the
-  droplet `.env` for links.
+- **Went live 2026-11-20:** `16_gl_lines.sql` applied to the cluster, `netsuite_intake` published to Windmill
+  (one script; user's OK), Zone writes `DW_GL_Lines.csv` (that spelling, added to `EXPORTS`), first load 9,327
+  lines (AU 5,225 / 3,322,866.04, NZ 4,102 / −1,408,766.38 = the S3 file), deployed, `NETSUITE_ACCOUNT_ID=840974`
+  set (links checked). Checked live: AU 22195 closing 2,897,112.68. **Still to do:** tick `gl_mova` / `gl_anker`
+  for the PMs. Between the sample and the first S3 file a reclass hit 637 / 953 / 11546 / 11547 (953 AU
+  −1,654,355.53, NZ −324,638.03 — first postings).
 
 **Receipt strip** (`app/receipts.py`, `templates/_st_status.html`, 2026-10-15) —
 "who have we received" for sell-through, a one-line collapsible bar at the top
@@ -848,7 +850,8 @@ Not committed or deployed.
   `change_log`. Same-key rules may never overlap (`settings.py` refuses). "New rate from" ends the old
   row the month before. Customers are NetSuite internal ids, so the later portfolio page (rep ↔
   customer ↔ brand, PM ↔ brand) can build on `brand_pm`.
-- **NetSuite GL feed + manual adjustments (2026-11-20, LOCAL only):** freight / VR now come from
+- **NetSuite GL feed + manual adjustments (2026-11-20, LIVE the same day; `--move-non-gl` run on the cluster:
+  the same 15 rows / three month totals as local):** freight / VR now come from
   `reporting.fact_gl_line` (the GL Accounts feed, `DW_gl_lines`) on accounts `data.GL_KIND` = 630 / 632 / 633
   freight, 637 / 953 VR (+ any mapped on the settings page, matched on id / name). A month the feed has
   replaces seeded / uploaded lines for that month (old rule). **`manual_adjustment`** (settings → Freight &
@@ -861,9 +864,18 @@ Not committed or deployed.
   credit −152,502.75; NZ a Withings credit −34,542.84). **Brand level differs** where the CYA re-branded GL
   lines by hand (AU ~$200k moved Apr–Sep, e.g. Apr: NetSuite has −$144,042 VR with no class that the CYA put
   on MOVA; NZ ~$47k) — the feed keeps NetSuite's line class; fix the class in NetSuite. JE006636 (NZ CMF pass
-  through, 51080 ↔ 11541) posts normally and is in both. **Go-live order** (so no month loses its Non-GL
+  through, 51080 ↔ 11541) posts normally and is in both. **Accounts now post some non-GL accruals in NetSuite
+  later** (51085 Brand Rebate recovery = id 953; found 2026-11-20 when EUFY Oct showed −1,169,671.18 manual +
+  −1,169,663.45 EUMG031126AU): the three duplicated manual rows (AU Oct EUFY / Anker, NZ Sep EUFY) were deleted on
+  the cluster (logged, by "Aaron (via Claude)…") and locally. **Duplicate check** (`data.posted_matches`): a manual
+  adjustment with a NetSuite line of the same month + brand + type within $10 or 0.1% is marked ⚠ on the settings
+  page (banner + row) and in the report drill-down (`posted_as`); NetSuite lines cancelled by an exact opposite in
+  the same month are ignored (JE006476 / JE006628). AU Sep: JE006647 puts EUFY −436,653.60 / Anker −27,814.05 on
+  953 with no CYA counterpart, so AU Sep VR is now ~−464k vs the CYA — asked the user to confirm with accounts.
+  **Go-live order** (so no month loses its Non-GL
   rows): deploy this code → `--move-non-gl` on the cluster → apply `16_gl_lines.sql` + load the GL export.
-- **Audit export + supporting PDFs (2026-11-20, user's request, LOCAL only).** Settings page → "Download all
+- **Audit export + supporting PDFs (2026-11-20, user's request, LIVE the same day; bucket
+  `macgear-reporting-docs` SYD1, private — anonymous GET 403 — SPACES_* in local `.env` and droplet `deploy/.env`).** Settings page → "Download all
   settings (Excel)" = `GET /brand-profit/settings/export.xlsx` (`brand_profit/settings_export.py`): About (how
   to read it, sheet counts), one sheet per rule kind (Rate, From, To, Months covered, Status as at this month
   — In force / Ended / Starts later, note, last changed by/at, supporting documents), PMs, GL accounts (built-in

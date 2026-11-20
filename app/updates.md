@@ -9,6 +9,10 @@ st_weekly, field, ageing, items, st_table, sell_through, promos, vendor_bills) o
 Add an entry with every commit people would notice. Everything above the first
 "##" is ignored.
 
+## 2026-11-20 | Manual adjustments already in NetSuite are flagged | brand_profit, brand_profit_settings
+- When accounts post in NetSuite something that's also a manual adjustment (e.g. a vendor's rebate reimbursement on 51085 Brand Rebate recovery), it would count twice. The settings page now marks that row ⚠ with the NetSuite document it matches (same month, brand and type, amount within $10 or 0.1%), and the report's drill-down warns too. Delete the manual row when it's the same entry.
+- Three such rows were removed today: AU October EUFY and Anker customer-rebate accruals, and NZ September EUFY's — NetSuite now has them.
+
 ## 2026-11-20 | Freight and vendor rebates straight from NetSuite | brand_profit, brand_profit_settings
 - Brand Profitability now takes freight and vendor rebates from NetSuite automatically, about every 30 minutes — no more uploading the saved search at month end.
 - New on the settings page (Freight & vendor rebates tab): **Manual adjustments**, for amounts finance adds that never post in NetSuite, like the CYA's "RPP only (Non-GL posting)" customer-rebate and MDF accruals. Enter them row by row (month, brand, type, amount, memo); they're added on top of the NetSuite lines, show as "Manual adjustment" in the report's drill-down, and every change is in the change log. September and October's rows from the CYA are already in.
