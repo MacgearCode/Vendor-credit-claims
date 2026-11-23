@@ -11,7 +11,10 @@ Holds what the CYA workbook hard-coded and the finance team pasted by hand:
                            item_code = NetSuite item code; the NZ CYA's "SKU rebate")
                 mdf        brand MDF %, optionally for one customer  (customer_id NULL = default)
                 gp_target  brand's target for net profit % on gross  (no customer)
-  brand_pm    brand -> product manager, effective-dated (seed of the later portfolio page)
+  brand_pm    brand -> product manager, effective-dated
+  pm_team     PM -> the senior PM they report to, effective-dated   (app/portfolio.py)
+  am_assignment  region x retailer x brand ('' = all) -> account manager, overriding
+              NetSuite's customer rep                               (app/portfolio.py)
   gl_account  which NetSuite GL accounts are freight and which are vendor rebates
   gl_batch /  freight and vendor-rebate GL lines that came in by seed or upload. They are
   gl_line     NetSuite lines (the upload takes the saved search's own CSV). An upload replaces
@@ -93,6 +96,34 @@ CREATE TABLE IF NOT EXISTS brand_pm (
     region      TEXT NOT NULL CHECK (region IN ('AU', 'NZ')),
     brand       TEXT NOT NULL,
     pm          TEXT NOT NULL,
+    valid_from  DATE NOT NULL,
+    valid_to    DATE,
+    note        TEXT NOT NULL DEFAULT '',
+    updated_by  TEXT NOT NULL DEFAULT '',
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (valid_to IS NULL OR valid_to >= valid_from)
+);
+
+-- Portfolios (2026-11-24, app/portfolio.py): who a PM reports to, and account managers set
+-- here instead of NetSuite's one rep per customer record
+CREATE TABLE IF NOT EXISTS pm_team (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    pm          TEXT NOT NULL,                     -- as named in brand_pm
+    reports_to  TEXT NOT NULL,                     -- a senior PM
+    valid_from  DATE NOT NULL,
+    valid_to    DATE,
+    updated_by  TEXT NOT NULL DEFAULT '',
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (valid_to IS NULL OR valid_to >= valid_from),
+    CHECK (pm <> reports_to)
+);
+
+CREATE TABLE IF NOT EXISTS am_assignment (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    region      TEXT NOT NULL CHECK (region IN ('AU', 'NZ')),
+    retailer    TEXT NOT NULL,                     -- Sales Explorer's Retailer (customer group)
+    brand       TEXT NOT NULL DEFAULT '',          -- upper-case class name; '' = every brand
+    am          TEXT NOT NULL,                     -- NetSuite sales rep name
     valid_from  DATE NOT NULL,
     valid_to    DATE,
     note        TEXT NOT NULL DEFAULT '',
@@ -221,7 +252,7 @@ def log(conn, by: str, entity: str, entity_id, action: str, before=None, after=N
 def overlaps(conn, table: str, key: dict, valid_from: date, valid_to: date | None,
              exclude_id: int | None = None) -> list[dict]:
     """Rows of `table` with the same key whose months overlap [valid_from, valid_to]."""
-    if table not in ("rate_rule", "brand_pm"):
+    if table not in ("rate_rule", "brand_pm", "pm_team", "am_assignment"):
         raise ValueError(table)
     where, params = [], []
     for col, val in key.items():

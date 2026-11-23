@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Portfolios{% endblock %}
+{% block brandword %}Admin{% endblock %}
+{% block nav %}
+  <a href="#teams">PM teams</a>
+  <a href="#ams">Account managers</a>
+{% endblock %}
+
+{% block content %}
+<style>
+  .pf-teams{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:.8rem;margin:.8rem 0}
+  .pf-card{border:1px solid var(--line,#d0d7de);border-radius:8px;padding:.7rem .9rem}
+  .pf-card h3{margin:0 0 .3rem;font-size:1.05rem}
+  .pf-card .pf-sub{font-size:.85rem;opacity:.8}
+  .pf-card ul{margin:.3rem 0 0;padding-left:1.1rem}
+  .pf-brands{font-size:.8rem;opacity:.75}
+  .pf-form{display:flex;flex-wrap:wrap;gap:.6rem;align-items:flex-end;margin:.6rem 0 1rem}
+  .pf-form label{display:flex;flex-direction:column;font-size:.85rem;gap:.2rem}
+  .pf-differs{color:#b02a37;font-weight:600}
+  .pf-ended td{opacity:.55}
+  .banner.okb{background:#d1e7dd;color:#0f5132;border:1px solid #a3cfbb}
+  section{margin-bottom:2rem}
+</style>
+
+<h1 class="home-title">Portfolios</h1>
+<p class="hint">Who looks after what. <b>PM teams</b>: a senior PM sees their own brands and their team's in Brand
+  Profitability (PM filter → “(team)”). <b>Account managers</b>: set here by retailer, and by brand where a retailer is
+  split; anything not listed keeps the account rep on the NetSuite customer record. Brands → PM are set in
+  <a href="/brand-profit/settings?tab=pm">Brand Profitability settings → PMs</a>. Admins only; every change is in the
+  settings change log.</p>
+
+{% if err %}<p class="banner error">{{ err }}</p>{% endif %}
+{% if ok %}<p class="banner okb">{{ ok }}</p>{% endif %}
+
+{% if v %}
+{% set this_month = v.month.strftime('%Y-%m') %}
+{% macro brands(pm) %}{% for r, bs in (v.brands_now.get(pm) or {}).items() %}{{ r }}: {{ bs | join(', ') }}{% if not loop.last %} · {% endif %}{% else %}no brands this month{% endfor %}{% endmacro %}
+<section id="teams">
+  <h2>PM teams — {{ v.month.strftime('%B %Y') }}</h2>
+  <div class="pf-teams">
+    {% for t in v.teams %}
+    <div class="pf-card">
+      <h3>{{ t.senior }} <span class="pf-sub">senior PM</span></h3>
+      <div class="pf-brands">{{ brands(t.senior) }}</div>
+      <ul>{% for m in t.members %}<li>{{ m }}<div class="pf-brands">{{ brands(m) }}</div></li>{% endfor %}</ul>
+    </div>
+    {% endfor %}
+    {% if v.solo %}
+    <div class="pf-card">
+      <h3>Not in a team</h3>
+      <ul>{% for p in v.solo %}<li>{{ p }}<div class="pf-brands">{{ brands(p) }}</div></li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+  </div>
+
+  <h3>Move a PM</h3>
+  <form class="pf-form" method="post" action="/admin/portfolios/team">
+    <label>PM<select name="pm" required><option value=""></option>{% for p in v.pm_names %}<option>{{ p }}</option>{% endfor %}</select></label>
+    <label>Reports to<select name="reports_to"><option value="">— nobody (stands alone) —</option>{% for p in v.pm_names %}<option>{{ p }}</option>{% endfor %}</select></label>
+    <label>From month<input type="month" name="month" value="{{ this_month }}" required></label>
+    <button class="btn" type="submit">Save</button>
+  </form>
+  <p class="hint">Their current row ends the month before; the new one runs from that month on. Months before keep the old team.</p>
+
+  <table class="grid compact">
+    <thead><tr><th>PM</th><th>Reports to</th><th>From</th><th>To</th><th>Changed by</th><th></th></tr></thead>
+    <tbody>
+    {% for r in v.team_rows %}
+      <tr class="{{ '' if (r.valid_to is none or r.valid_to >= v.month) else 'pf-ended' }}">
+        <td>{{ r.pm }}</td><td>{{ r.reports_to }}</td><td>{{ r.valid_from.strftime('%b %Y') }}</td>
+        <td>{{ r.valid_to.strftime('%b %Y') if r.valid_to else '—' }}</td><td>{{ r.updated_by }}</td>
+        <td><form method="post" action="/admin/portfolios/team/{{ r.id }}/delete" onsubmit="return confirm('Delete this row? (Use Move a PM to change someone from a month on.)')"><button class="btn ghost small" type="submit">Delete</button></form></td>
+      </tr>
+    {% else %}<tr><td colspan="6">No teams yet.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section id="ams">
+  <h2>Account managers</h2>
+  <p class="hint">A sale's manager: the row for its retailer <i>and brand</i>, else the row for the retailer (every
+    brand), else NetSuite's customer rep. The manager in force now applies to all history, so a manager sees their
+    whole portfolio (as before). Leave <b>Account manager</b> blank to end a row and go back to NetSuite's rep.
+    {% if v.warehouse_error %}<br><b>Warehouse not reachable — NetSuite reps and the pick lists aren't shown.</b>{% endif %}</p>
+
+  <form class="pf-form" method="post" action="/admin/portfolios/am">
+    <label>Region<select name="region"><option>AU</option><option>NZ</option></select></label>
+    <label>Retailer<input name="retailer" list="pf-retailers" required size="24"></label>
+    <label>Brand (blank = every brand)<input name="brand" list="pf-brands" size="16"></label>
+    <label>Account manager<input name="am" list="pf-reps" size="20"></label>
+    <label>From month<input type="month" name="valid_from" value="{{ this_month }}" required></label>
+    <label>Note<input name="note" size="18"></label>
+    <button class="btn" type="submit">Save</button>
+  </form>
+  <datalist id="pf-retailers">{% for r in (v.retailers.AU + v.retailers.NZ) | unique %}<option value="{{ r }}">{% endfor %}</datalist>
+  <datalist id="pf-brands">{% for b in v.brands %}<option value="{{ b }}">{% endfor %}</datalist>
+  <datalist id="pf-reps">{% for r in v.reps %}<option value="{{ r }}">{% endfor %}</datalist>
+
+  {% set differs = v.am_rows | selectattr('differs') | list %}
+  {% if differs %}<p class="banner error">⚠ {{ differs | length }} current row{{ 's differ' if differs | length > 1 else ' differs' }}
+    from the rep on the NetSuite customer record (marked below). The rows here win; update NetSuite too if the customer record is wrong.</p>{% endif %}
+  <table class="grid compact">
+    <thead><tr><th>Region</th><th>Retailer</th><th>Brand</th><th>Account manager</th><th>NetSuite customer rep</th><th>From</th><th>To</th><th>Note</th><th></th></tr></thead>
+    <tbody>
+    {% for r in v.am_rows %}
+      <tr class="{{ '' if r.current or r.valid_from > v.month else 'pf-ended' }}">
+        <td>{{ r.region }}</td><td>{{ r.retailer }}</td><td>{{ r.brand or 'every brand' }}</td>
+        <td class="{{ 'pf-differs' if r.differs }}">{{ r.am }}{% if r.differs %} ⚠{% endif %}</td>
+        <td>{{ r.netsuite or '—' }}</td>
+        <td>{{ r.valid_from.strftime('%b %Y') }}</td><td>{{ r.valid_to.strftime('%b %Y') if r.valid_to else '—' }}</td>
+        <td>{{ r.note }}</td>
+        <td><form method="post" action="/admin/portfolios/am/{{ r.id }}/delete" onsubmit="return confirm('Delete this row?')"><button class="btn ghost small" type="submit">Delete</button></form></td>
+      </tr>
+    {% else %}<tr><td colspan="9">None yet — every retailer follows NetSuite.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+{% endblock %}

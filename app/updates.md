@@ -9,6 +9,15 @@ st_weekly, field, ageing, items, st_table, sell_through, promos, vendor_bills) o
 Add an entry with every commit people would notice. Everything above the first
 "##" is ignored.
 
+## 2026-11-24 | Team view for senior PMs | brand_profit
+- Brand Profitability's PM filter now lists each senior PM's team, e.g. "Rachel Harris (team)": their own brands plus those of the PMs who report to them, with the team total. Picking one PM still shows just that PM's brands.
+- Teams follow the month: someone who joined a team in September counts in it from September on.
+
+## 2026-11-24 | Account managers by retailer and brand | sales, admin
+- Account managers can now be set by retailer, and by brand where a retailer is split, e.g. at JB Hi-Fi AU, Mova and Outin are Mike Bihary's and the other brands Chris O'Donohue's. Retailers not set keep the account manager on the NetSuite customer record.
+- The home page's account managers, Sales Explorer (rows, filter, targets) all follow it. As before, the current manager applies to the whole history, so each manager sees their full portfolio.
+- Admins set PM teams and account managers on the new **Portfolios** page (side menu, Admin). Rows that differ from NetSuite are marked so the customer record can be fixed too.
+
 ## 2026-11-20 | Manual adjustments already in NetSuite are flagged | brand_profit, brand_profit_settings
 - When accounts post in NetSuite something that's also a manual adjustment (e.g. a vendor's rebate reimbursement on 51085 Brand Rebate recovery), it would count twice. The settings page now marks that row ⚠ with the NetSuite document it matches (same month, brand and type, amount within $10 or 0.1%), and the report's drill-down warns too. Delete the manual row when it's the same entry.
 - Three such rows were removed today: AU October EUFY and Anker customer-rebate accruals, and NZ September EUFY's — NetSuite now has them.

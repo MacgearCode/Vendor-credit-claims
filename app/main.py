@@ -57,6 +57,8 @@ app.include_router(targets_routes.router)
 from .brand_profit import routes as bp_routes          # noqa: E402
 from .brand_profit import data as bp_data, export as bp_export, np as bp_np, settings as bp_settings  # noqa: E402
 app.include_router(bp_routes.router)
+from . import portfolio, portfolio_routes                 # noqa: E402
+app.include_router(portfolio_routes.router)
 templates = Jinja2Templates(directory=os.path.join(HERE, "templates"))
 
 
@@ -897,7 +899,7 @@ def report_brand_profit_xlsx(request: Request, region: str = "AU", fy: int | Non
     brands, _ = _scope(request)
     region, _, fy, period = _bp_args(request, region, fy, period)
     rep = bp_data.report(region, fy, period, brands, pm)
-    name = f"Brand profitability {region} {rep['label']}{' ' + rep['pm'] if rep['pm'] else ''}.xlsx"
+    name = f"Brand profitability {region} {rep['label']}{' ' + rep['pm_label'] if rep['pm'] else ''}.xlsx"
     return Response(bp_export.to_xlsx(rep),
                     media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
@@ -2514,6 +2516,17 @@ def admin_activity(request: Request, days: int = 30, event: str = "", who: str =
     return templates.TemplateResponse(request, "admin_activity.html", {
         **data, "days": days, "event": event, "who": who, "event_labels": audit.EVENTS,
         "area_label": _area_label, "ago": audit.ago})
+
+
+@app.get("/admin/portfolios", response_class=HTMLResponse)
+def admin_portfolios(request: Request, ok: str = "", err: str = ""):
+    """PM teams and account managers (portfolio.py). Admin only (middleware: /admin/...)."""
+    ctx = {"ok": ok, "err": err, "v": None}
+    try:
+        ctx["v"] = portfolio.page(sales_today())
+    except bp_data.db.NotConfigured:
+        ctx["err"] = "The settings database isn't configured (BRAND_PROFIT_DB_URL / TARGETS_DB_URL)."
+    return templates.TemplateResponse(request, "admin_portfolios.html", ctx)
 
 
 def _area_label(key: str) -> str:

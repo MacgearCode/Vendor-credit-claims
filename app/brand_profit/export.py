@@ -22,7 +22,8 @@ def to_xlsx(rep: dict) -> bytes:
     ws = wb.active
     ws.title = "Brand profitability"
     region = "Australia (AUD)" if rep["region"] == "AU" else "New Zealand (NZD)"
-    ws.append([f"Brand profitability — {region} — {rep['label']} (company financial year, Apr–Mar)"])
+    ws.append([f"Brand profitability — {region} — {rep['label']} (company financial year, Apr–Mar)"
+               + (f" — {rep['pm_label']}" if rep.get('pm') else "")])
     ws["A1"].font = Font(bold=True, size=13)
     note = f"Excludes AU→NZ intercompany sales of ${rep['intercompany']:,.2f}." if rep["intercompany"] else ""
     ws.append([note])

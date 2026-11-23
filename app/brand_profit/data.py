@@ -30,7 +30,7 @@ feed keeps NetSuite's line class).
 """
 from datetime import date
 
-from .. import doc_store, warehouse
+from .. import doc_store, portfolio, warehouse
 from . import calc, db
 
 SUBSIDIARY = {"AU": 2, "NZ": 3}
@@ -264,17 +264,32 @@ def report(region: str, fy: int, period: str, brands: list[str] | None = None, p
         keep = {calc.norm_brand(b) for b in brands}
         sales = [r for r in sales if calc.norm_brand(r["brand"]) in keep]
         gl = [g for g in gl if calc.norm_brand(g["brand"]) in keep]
-    root = calc.build_tree(rates, sales, gl, set(months), lines["names"])
-    pms = sorted(root.children, key=lambda k: (k == calc.NO_PM, k))
-    if pm and pm in root.children:
+    mset = set(months)
+    pms = sorted({rates.pm(r["month"], r["brand"]) for r in sales if r["month"] in mset}
+                 | {rates.pm(g["month"], g["brand"]) for g in gl if g["month"] in mset},
+                 key=lambda k: (k == calc.NO_PM, k))
+    # "team:<senior PM>" = the senior's brands plus their team's, by who reported to them in each
+    # month (portfolio.py; user, 2026-11-24). Brands keep one PM, so nothing counts twice.
+    team_rows = portfolio.rows()["team"]
+    teams = portfolio.seniors(team_rows, months)
+    team = pm[5:] if pm.startswith("team:") else ""
+    if team in teams:
+        ok = portfolio.in_team(team_rows, team)
+        sales = [r for r in sales if ok(r["month"], rates.pm(r["month"], r["brand"]))]
+        gl = [g for g in gl if ok(g["month"], rates.pm(g["month"], g["brand"]))]
+    elif team:
+        pm = team = ""
+    root = calc.build_tree(rates, sales, gl, mset, lines["names"])
+    if pm and not team and pm in root.children:
         only = calc.Totals()
         only.add(root.children[pm])
         only.children = {pm: root.children[pm]}
         root = only
-    else:
+    elif not team:
         pm = ""
     return {
-        "pm": pm, "pms": pms,
+        "pm": pm, "pms": pms, "teams": teams,
+        "pm_label": f"{team} (team)" if team else pm,
         "region": region, "fy": fy, "period": period, "label": label,
         "months": [m.isoformat() for m in months],
         "total": root.as_dict(), "rows": _flatten(root),

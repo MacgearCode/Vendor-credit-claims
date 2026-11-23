@@ -23,7 +23,7 @@ Targets: the official targets committed in the Targets tool (targets.sales_targe
 import calendar
 from datetime import date, timedelta
 
-from . import warehouse
+from . import portfolio, warehouse
 from .brand_profit import np as bp_np
 
 REGIONS = ("AU", "NZ")
@@ -126,14 +126,14 @@ def tops(start: date, end: date) -> dict:
             left join reporting.dim_brand b on b.brand_id = s.brand_id
             where s.date_key between %(lo)s and %(hi)s and s.net_sales is not null
             group by 1, 2""",
-        # the customer's CURRENT account manager, not the rep on each invoice (user,
-        # 2026-10-15) — same rule as Sales Explorer
-        "reps": """select s.region_key, coalesce(nc.account_rep, 'No account manager'),
+        # the CURRENT account manager, not the rep on each invoice (user, 2026-10-15) —
+        # same rule as Sales Explorer: Portfolios page row for retailer x brand / retailer,
+        # else NetSuite's customer rep (portfolio.am_map) — so grouped by customer x brand
+        "reps": """select s.region_key, s.customer_id, s.brand_id,
                    sum(s.net_sales), sum(s.net_sales_est_cost)
             from reporting.fact_sales_line s
-            left join reporting.dim_ns_customer nc on nc.customer_id = s.customer_id
             where s.date_key between %(lo)s and %(hi)s and s.net_sales is not null
-            group by 1, 2""",
+            group by 1, 2, 3""",
         "items": """select s.region_key, i.macgear_code || ' — ' || coalesce(i.description, ''),
                    sum(s.net_sales), sum(s.net_sales_est_cost), i.macgear_code
             from reporting.fact_sales_line s
@@ -142,17 +142,21 @@ def tops(start: date, end: date) -> dict:
             group by 1, 2, 5""",
     }
     # net-profit deductions by the same labels (brand_profit/np.py)
-    lab = {"customers": {}, "reps": {}, "brands": {}, "items": {}}
-    for cid, grp, rep in warehouse.query(
-            "select customer_id, coalesce(customer_group, parent_name, customer_name, 'Other'), "
-            "coalesce(account_rep, 'No account manager') from reporting.dim_ns_customer"):
-        lab["customers"][cid], lab["reps"][cid] = grp, rep
+    lab = {"customers": {}, "brands": {}, "items": {}}
+    for cid, grp in warehouse.query(
+            "select customer_id, coalesce(customer_group, parent_name, customer_name, 'Other') "
+            "from reporting.dim_ns_customer"):
+        lab["customers"][cid] = grp
     lab["brands"] = dict(warehouse.query("select brand_id, brand from reporting.dim_brand"))
+    amap = portfolio.am_map()
+
+    def am_name(c, b):
+        return portfolio.am_of(amap, c, b) or "No account manager"
     ded = {}
     for r in REGIONS:
         ded[r] = {
             "customers": bp_np.deductions(r, p["lo"], p["hi"], lambda k, c, b, i: lab["customers"].get(c, "Other")),
-            "reps": bp_np.deductions(r, p["lo"], p["hi"], lambda k, c, b, i: lab["reps"].get(c, "No account manager")),
+            "reps": bp_np.deductions(r, p["lo"], p["hi"], lambda k, c, b, i: am_name(c, b)),
             "brands": bp_np.deductions(r, p["lo"], p["hi"], lambda k, c, b, i: lab["brands"].get(b) or "Other"),
             "items": bp_np.deductions(r, p["lo"], p["hi"], lambda k, c, b, i: i)}
     out = {r: {} for r in REGIONS}
@@ -169,8 +173,15 @@ def tops(start: date, end: date) -> dict:
                 sql = (sql.replace("from reporting.fact_sales_line s", "from reporting.agg_sales_day s")
                           .replace("s.net_sales is not null", "s.n_net > 0"))
             cur.execute(sql, p)
+            fetched = cur.fetchall()
+            if name == "reps":                 # customer x brand -> manager, summed
+                agg: dict = {}
+                for rkey, c, b, v, x in fetched:
+                    cell = agg.setdefault((rkey, am_name(c, b)), [0.0, 0.0])
+                    cell[0] += float(v or 0); cell[1] += float(x or 0)
+                fetched = [(rkey, n, v, x) for (rkey, n), (v, x) in agg.items()]
             per = {r: [] for r in REGIONS}
-            for row in cur.fetchall():
+            for row in fetched:
                 region = rk.get(row[0])
                 if region:
                     v, c = float(row[2] or 0), float(row[3] or 0)

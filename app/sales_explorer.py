@@ -15,7 +15,9 @@ a period that hasn't finished compares to-date with to-date. AU and NZ never sum
 ACCOUNT MANAGER = the CURRENT account rep on the customer record (NetSuite customer
 salesrep, dim_ns_customer.account_rep_id), applied to ALL history — so a manager's
 numbers are their whole portfolio, including sales made before they took an account
-over (user, 2026-10-15). It is NOT the rep on each invoice.
+over (user, 2026-10-15). It is NOT the rep on each invoice. Since 2026-11-24 a manager
+set on the Portfolios page for the retailer (and brand) wins over NetSuite's
+(portfolio.py), so the manager is per customer x brand: _am(c, b, nm).
 
 Speed. Querying the warehouse per click took ~6 s, so each region's sales are held in
 memory as a compact summary and sliced in Python:
@@ -34,7 +36,7 @@ from bisect import bisect_left, bisect_right
 from datetime import date, timedelta
 from io import BytesIO
 
-from . import sales, warehouse
+from . import portfolio, sales, warehouse
 from .brand_profit import np as bp_np
 
 MONTHLY_TTL = 30 * 60          # closed months barely move
@@ -71,7 +73,25 @@ def names() -> dict:
             brand = {b: n for b, n in cur.fetchall()}
             cur.execute("select rep_id, rep_name from reporting.dim_salesrep")
             rep = {r: n for r, n in cur.fetchall()}
-        return {"cust": cust, "brand": brand, "rep": rep}
+        # account managers set on the Portfolios page override NetSuite's (portfolio.py):
+        # an every-brand row replaces the customer's manager, a brand row goes in am_cb
+        amap = portfolio.am_map()
+        rep_id = {n: i for i, n in sorted(rep.items(), reverse=True)}
+
+        def rid(name):
+            if name is None:
+                return None
+            if name not in rep_id:                    # not a NetSuite rep: give it its own id
+                rep_id[name] = -len(rep_id) - 1
+                rep[rep_id[name]] = name
+            return rep_id[name]
+        for cid, (nm, grp, am) in list(cust.items()):
+            if cid in amap["cust"] and amap["cust"][cid] != rep.get(am):
+                cust[cid] = (nm, grp, rid(amap["cust"][cid]))
+        am_cb = {k: rid(n) for k, n in amap["cb"].items()}
+        am_rb = {k: rid(n) for k, n in amap["rb"].items()}
+        am_ra = {k: rid(n) for k, n in amap["ra"].items()}
+        return {"cust": cust, "brand": brand, "rep": rep, "am_cb": am_cb, "am_rb": am_rb, "am_ra": am_ra}
     return warehouse.cached(("sx_names",), build, ttl=60 * 60)
 
 
@@ -225,7 +245,8 @@ def period(code: str, fy: int, today: date) -> dict:
 # The official targets committed in the Targets tool (sales.target_lines), set per
 # country x brand x retailer x month. A retailer's target belongs to its ACCOUNT MANAGER
 # in NetSuite (retailer_ams: the manager on the customer records, user 2026-10-23 —
-# NetSuite is the source of truth, not a manager typed on the target), so targets sit on
+# NetSuite is the source of truth, not a manager typed on the target; since 2026-11-24 a
+# Portfolios row for the retailer x brand or the retailer wins over it), so targets sit on
 # Retailer, Brand, Month and Account manager rows and follow the manager filter; only
 # Account and Item rows have no target. A month the period covers only part of counts
 # in proportion to its weekdays — the home page's pace rule — so "to date" compares
@@ -282,10 +303,19 @@ def targets(region: str, a: date, b: date, dims: list, f: dict, nm: dict, ams: d
     brand = nm["brand"].get(f["brand"]) if f.get("brand") is not None else None
     by_row = {} if all(d in TARGET_DIMS for d in dims) else None
     total = 0.0
+    rb, ra = nm.get("am_rb") or {}, nm.get("am_ra") or {}
+
+    def am_of(cust, bn):           # Portfolios retailer x brand, retailer, else NetSuite's
+        rk = portfolio.norm_retailer(cust)
+        a = rb.get((region, rk, portfolio.calc.norm_brand(bn))) if rb else None
+        if a is None and ra:
+            a = ra.get((region, rk))
+        return a if a is not None else ams.get(cust)
     for ms, bn, cust, amt in lines:
         if (brand is not None and bn != brand) or (f.get("retailer") and cust != f["retailer"]):
             continue
-        if f.get("rep") is not None and ams.get(cust) != f["rep"]:
+        am = am_of(cust, bn)
+        if f.get("rep") is not None and am != f["rep"]:
             continue
         fr = _target_frac(ms, a, b)
         if not fr:
@@ -293,15 +323,20 @@ def targets(region: str, a: date, b: date, dims: list, f: dict, nm: dict, ams: d
         total += amt * fr
         if by_row is not None:
             key = tuple({"retailer": cust, "brand": bn, "month": f"{ms.year}-{ms.month:02d}",
-                         "rep": nm["rep"].get(ams.get(cust)) or "(no account manager)"}[d]
+                         "rep": nm["rep"].get(am) or "(no account manager)"}[d]
                         for d in dims)
             by_row[key] = by_row.get(key, 0.0) + amt * fr
     return total, by_row
 
 
 # ---- slicing ------------------------------------------------------------------------
-def _am(c: int, nm: dict):
-    """The customer's current account manager id (None if the record has none)."""
+def _am(c: int, b: int, nm: dict):
+    """The current account manager id for a customer's sales of a brand: a Portfolios brand
+    row, else the customer's (Portfolios retailer row or NetSuite). None if neither has one."""
+    cb = nm.get("am_cb")
+    a = cb.get((c, b)) if cb else None
+    if a is not None:
+        return a
     t = nm["cust"].get(c)
     return t[2] if t else None
 
@@ -309,7 +344,7 @@ def _am(c: int, nm: dict):
 def _filter_ok(f: dict, c: int, b: int, r: int, nm: dict) -> bool:
     if f.get("brand") is not None and b != f["brand"]:
         return False
-    if f.get("rep") is not None and _am(c, nm) != f["rep"]:
+    if f.get("rep") is not None and _am(c, b, nm) != f["rep"]:
         return False
     if f.get("retailer"):
         if nm["cust"].get(c, ("", ""))[1] != f["retailer"]:
@@ -325,7 +360,7 @@ def _label(dim: str, c: int, b: int, r: int, k: int, nm: dict) -> str:
     if dim == "brand":
         return nm["brand"].get(b) or "(no brand)"
     if dim == "rep":
-        return nm["rep"].get(_am(c, nm)) or "(no account manager)"
+        return nm["rep"].get(_am(c, b, nm)) or "(no account manager)"
     if dim == "month":
         ym = k if k < 1000000 else k // 100
         return f"{ym // 100}-{ym % 100:02d}"
@@ -362,13 +397,18 @@ def _items_sql(region: str, p: dict, dims: list, f: dict, nm: dict) -> dict:
     # brand_id sends the planner down a path that ran past 80 s (0.13 s without it), so
     # brand is grouped on and filtered here instead.
     if f.get("rep") is not None or f.get("retailer"):
+        # a customer can have the manager through one brand only (Portfolios brand rows),
+        # so the SQL keeps every customer that might, and the rows are checked below
+        via_brand = {c for (c, _), a in (nm.get("am_cb") or {}).items() if a == f.get("rep")}
         ids = [cid for cid, t in nm["cust"].items()
-               if (f.get("rep") is None or t[2] == f["rep"])
+               if (f.get("rep") is None or t[2] == f["rep"] or cid in via_brand)
                and (not f.get("retailer") or t[1] == f["retailer"])]
         where.append("s.customer_id = any(%(cids)s)"); prm["cids"] = ids
     # Group by only what the rows (or the brand filter) need — every id took ~6 s.
-    need_c = any(x in dims for x in ("retailer", "account", "rep"))
-    need_b = "brand" in dims or f.get("brand") is not None
+    # The manager depends on customer AND brand (Portfolios), so it needs both.
+    by_am = "rep" in dims or f.get("rep") is not None
+    need_c = any(x in dims for x in ("retailer", "account", "rep")) or by_am
+    need_b = "brand" in dims or f.get("brand") is not None or by_am
     cols = ["s.item_key",
             "s.date_key / 100" if "month" in dims else "0",
             "s.customer_id" if need_c else "null::int",
@@ -396,6 +436,8 @@ def _items_sql(region: str, p: dict, dims: list, f: dict, nm: dict) -> dict:
         r = -1 if r is None else r
         dx, dn = ded[bool(is_cur)].get((-1 if ik is None else ik, ym, c, b), (0.0, 0.0))
         if f.get("brand") is not None and b != f["brand"]:
+            continue
+        if f.get("rep") is not None and _am(c, b, nm) != f["rep"]:
             continue
         lab = []
         for dm in dims:
@@ -566,7 +608,7 @@ def options(region: str, today: date) -> dict:
                 continue
             v = m.v[i]
             b, c = m.b[i], m.c[i]
-            r = _am(c, nm)
+            r = _am(c, b, nm)
             if b in nm["brand"]:
                 brands[b] = brands.get(b, 0) + v
             if r in nm["rep"]:

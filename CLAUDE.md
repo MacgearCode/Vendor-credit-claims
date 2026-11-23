@@ -42,6 +42,7 @@ warehouse host in the droplet `.env` broke the warm-up — compare the host, not
 | `/reports/brand-profit` | Brand Profitability — NP by PM / brand after rebates, freight, vendor rebates, MDF (LOCAL only) | staff with the area + Margin |
 | `/brand-profit/settings` | Brand Profitability settings — rates by month, PMs, freight / VR uploads, change log (LOCAL only) | staff with the area |
 | `/admin/users` | User management | admins |
+| `/admin/portfolios` | Portfolios — PM teams (senior PM ← PMs) and account managers by retailer × brand, overriding NetSuite's rep (LOCAL only so far) | admins |
 
 **Adding a report or tool** takes three edits: a tile in `REPORTS` or `TOOLS`
 (`app/main.py`), its key in `perms.REPORT_KEYS` / `TOOL_KEYS` + `AREA_LABELS`
@@ -226,6 +227,19 @@ brand, retailer (customer group); every figure vs the **same dates LY**
 Account (store), Brand, Account manager, Item, Month — expandable tree, sortable,
 share bars, GP only with `margin`; Excel = the matrix flattened. Needs the `sales`
 area AND `sell_in_value` (route-checked; not listed in menus without it); never vendors.
+- **Portfolios override NetSuite (2026-11-24, user):** `app/portfolio.py` + `/admin/portfolios`
+  (admin only — edits stay with admins, user). Tables `pm_team` and `am_assignment` in the brand_profit
+  settings schema. A sale's manager = the Portfolios row for its region × retailer (customer group) ×
+  brand, else × every brand, else NetSuite's customer rep below; still the CURRENT assignment over all
+  history. Everything resolves through `portfolio.am_map()` (Sales Explorer `names()` → `_am(c, b, nm)`,
+  home `tops`, Sales Explorer targets per retailer × brand). Seeded from the user's `AM PM Assignment.xlsx`
+  (`python -m app.portfolio <xlsx>`: AU key accounts; JB HIFI / TGG split by brand; Harvey Norman + Costco
+  AU → Samantha Musson though NetSuite says Jeremy Sedley). TGG's "Eufy Security / Floorcare / Baby" split
+  was NOT loaded — NetSuite has only EUFY (needs an item-category rule if wanted). PM teams (user
+  2026-11-24): David ← Prasanna (Oct 2026), Rachel ← Jeffrey, Mia (assumed Apr 2026), Dale ← Charles,
+  Carlo (Sep 2026); Brand Profitability's PM filter has "<senior> (team)" = brands whose PM that month
+  is the senior or reports to them (`data.report(pm="team:…")`). Reassigning ends the old row the month
+  before. Writes drop `portfolio.CACHE_PREFIXES`. Tests: `tests/test_portfolio.py`.
 - **Account manager = the CURRENT account rep on the customer record**
   (`dim_ns_customer.account_rep_id`), applied to all history — the manager's whole
   portfolio (user, 2026-10-15). NOT the rep on each invoice (`fact_sales_line.rep_id`,
