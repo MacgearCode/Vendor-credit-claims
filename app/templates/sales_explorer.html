@@ -79,6 +79,13 @@
     <label class="r-muted" style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;display:flex;flex-direction:column;gap:4px">Account manager
       <select class="r-select" id="repSel"><option value="">All</option>
         {% for r in opts.reps %}<option value="{{ r.id }}" {{ 'selected' if a.f.rep == r.id }}>{{ r.name }}</option>{% endfor %}</select></label>
+    <label class="r-muted" style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;display:flex;flex-direction:column;gap:4px">Product manager
+      <select class="r-select" id="pmSel"><option value="">All</option>
+        {% if opts.teams %}<optgroup label="Teams (senior PM + their PMs)">
+          {% for t in opts.teams %}<option value="team:{{ t }}" {{ 'selected' if a.f.pm == 'team:' ~ t }}>{{ t }} (team)</option>{% endfor %}
+        </optgroup><optgroup label="One PM's own brands">{% endif %}
+        {% for p in opts.pms %}<option value="{{ p }}" {{ 'selected' if a.f.pm == p }}>{{ p }}</option>{% endfor %}
+        {% if opts.teams %}</optgroup>{% endif %}</select></label>
     <label class="r-muted" style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;display:flex;flex-direction:column;gap:4px">Brand
       <select class="r-select" id="brandSel"><option value="">All</option>
         {% for b in opts.brands %}<option value="{{ b.id }}" {{ 'selected' if a.f.brand == b.id }}>{{ b.name }}</option>{% endfor %}</select></label>
@@ -107,6 +114,7 @@
       <button type="button" data-d="retailer,brand">Retailer › Brand</button>
       <button type="button" data-d="brand,item">Brand › Item</button>
       <button type="button" data-d="rep,retailer">Account manager › Retailer</button>
+      <button type="button" data-d="pm,brand">Product manager › Brand</button>
       <button type="button" data-d="month,brand">Month › Brand</button>
       <button type="button" data-d="retailer,account">Retailer › Store/account</button>
     </div>
@@ -122,7 +130,8 @@
 
 <p class="r-note">Revenue = Macgear's NetSuite sales (sales account, ex-GST, net of credits; AU → NZ intercompany excluded), each country in its own
   currency. Periods follow the financial year (April–March). "LY" = the same dates a year earlier; a period still running compares to-date with to-date.
-  Account manager = the account manager on the customer record today, applied to all past sales — their whole portfolio, not the rep on each invoice. {% if a.margin %}Net profit = revenue − NetSuite estimated cost − customer rebates, MDF and the brand's freight &amp; vendor rebates (shared by sales), from the Brand Profitability settings. NP % is on gross (revenue) and on net (revenue − customer rebates).{% endif %}
+  Account manager = the account manager on the customer record today, applied to all past sales — their whole portfolio, not the rep on each invoice.
+  Product manager = the brand's PM today (Brand Profitability settings), also applied to all past sales; a PM's team = their own brands plus those of the PMs who report to them. {% if a.margin %}Net profit = revenue − NetSuite estimated cost − customer rebates, MDF and the brand's freight &amp; vendor rebates (shared by sales), from the Brand Profitability settings. NP % is on gross (revenue) and on net (revenue − customer rebates).{% endif %}
   <span id="tgtNote"></span></p>
 {% endblock %}
 
@@ -134,7 +143,8 @@
   var DIMS = {{ dims_all|tojson }};
   var S = {region: {{ a.region|tojson }}, p: {{ a.code|tojson }}, fy: {{ a.fy|tojson }},
            dims: {{ a.dims|tojson }}, brand: {{ (a.f.brand if a.f.brand is not none else '')|tojson }},
-           rep: {{ (a.f.rep if a.f.rep is not none else '')|tojson }}, retailer: {{ (a.f.retailer or '')|tojson }}};
+           rep: {{ (a.f.rep if a.f.rep is not none else '')|tojson }}, retailer: {{ (a.f.retailer or '')|tojson }},
+           pm: {{ (a.f.pm or '')|tojson }}};
   var sort = {key: "v", dir: -1}, open = {}, seq = 0;
   var col = {acc: RPT.css("--r-accent"), amb: RPT.css("--r-amber"), muted: RPT.css("--r-muted"), pos: RPT.css("--r-pos")};
 
@@ -143,6 +153,7 @@
     if (S.brand !== "") o.brand = S.brand;
     if (S.rep !== "") o.rep = S.rep;
     if (S.retailer) o.retailer = S.retailer;
+    if (S.pm) o.pm = S.pm;
     return new URLSearchParams(o).toString();
   }
   function money(v, full) { return RPT.money(v, D.currency, full); }
@@ -206,7 +217,7 @@
     // brand / rep / retailer lists differ by region: reload the page for fresh lists
     location.href = "/reports/sales?" + new URLSearchParams({region: S.region, p: S.p, fy: S.fy, dims: S.dims.join(",")});
   });
-  [["repSel", "rep"], ["brandSel", "brand"], ["retSel", "retailer"]].forEach(function (x) {
+  [["repSel", "rep"], ["pmSel", "pm"], ["brandSel", "brand"], ["retSel", "retailer"]].forEach(function (x) {
     document.getElementById(x[0]).addEventListener("change", function (e) { S[x[1]] = e.target.value; load(); });
   });
 

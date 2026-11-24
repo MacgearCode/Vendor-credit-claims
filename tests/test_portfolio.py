@@ -218,3 +218,31 @@ def test_portfolios_page_posts_and_lists(conn, monkeypatch):
     page = client.get("/admin/portfolios")
     assert page.status_code == 200 and "Samantha Musson" in page.text and "Mia Chen" in page.text
     assert "every brand" in page.text
+
+
+def test_sales_explorer_product_manager_filter_rows_and_targets(monkeypatch):
+    teams = {"Rachel Harris": {"Mia Chen", "Jeffrey Zhu"}}
+    assert sales_explorer.pm_match("team:Rachel Harris", "Mia Chen", teams)
+    assert sales_explorer.pm_match("team:Rachel Harris", "Rachel Harris", teams)
+    assert not sales_explorer.pm_match("team:Rachel Harris", "David Vanderkley", teams)
+    assert sales_explorer.pm_match("Mia Chen", "Mia Chen", teams) and not sales_explorer.pm_match("Mia Chen", None, teams)
+    assert sales_explorer.pm_match(sales_explorer.NO_PM, None, teams)
+    nm = {"cust": {1: ("JB", "JB HIFI", 10)}, "brand": {7: "TYMO", 8: "ANKER", 9: "OTHER"},
+          "rep": {10: "Chris"}, "pm_b": {7: "Mia Chen", 8: "Dale Farnham"}}
+    monkeypatch.setattr(sales_explorer, "pm_brands", lambda region, today=None: nm["pm_b"])
+    monkeypatch.setattr(sales_explorer, "pm_by_brand_name", lambda region, today=None: {"TYMO": "Mia Chen", "ANKER": "Dale Farnham"})
+    monkeypatch.setattr(sales_explorer, "pm_teams", lambda today=None: teams)
+    nm2 = sales_explorer.with_pms(nm, "AU", {"pm": "team:Rachel Harris"})
+    assert nm2["pm_bids"] == {7}
+    assert sales_explorer._label("pm", 1, 7, -1, 202610, nm2) == "Mia Chen"
+    assert sales_explorer._label("pm", 1, 9, -1, 202610, nm2) == sales_explorer.NO_PM
+    assert sales_explorer._filter_ok({"pm": "team:Rachel Harris"}, 1, 7, -1, nm2)
+    assert not sales_explorer._filter_ok({"pm": "team:Rachel Harris"}, 1, 8, -1, nm2)
+    monkeypatch.setattr(sales_explorer, "target_lines", lambda: {"AU": [
+        (D(2026, 10, 1), "TYMO", "JB HIFI", 100.0), (D(2026, 10, 1), "ANKER", "JB HIFI", 50.0),
+        (D(2026, 10, 1), "OTHER", "JB HIFI", 5.0)]})
+    tot, rows = sales_explorer.targets("AU", D(2026, 10, 1), D(2026, 10, 31), ["pm"], {}, nm2, {"JB HIFI": 10})
+    assert tot == 155 and rows == {("Mia Chen",): 100.0, ("Dale Farnham",): 50.0, (sales_explorer.NO_PM,): 5.0}
+    tot, _ = sales_explorer.targets("AU", D(2026, 10, 1), D(2026, 10, 31), [], {"pm": "team:Rachel Harris"}, nm2,
+                                    {"JB HIFI": 10})
+    assert tot == 100

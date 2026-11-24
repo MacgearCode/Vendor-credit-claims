@@ -1223,7 +1223,7 @@ def report_table_xlsx(request: Request, region: str = "", grain: str = "retailer
 # Macgear's own revenue: Sales Explorer access AND the sell_in_value capability (the
 # middleware checks the first; these routes check the second). Never vendors.
 def _sx_args(request: Request, region: str, p: str, fy: int, dims: str,
-             brand: str, rep: str, retailer: str):
+             brand: str, rep: str, retailer: str, pm: str = ""):
     caps = _caps(request)
     if "sell_in_value" not in caps:
         return None
@@ -1232,7 +1232,7 @@ def _sx_args(request: Request, region: str, p: str, fy: int, dims: str,
     fy = fy or (sales.fy_start(today).year + 1)
     f = {"brand": int(brand) if brand.lstrip("-").isdigit() else None,
          "rep": int(rep) if rep.lstrip("-").isdigit() else None,
-         "retailer": retailer or None}
+         "retailer": retailer or None, "pm": pm.strip() or None}
     dl = [d for d in (dims or "retailer").split(",") if d in sales_explorer.DIMS]
     return {"region": region, "regions": regions, "today": today, "code": p or "ytd",
             "fy": fy, "dims": dl, "f": f, "margin": "margin" in caps}
@@ -1246,8 +1246,8 @@ def _sx_denied(request):
 
 @app.get("/reports/sales", response_class=HTMLResponse)
 def report_sales(request: Request, region: str = "", p: str = "ytd", fy: int = 0, dims: str = "",
-                 brand: str = "", rep: str = "", retailer: str = ""):
-    a = _sx_args(request, region, p, fy, dims, brand, rep, retailer)
+                 brand: str = "", rep: str = "", retailer: str = "", pm: str = ""):
+    a = _sx_args(request, region, p, fy, dims, brand, rep, retailer, pm)
     if a is None:
         return _sx_denied(request)
     try:
@@ -1265,8 +1265,8 @@ def report_sales(request: Request, region: str = "", p: str = "ytd", fy: int = 0
 
 @app.get("/reports/sales/data")
 def report_sales_data(request: Request, region: str = "", p: str = "ytd", fy: int = 0,
-                      dims: str = "", brand: str = "", rep: str = "", retailer: str = ""):
-    a = _sx_args(request, region, p, fy, dims, brand, rep, retailer)
+                      dims: str = "", brand: str = "", rep: str = "", retailer: str = "", pm: str = ""):
+    a = _sx_args(request, region, p, fy, dims, brand, rep, retailer, pm)
     if a is None:
         return JSONResponse({"error": "no access"}, status_code=403)
     try:
@@ -1278,8 +1278,8 @@ def report_sales_data(request: Request, region: str = "", p: str = "ytd", fy: in
 
 @app.get("/reports/sales/export.xlsx")
 def report_sales_xlsx(request: Request, region: str = "", p: str = "ytd", fy: int = 0,
-                      dims: str = "", brand: str = "", rep: str = "", retailer: str = ""):
-    a = _sx_args(request, region, p, fy, dims, brand, rep, retailer)
+                      dims: str = "", brand: str = "", rep: str = "", retailer: str = "", pm: str = ""):
+    a = _sx_args(request, region, p, fy, dims, brand, rep, retailer, pm)
     if a is None:
         return _sx_denied(request)
     try:
@@ -1294,6 +1294,8 @@ def report_sales_xlsx(request: Request, region: str = "", p: str = "ytd", fy: in
         "vs same dates LY",
         f"brand {nm['brand'].get(f['brand'], f['brand'])}" if f["brand"] is not None else "",
         f"account manager {nm['rep'].get(f['rep'], f['rep'])}" if f["rep"] is not None else "",
+        (f"product manager {f['pm'][5:]} (team)" if f["pm"].startswith("team:") else f"product manager {f['pm']}")
+        if f.get("pm") else "",
         f"retailer {f['retailer']}" if f["retailer"] else ""] if x)
     body = sales_explorer.to_xlsx(data, "Macgear Sales", desc)
     name = f"Macgear_Sales_{a['region']}_{data['period']['from']}_{data['period']['to']}.xlsx"

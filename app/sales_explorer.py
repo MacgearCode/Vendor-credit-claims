@@ -23,6 +23,12 @@ Baby): those customer x brand pairs' summary rows are split by category, the cat
 riding in the rep column (portfolio.split_rows), and _am(c, b, nm, r) resolves it. Their
 targets, set by retailer x brand only, are split by the last 12 months' category mix.
 
+PRODUCT MANAGER (user, 2026-11-25) = the brand's PM in force NOW (Brand Profitability
+settings → PMs, per region), applied to all history like the account manager — a PM's
+whole portfolio with a fair LY. A brand with no PM this month falls back to its latest
+PM row. The filter also takes "team:<senior PM>": the senior's brands plus those of the
+PMs reporting to them this month (Portfolios). Brands with no PM row at all = "(no PM)".
+
 Speed. Querying the warehouse per click took ~6 s, so each region's sales are held in
 memory as a compact summary and sliced in Python:
   - monthly: month x customer x brand x rep, all history   (AU ~190k rows)
@@ -48,8 +54,9 @@ DAILY_TTL = 5 * 60             # today's invoices
 
 DIMS = {                       # key -> label (order = the builder's chips)
     "retailer": "Retailer", "account": "Account", "brand": "Brand",
-    "rep": "Account manager", "item": "Item", "month": "Month",
+    "pm": "Product manager", "rep": "Account manager", "item": "Item", "month": "Month",
 }
+NO_PM = "(no PM)"
 MAX_LEVELS = 3
 FY_MONTHS = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"]
 
@@ -100,6 +107,76 @@ def names() -> dict:
         return {"cust": cust, "brand": brand, "rep": rep, "am_cb": am_cb, "am_cbk": am_cbk,
                 "am_rb": am_rb, "am_rbk": am_rbk, "am_ra": am_ra}
     return warehouse.cached(("sx_names",), build, ttl=60 * 60)
+
+
+def pm_by_brand_name(region: str, today: date | None = None) -> dict:
+    """{BRAND NAME: PM name} for the region: the brand_pm row in force this month, else the
+    brand's latest row. By name so brands with a target but no sales yet keep their PM.
+    Settings changes drop it (bp_np prefix, brand_profit/routes.py)."""
+    t = today or date.today()
+    m0 = date(t.year, t.month, 1)
+
+    def build():
+        from .brand_profit import db as bp_db
+        try:
+            with bp_db.connect() as conn:
+                rows = bp_db.load_pms(conn, region)
+        except Exception:                       # settings DB not there: no PMs, not an error
+            return {}
+        best: dict = {}
+        for r in rows:
+            cur = r["valid_from"] <= m0 and (r["valid_to"] is None or r["valid_to"] >= m0)
+            key = (cur, r["valid_from"])
+            b = portfolio.calc.norm_brand(r["brand"])
+            if b not in best or key > best[b][0]:
+                best[b] = (key, r["pm"])
+        return {b: v[1] for b, v in best.items()}
+    return warehouse.cached(("bp_np_sxpm", region, m0), build, ttl=10 * 60)
+
+
+def pm_brands(region: str, today: date | None = None) -> dict:
+    """{brand_id: PM name} for the region (pm_by_brand_name over the warehouse's brands)."""
+    by_name = pm_by_brand_name(region, today)
+    out = {}
+    for bid, bn in (names().get("brand") or {}).items():
+        pm = by_name.get(portfolio.calc.norm_brand(bn))
+        if pm:
+            out[bid] = pm
+    return out
+
+
+def pm_teams(today: date | None = None) -> dict:
+    """{senior PM: {members}} in force this month (Portfolios)."""
+    t = today or date.today()
+    m0 = date(t.year, t.month, 1)
+    rows = portfolio.rows()["team"]
+    out: dict = {}
+    for s_ in portfolio.seniors(rows, [m0]):
+        out[s_] = {r["pm"] for r in rows if r["reports_to"] == s_ and portfolio._in_force(r, m0)}
+    return out
+
+
+def pm_match(sel: str, pm: str | None, teams: dict) -> bool:
+    """Does a brand's PM pass the PM filter? sel = a PM's name, "team:<senior>" or NO_PM."""
+    if sel == NO_PM:
+        return not pm
+    if sel.startswith("team:"):
+        senior = sel[5:]
+        return bool(pm) and (pm == senior or pm in teams.get(senior, ()))
+    return pm == sel
+
+
+def with_pms(nm: dict, region: str, f: dict | None = None, today: date | None = None) -> dict:
+    """names() plus this region's brand -> PM (pm_b) and, when filtering by PM, the brand
+    ids that pass (pm_bids). A shallow copy: names() itself stays region-free."""
+    out = dict(nm)
+    out["pm_b"] = pm_brands(region, today)
+    out["pm_n"] = pm_by_brand_name(region, today)
+    if f and f.get("pm"):
+        teams = pm_teams(today)
+        out["pm_bids"] = {b for b in nm["brand"] if pm_match(f["pm"], out["pm_b"].get(b), teams)}
+        out["pm_teams"] = teams
+    return out
 
 
 # ---- the in-memory summary --------------------------------------------------------
@@ -277,7 +354,7 @@ def period(code: str, fy: int, today: date) -> dict:
 # Account and Item rows have no target. A month the period covers only part of counts
 # in proportion to its weekdays — the home page's pace rule — so "to date" compares
 # like with like.
-TARGET_DIMS = ("retailer", "brand", "month", "rep")
+TARGET_DIMS = ("retailer", "brand", "month", "rep", "pm")
 
 
 def _target_frac(ms: date, a: date, b: date) -> float:
@@ -349,6 +426,7 @@ def targets(region: str, a: date, b: date, dims: list, f: dict, nm: dict, ams: d
     total = 0.0
     rb, ra, rbk = nm.get("am_rb") or {}, nm.get("am_ra") or {}, nm.get("am_rbk") or {}
     mix = mix or {}
+    pm_by_name = nm.get("pm_n") or {}
 
     def am_of(cust, bn):           # Portfolios retailer x brand, retailer, else NetSuite's
         rk = portfolio.norm_retailer(cust)
@@ -358,6 +436,9 @@ def targets(region: str, a: date, b: date, dims: list, f: dict, nm: dict, ams: d
         return a if a is not None else ams.get(cust)
     for ms, bn, cust, amt in lines:
         if (brand is not None and bn != brand) or (f.get("retailer") and cust != f["retailer"]):
+            continue
+        pm = pm_by_name.get(portfolio.calc.norm_brand(bn))
+        if f.get("pm") and not pm_match(f["pm"], pm, nm.get("pm_teams") or {}):
             continue
         fr = _target_frac(ms, a, b)
         if not fr:
@@ -376,7 +457,7 @@ def targets(region: str, a: date, b: date, dims: list, f: dict, nm: dict, ams: d
             total += t
             if by_row is not None:
                 key = tuple({"retailer": cust, "brand": bn, "month": f"{ms.year}-{ms.month:02d}",
-                             "rep": nm["rep"].get(am) or "(no account manager)"}[d]
+                             "rep": nm["rep"].get(am) or "(no account manager)", "pm": pm or NO_PM}[d]
                             for d in dims)
                 by_row[key] = by_row.get(key, 0.0) + t
     return total, by_row
@@ -400,8 +481,16 @@ def _am(c: int, b: int, nm: dict, r: int = -1):
     return t[2] if t else None
 
 
+def _pm_ok(sel: str, b: int, nm: dict) -> bool:
+    if sel == NO_PM:
+        return b not in (nm.get("pm_b") or {})
+    return b in nm.get("pm_bids", ())
+
+
 def _filter_ok(f: dict, c: int, b: int, r: int, nm: dict) -> bool:
     if f.get("brand") is not None and b != f["brand"]:
+        return False
+    if f.get("pm") and not _pm_ok(f["pm"], b, nm):
         return False
     if f.get("rep") is not None and _am(c, b, nm, r) != f["rep"]:
         return False
@@ -418,6 +507,8 @@ def _label(dim: str, c: int, b: int, r: int, k: int, nm: dict) -> str:
         return nm["cust"].get(c, ("(no customer)", ""))[0]
     if dim == "brand":
         return nm["brand"].get(b) or "(no brand)"
+    if dim == "pm":
+        return (nm.get("pm_b") or {}).get(b) or NO_PM
     if dim == "rep":
         return nm["rep"].get(_am(c, b, nm, r)) or "(no account manager)"
     if dim == "month":
@@ -468,7 +559,7 @@ def _items_sql(region: str, p: dict, dims: list, f: dict, nm: dict) -> dict:
     # The manager depends on customer AND brand (Portfolios), so it needs both.
     by_am = "rep" in dims or f.get("rep") is not None
     need_c = any(x in dims for x in ("retailer", "account", "rep")) or by_am
-    need_b = "brand" in dims or f.get("brand") is not None or by_am
+    need_b = "brand" in dims or "pm" in dims or f.get("brand") is not None or f.get("pm") or by_am
     cols = ["s.item_key",
             "s.date_key / 100" if "month" in dims else "0",
             "s.customer_id" if need_c else "null::int",
@@ -497,6 +588,8 @@ def _items_sql(region: str, p: dict, dims: list, f: dict, nm: dict) -> dict:
         r = icat.get(ik, -1)                      # item category, for Portfolios category rows
         dx, dn = ded[bool(is_cur)].get((-1 if ik is None else ik, ym, c, b), (0.0, 0.0))
         if f.get("brand") is not None and b != f["brand"]:
+            continue
+        if f.get("pm") and not _pm_ok(f["pm"], b, nm):
             continue
         if f.get("rep") is not None and _am(c, b, nm, r) != f["rep"]:
             continue
@@ -542,7 +635,7 @@ def explore(region: str, code: str, fy: int, today: date, dims: list, f: dict,
             margin: bool) -> dict:
     dims = [d for d in dims if d in DIMS][:MAX_LEVELS] or ["retailer"]
     p = period(code, fy, today)
-    nm = names()
+    nm = with_pms(names(), region, f, today)
     m, d = cubes(region, today)
     out = {"period": {"label": p["label"], "from": p["a"].isoformat(), "to": p["b"].isoformat(),
                       "future": p["future"]},
@@ -659,12 +752,13 @@ def trend(region, fy, today, f, nm, m, d) -> dict:
 
 
 def options(region: str, today: date) -> dict:
-    """Filter lists: brands, reps, retailers with sales in the last two FYs."""
+    """Filter lists: brands, reps, PMs (and senior PMs' teams), retailers with sales in the
+    last two FYs."""
     def build():
-        nm = names()
+        nm = with_pms(names(), region, None, today)
         m, _ = cubes(region, today)
         since = (sales.fy_start(today).year - 1) * 100 + 4
-        brands, reps, rets = {}, {}, {}
+        brands, reps, rets, pms = {}, {}, {}, set()
         for i in range(len(m)):
             if m.k[i] < since:
                 continue
@@ -673,6 +767,7 @@ def options(region: str, today: date) -> dict:
             r = _am(c, b, nm, m.r[i])
             if b in nm["brand"]:
                 brands[b] = brands.get(b, 0) + v
+                pms.add(nm["pm_b"].get(b) or NO_PM)
             if r in nm["rep"]:
                 reps[r] = reps.get(r, 0) + v
             g = nm["cust"].get(c, (None, None))[1]
@@ -681,6 +776,8 @@ def options(region: str, today: date) -> dict:
         return {"brands": [{"id": b, "name": nm["brand"][b]} for b in sorted(brands, key=lambda x: nm["brand"][x])],
                 "reps": [{"id": r, "name": nm["rep"][r]} for r in sorted(reps, key=lambda x: nm["rep"][x])],
                 "retailers": sorted(rets, key=lambda g: -rets[g]),
+                "pms": sorted(p_ for p_ in pms if p_ != NO_PM) + ([NO_PM] if NO_PM in pms else []),
+                "teams": sorted(pm_teams(today)),
                 "fys": list(range(2023, sales.fy_start(today).year + 2))}
     return warehouse.cached(("sx_opts", region, today), build, ttl=MONTHLY_TTL)
 

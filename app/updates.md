@@ -18,6 +18,10 @@ Add an entry with every commit people would notice. Everything above the first
 - Brand Profitability's PM filter now lists each senior PM's team, e.g. "Rachel Harris (team)": their own brands plus those of the PMs who report to them, with the team total. Picking one PM still shows just that PM's brands.
 - Teams follow the month: someone who joined a team in September counts in it from September on.
 
+## 2026-11-25 | Sales Explorer: product manager filter and rows | sales
+- Filter Sales Explorer by product manager, or by a senior PM's team (their own brands plus those of the PMs who report to them). Targets follow the filter.
+- "Product manager" is also a level in Build your table, e.g. Product manager › Brand. As with account managers, a brand's PM today applies to all its past sales, so last year compares like with like.
+
 ## 2026-11-25 | Month target dial on the home page | sales
 - This month's target is now a dial. The solid fill is sales so far, the faded fill is where the current pace lands, and the tick is the target. It shows amber when behind pace and green when on pace to beat it.
 - The dial runs to the next whole million above the target (or above sales, if they're higher), so going past target shows.
