@@ -78,8 +78,10 @@
 
 <section id="ams">
   <h2>Account managers</h2>
-  <p class="hint">A sale's manager: the row for its retailer <i>and brand</i>, else the row for the retailer (every
-    brand), else NetSuite's customer rep. The manager in force now applies to all history, so a manager sees their
+  <p class="hint">A sale's manager: the row for its retailer, brand <i>and item category</i>, else the row for its
+    retailer <i>and brand</i>, else the row for the retailer (every brand), else NetSuite's customer rep. Categories
+    are the item list's (e.g. EUFY Security / Appliances / Baby); targets are set by retailer × brand only, so a
+    category's share of the target is estimated from the last 12 months' sales mix. The manager in force now applies to all history, so a manager sees their
     whole portfolio (as before). Leave <b>Account manager</b> blank to end a row and go back to NetSuite's rep.
     {% if v.warehouse_error %}<br><b>Warehouse not reachable — NetSuite reps and the pick lists aren't shown.</b>{% endif %}</p>
 
@@ -87,6 +89,7 @@
     <label>Region<select name="region"><option>AU</option><option>NZ</option></select></label>
     <label>Retailer<input name="retailer" list="pf-retailers" required size="24"></label>
     <label>Brand (blank = every brand)<input name="brand" list="pf-brands" size="16"></label>
+    <label>Item category (blank = whole brand)<input name="category" list="pf-cats" size="14"></label>
     <label>Account manager<input name="am" list="pf-reps" size="20"></label>
     <label>From month<input type="month" name="valid_from" value="{{ this_month }}" required></label>
     <label>Note<input name="note" size="18"></label>
@@ -94,24 +97,25 @@
   </form>
   <datalist id="pf-retailers">{% for r in (v.retailers.AU + v.retailers.NZ) | unique %}<option value="{{ r }}">{% endfor %}</datalist>
   <datalist id="pf-brands">{% for b in v.brands %}<option value="{{ b }}">{% endfor %}</datalist>
+  <datalist id="pf-cats">{% for c in v.categories %}<option value="{{ c }}">{% endfor %}</datalist>
   <datalist id="pf-reps">{% for r in v.reps %}<option value="{{ r }}">{% endfor %}</datalist>
 
   {% set differs = v.am_rows | selectattr('differs') | list %}
   {% if differs %}<p class="banner error">⚠ {{ differs | length }} current row{{ 's differ' if differs | length > 1 else ' differs' }}
     from the rep on the NetSuite customer record (marked below). The rows here win; update NetSuite too if the customer record is wrong.</p>{% endif %}
   <table class="grid compact">
-    <thead><tr><th>Region</th><th>Retailer</th><th>Brand</th><th>Account manager</th><th>NetSuite customer rep</th><th>From</th><th>To</th><th>Note</th><th></th></tr></thead>
+    <thead><tr><th>Region</th><th>Retailer</th><th>Brand</th><th>Category</th><th>Account manager</th><th>NetSuite customer rep</th><th>From</th><th>To</th><th>Note</th><th></th></tr></thead>
     <tbody>
     {% for r in v.am_rows %}
       <tr class="{{ '' if r.current or r.valid_from > v.month else 'pf-ended' }}">
-        <td>{{ r.region }}</td><td>{{ r.retailer }}</td><td>{{ r.brand or 'every brand' }}</td>
+        <td>{{ r.region }}</td><td>{{ r.retailer }}</td><td>{{ r.brand or 'every brand' }}</td><td>{{ r.category or '—' }}</td>
         <td class="{{ 'pf-differs' if r.differs }}">{{ r.am }}{% if r.differs %} ⚠{% endif %}</td>
         <td>{{ r.netsuite or '—' }}</td>
         <td>{{ r.valid_from.strftime('%b %Y') }}</td><td>{{ r.valid_to.strftime('%b %Y') if r.valid_to else '—' }}</td>
         <td>{{ r.note }}</td>
         <td><form method="post" action="/admin/portfolios/am/{{ r.id }}/delete" onsubmit="return confirm('Delete this row?')"><button class="btn ghost small" type="submit">Delete</button></form></td>
       </tr>
-    {% else %}<tr><td colspan="9">None yet — every retailer follows NetSuite.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="10">None yet — every retailer follows NetSuite.</td></tr>{% endfor %}
     </tbody>
   </table>
 </section>

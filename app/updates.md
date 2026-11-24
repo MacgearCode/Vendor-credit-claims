@@ -13,6 +13,10 @@ Add an entry with every commit people would notice. Everything above the first
 - Brand Profitability's PM filter now lists each senior PM's team, e.g. "Rachel Harris (team)": their own brands plus those of the PMs who report to them, with the team total. Picking one PM still shows just that PM's brands.
 - Teams follow the month: someone who joined a team in September counts in it from September on.
 
+## 2026-11-24 | Account managers by product category | sales, admin
+- An account manager can now be set for one product category of a brand at a retailer. At The Good Guys AU, Eufy Security is Chris O'Donohue's and Eufy floorcare (Appliances) and Baby are Mike Bihary's.
+- Their sales split exactly by each product's category. Targets are set by retailer and brand only, so each manager's share of the Eufy target is estimated from the last 12 months' sales mix (about 65% Security, 35% floorcare and Baby today), and moves as the mix does.
+
 ## 2026-11-24 | Account managers by retailer and brand | sales, admin
 - Account managers can now be set by retailer, and by brand where a retailer is split, e.g. at JB Hi-Fi AU, Mova and Outin are Mike Bihary's and the other brands Chris O'Donohue's. Retailers not set keep the account manager on the NetSuite customer record.
 - The home page's account managers, Sales Explorer (rows, filter, targets) all follow it. As before, the current manager applies to the whole history, so each manager sees their full portfolio.

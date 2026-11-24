@@ -45,7 +45,8 @@ async def team_delete(request: Request, rid: int):
 async def am_assign(request: Request):
     f = dict(await request.form())
     who = f.get("am") or "NetSuite's rep"
-    msg = f"{f.get('retailer', '')} × {f.get('brand') or 'every brand'} → {who} from {f.get('valid_from', '')}."
+    cat = f" ({f['category']})" if f.get('category') else ''
+    msg = f"{f.get('retailer', '')} × {f.get('brand') or 'every brand'}{cat} → {who} from {f.get('valid_from', '')}."
     return _run(lambda c: portfolio.assign_am(c, f, _who(request)), msg, "ams")
 
 

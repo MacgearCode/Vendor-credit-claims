@@ -17,7 +17,11 @@ salesrep, dim_ns_customer.account_rep_id), applied to ALL history — so a manag
 numbers are their whole portfolio, including sales made before they took an account
 over (user, 2026-10-15). It is NOT the rep on each invoice. Since 2026-11-24 a manager
 set on the Portfolios page for the retailer (and brand) wins over NetSuite's
-(portfolio.py), so the manager is per customer x brand: _am(c, b, nm).
+(portfolio.py), so the manager is per customer x brand: _am(c, b, nm). A Portfolios row
+can name an item CATEGORY within a brand (AU The Good Guys EUFY: Security / Appliances /
+Baby): those customer x brand pairs' summary rows are split by category, the category id
+riding in the rep column (portfolio.split_rows), and _am(c, b, nm, r) resolves it. Their
+targets, set by retailer x brand only, are split by the last 12 months' category mix.
 
 Speed. Querying the warehouse per click took ~6 s, so each region's sales are held in
 memory as a compact summary and sliced in Python:
@@ -89,9 +93,12 @@ def names() -> dict:
             if cid in amap["cust"] and amap["cust"][cid] != rep.get(am):
                 cust[cid] = (nm, grp, rid(amap["cust"][cid]))
         am_cb = {k: rid(n) for k, n in amap["cb"].items()}
+        am_cbk = {k: rid(n) for k, n in amap.get("cbk", {}).items()}
         am_rb = {k: rid(n) for k, n in amap["rb"].items()}
+        am_rbk = {k: rid(n) for k, n in amap.get("rbk", {}).items()}
         am_ra = {k: rid(n) for k, n in amap["ra"].items()}
-        return {"cust": cust, "brand": brand, "rep": rep, "am_cb": am_cb, "am_rb": am_rb, "am_ra": am_ra}
+        return {"cust": cust, "brand": brand, "rep": rep, "am_cb": am_cb, "am_cbk": am_cbk,
+                "am_rb": am_rb, "am_rbk": am_rbk, "am_ra": am_ra}
     return warehouse.cached(("sx_names",), build, ttl=60 * 60)
 
 
@@ -131,7 +138,7 @@ def _monthly(region: str) -> Cube:
         from reporting.fact_sales_line s
         where s.region_key = %(rk)s and s.net_sales is not null
         group by 1, 2, 3 order by 1""", {"rk": rk})
-    return Cube(bp_np.adjust_cube_rows(region, rows, monthly=True))
+    return Cube(_split(region, bp_np.adjust_cube_rows(region, rows, monthly=True), "s.date_key / 100", "", {}))
 
 
 def daily_window(today: date) -> tuple[date, date, date, date]:
@@ -159,7 +166,26 @@ def _daily(region: str, today: date) -> Cube:
           and (s.date_key between %(lo)s and %(hi)s or s.date_key between %(llo)s and %(lhi)s)
         group by 1, 2, 3 order by 1""",
         {"rk": rk, "lo": _key(lo), "hi": _key(hi), "llo": _key(ly_lo), "lhi": _key(ly_hi)})
-    return Cube(bp_np.adjust_cube_rows(region, rows, monthly=False))
+    return Cube(_split(region, bp_np.adjust_cube_rows(region, rows, monthly=False), "s.date_key",
+                       "and (s.date_key between %(lo)s and %(hi)s or s.date_key between %(llo)s and %(lhi)s)",
+                       {"lo": _key(lo), "hi": _key(hi), "llo": _key(ly_lo), "lhi": _key(ly_hi)}))
+
+
+def _split(region: str, rows: list, kcol: str, extra_where: str, prm: dict) -> list:
+    """Split the rows of customer x brand pairs a Portfolios category row covers by item
+    category (portfolio.split_rows). Filtered on customer only (see _items_sql on brand)."""
+    pairs = portfolio.category_pairs(region)
+    if not pairs:
+        return rows
+    fine = warehouse.query(f"""
+        select {kcol}, s.customer_id, s.brand_id, i.category,
+               sum(s.net_sales), sum(s.net_sales_est_cost), sum(s.net_sales_qty)
+        from reporting.fact_sales_line s
+        left join reporting.dim_item i on i.item_key = s.item_key
+        where s.region_key = %(rk)s and s.net_sales is not null and s.customer_id = any(%(c)s) {extra_where}
+        group by 1, 2, 3, 4""", {"rk": warehouse.region_key(region), "c": sorted({c for c, _ in pairs}), **prm})
+    fine = [(k, c, b, portfolio.category_id(cat), v, x, q) for k, c, b, cat, v, x, q in fine if (c, b) in pairs]
+    return portfolio.split_rows(rows, pairs, fine)
 
 
 def cubes(region: str, today: date) -> tuple[Cube, Cube]:
@@ -293,17 +319,36 @@ def retailer_ams(region: str, today: date) -> dict:
     return warehouse.cached(("sx_ram", region, today), build, ttl=MONTHLY_TTL)
 
 
-def targets(region: str, a: date, b: date, dims: list, f: dict, nm: dict, ams: dict):
+def category_mix(region: str, today: date) -> dict:
+    """{(RETAILER, BRAND): {category_id: share}} over the last 12 months (this month
+    included) for the retailer x brands a Portfolios category row covers."""
+    def build():
+        nm = names()
+        if not nm.get("am_rbk"):
+            return {}
+        m, _ = cubes(region, today)
+        since = (today.year - 1) * 100 + today.month + 1
+        if today.month == 12:
+            since = today.year * 100 + 1
+        cr = {c: t[1] for c, t in nm["cust"].items()}
+        rows = [(m.c[i], m.b[i], m.r[i], m.v[i]) for i in range(bisect_left(m.k, since), len(m)) if m.r[i] >= 0]
+        return portfolio.category_mix(rows, cr, nm["brand"])
+    return warehouse.cached(("sx_mix", region, today), build, ttl=MONTHLY_TTL)
+
+
+def targets(region: str, a: date, b: date, dims: list, f: dict, nm: dict, ams: dict, mix: dict | None = None):
     """(total, {row key: target}) for [a, b], or None when no targets apply here. The
     row dict is None when the rows use a dimension targets aren't set by. ams =
-    retailer_ams()."""
+    retailer_ams(); mix = category_mix() — a retailer x brand with Portfolios category rows
+    has its target split between the categories' managers by it."""
     lines = target_lines().get(region)
     if not lines:
         return None
     brand = nm["brand"].get(f["brand"]) if f.get("brand") is not None else None
     by_row = {} if all(d in TARGET_DIMS for d in dims) else None
     total = 0.0
-    rb, ra = nm.get("am_rb") or {}, nm.get("am_ra") or {}
+    rb, ra, rbk = nm.get("am_rb") or {}, nm.get("am_ra") or {}, nm.get("am_rbk") or {}
+    mix = mix or {}
 
     def am_of(cust, bn):           # Portfolios retailer x brand, retailer, else NetSuite's
         rk = portfolio.norm_retailer(cust)
@@ -314,25 +359,39 @@ def targets(region: str, a: date, b: date, dims: list, f: dict, nm: dict, ams: d
     for ms, bn, cust, amt in lines:
         if (brand is not None and bn != brand) or (f.get("retailer") and cust != f["retailer"]):
             continue
-        am = am_of(cust, bn)
-        if f.get("rep") is not None and am != f["rep"]:
-            continue
         fr = _target_frac(ms, a, b)
         if not fr:
             continue
-        total += amt * fr
-        if by_row is not None:
-            key = tuple({"retailer": cust, "brand": bn, "month": f"{ms.year}-{ms.month:02d}",
-                         "rep": nm["rep"].get(am) or "(no account manager)"}[d]
-                        for d in dims)
-            by_row[key] = by_row.get(key, 0.0) + amt * fr
+        base = am_of(cust, bn)
+        parts = [(base, 1.0)]
+        if rbk:
+            rk, bk = portfolio.norm_retailer(cust), portfolio.calc.norm_brand(bn)
+            sh = mix.get((rk, bk))
+            if sh and any((region, rk, bk, k) in rbk for k in sh):
+                parts = [(rbk.get((region, rk, bk, k), base), v) for k, v in sh.items()]
+        for am, share in parts:
+            if f.get("rep") is not None and am != f["rep"]:
+                continue
+            t = amt * fr * share
+            total += t
+            if by_row is not None:
+                key = tuple({"retailer": cust, "brand": bn, "month": f"{ms.year}-{ms.month:02d}",
+                             "rep": nm["rep"].get(am) or "(no account manager)"}[d]
+                            for d in dims)
+                by_row[key] = by_row.get(key, 0.0) + t
     return total, by_row
 
 
 # ---- slicing ------------------------------------------------------------------------
-def _am(c: int, b: int, nm: dict):
-    """The current account manager id for a customer's sales of a brand: a Portfolios brand
-    row, else the customer's (Portfolios retailer row or NetSuite). None if neither has one."""
+def _am(c: int, b: int, nm: dict, r: int = -1):
+    """The current account manager id for a customer's sales of a brand (r = item category id,
+    -1 none): a Portfolios category row, brand row, else the customer's (Portfolios retailer
+    row or NetSuite). None if none has one."""
+    if r is not None and r >= 0:
+        k = nm.get("am_cbk")
+        a = k.get((c, b, r)) if k else None
+        if a is not None:
+            return a
     cb = nm.get("am_cb")
     a = cb.get((c, b)) if cb else None
     if a is not None:
@@ -344,7 +403,7 @@ def _am(c: int, b: int, nm: dict):
 def _filter_ok(f: dict, c: int, b: int, r: int, nm: dict) -> bool:
     if f.get("brand") is not None and b != f["brand"]:
         return False
-    if f.get("rep") is not None and _am(c, b, nm) != f["rep"]:
+    if f.get("rep") is not None and _am(c, b, nm, r) != f["rep"]:
         return False
     if f.get("retailer"):
         if nm["cust"].get(c, ("", ""))[1] != f["retailer"]:
@@ -360,7 +419,7 @@ def _label(dim: str, c: int, b: int, r: int, k: int, nm: dict) -> str:
     if dim == "brand":
         return nm["brand"].get(b) or "(no brand)"
     if dim == "rep":
-        return nm["rep"].get(_am(c, b, nm)) or "(no account manager)"
+        return nm["rep"].get(_am(c, b, nm, r)) or "(no account manager)"
     if dim == "month":
         ym = k if k < 1000000 else k // 100
         return f"{ym // 100}-{ym % 100:02d}"
@@ -399,7 +458,8 @@ def _items_sql(region: str, p: dict, dims: list, f: dict, nm: dict) -> dict:
     if f.get("rep") is not None or f.get("retailer"):
         # a customer can have the manager through one brand only (Portfolios brand rows),
         # so the SQL keeps every customer that might, and the rows are checked below
-        via_brand = {c for (c, _), a in (nm.get("am_cb") or {}).items() if a == f.get("rep")}
+        via_brand = ({c for (c, _), a in (nm.get("am_cb") or {}).items() if a == f.get("rep")}
+                     | {c for (c, _, _), a in (nm.get("am_cbk") or {}).items() if a == f.get("rep")})
         ids = [cid for cid, t in nm["cust"].items()
                if (f.get("rep") is None or t[2] == f["rep"] or cid in via_brand)
                and (not f.get("retailer") or t[1] == f["retailer"])]
@@ -429,15 +489,16 @@ def _items_sql(region: str, p: dict, dims: list, f: dict, nm: dict) -> dict:
     items = dict(((k, (c, d)) for k, c, d in warehouse.query(
         "select item_key, macgear_code, description from reporting.dim_item where item_key = any(%(k)s)",
         {"k": list(keys)}))) if keys else {}
+    icat = portfolio.item_categories() if nm.get("am_cbk") else {}
     acc: dict = {}
     for ik, ym, c, b, r, is_cur, v, x, q in rows:
         c = -1 if c is None else c
         b = -1 if b is None else b
-        r = -1 if r is None else r
+        r = icat.get(ik, -1)                      # item category, for Portfolios category rows
         dx, dn = ded[bool(is_cur)].get((-1 if ik is None else ik, ym, c, b), (0.0, 0.0))
         if f.get("brand") is not None and b != f["brand"]:
             continue
-        if f.get("rep") is not None and _am(c, b, nm) != f["rep"]:
+        if f.get("rep") is not None and _am(c, b, nm, r) != f["rep"]:
             continue
         lab = []
         for dm in dims:
@@ -507,8 +568,9 @@ def explore(region: str, code: str, fy: int, today: date, dims: list, f: dict,
             out["rows"].append(row)
     # targets: to date for the dates shown, and for the whole period
     ams = retailer_ams(region, today)
-    tg = targets(region, p["a"], p["b"], dims, f, nm, ams)
-    full = targets(region, p["a"], p["end"], [], f, nm, ams)
+    mix = category_mix(region, today)
+    tg = targets(region, p["a"], p["b"], dims, f, nm, ams, mix)
+    full = targets(region, p["a"], p["end"], [], f, nm, ams, mix)
     out["targets"] = {"has": tg is not None or full is not None,
                       "rows": bool(tg and tg[1] is not None),
                       "full": round(full[0]) if full else None}
@@ -582,14 +644,14 @@ def trend(region, fy, today, f, nm, m, d) -> dict:
         if f and not _filter_ok(f, m.c[i], m.b[i], m.r[i], nm):
             continue
         by[k[i]] = by.get(k[i], 0.0) + m.v[i]
-    ams = retailer_ams(region, today)
+    ams, mix = retailer_ams(region, today), category_mix(region, today)
     cur, prev, tgt = [], [], []
     for i in range(12):
         mo = (i + 3) % 12 + 1
         y = fy - 1 + (1 if mo < 4 else 0)
         cur.append(None if date(y, mo, 1) > today else round(by.get(y * 100 + mo, 0.0)))
         prev.append(round(by.get((y - 1) * 100 + mo, 0.0)))
-        t = targets(region, date(y, mo, 1), _month_end(y, mo), [], f, nm, ams)
+        t = targets(region, date(y, mo, 1), _month_end(y, mo), [], f, nm, ams, mix)
         tgt.append(round(t[0]) if t and t[0] else None)
     return {"labels": list(FY_MONTHS), "cur": cur, "prev": prev,
             "target": tgt if any(tgt) else None,
@@ -608,7 +670,7 @@ def options(region: str, today: date) -> dict:
                 continue
             v = m.v[i]
             b, c = m.b[i], m.c[i]
-            r = _am(c, b, nm)
+            r = _am(c, b, nm, m.r[i])
             if b in nm["brand"]:
                 brands[b] = brands.get(b, 0) + v
             if r in nm["rep"]:

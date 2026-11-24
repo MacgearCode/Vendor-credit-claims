@@ -149,14 +149,18 @@ def tops(start: date, end: date) -> dict:
         lab["customers"][cid] = grp
     lab["brands"] = dict(warehouse.query("select brand_id, brand from reporting.dim_brand"))
     amap = portfolio.am_map()
+    # Portfolios category rows (AU The Good Guys EUFY by item category): those customer x
+    # brand pairs are re-read from the line facts by category below
+    pairs = {(c, b) for r in REGIONS for (c, b) in portfolio.category_pairs(r)}
+    icat = portfolio.item_categories() if pairs else {}
 
-    def am_name(c, b):
-        return portfolio.am_of(amap, c, b) or "No account manager"
+    def am_name(c, b, cat=-1):
+        return portfolio.am_of(amap, c, b, cat) or "No account manager"
     ded = {}
     for r in REGIONS:
         ded[r] = {
             "customers": bp_np.deductions(r, p["lo"], p["hi"], lambda k, c, b, i: lab["customers"].get(c, "Other")),
-            "reps": bp_np.deductions(r, p["lo"], p["hi"], lambda k, c, b, i: am_name(c, b)),
+            "reps": bp_np.deductions(r, p["lo"], p["hi"], lambda k, c, b, i: am_name(c, b, icat.get(i, -1))),
             "brands": bp_np.deductions(r, p["lo"], p["hi"], lambda k, c, b, i: lab["brands"].get(b) or "Other"),
             "items": bp_np.deductions(r, p["lo"], p["hi"], lambda k, c, b, i: i)}
     out = {r: {} for r in REGIONS}
@@ -175,9 +179,22 @@ def tops(start: date, end: date) -> dict:
             cur.execute(sql, p)
             fetched = cur.fetchall()
             if name == "reps":                 # customer x brand -> manager, summed
+                if pairs:
+                    cur.execute("""select s.region_key, s.customer_id, s.brand_id, i.category,
+                               sum(s.net_sales), sum(s.net_sales_est_cost)
+                        from reporting.fact_sales_line s
+                        left join reporting.dim_item i on i.item_key = s.item_key
+                        where s.date_key between %(lo)s and %(hi)s and s.net_sales is not null
+                          and s.customer_id = any(%(c)s)
+                        group by 1, 2, 3, 4""", {**p, "c": sorted({c for c, _ in pairs})})
+                    fine = [(rkey, c, b, portfolio.category_id(k), v, x) for rkey, c, b, k, v, x in cur.fetchall()
+                            if (c, b) in pairs]
+                    fetched = [(rkey, c, b, -1, v, x) for rkey, c, b, v, x in fetched if (c, b) not in pairs] + fine
+                else:
+                    fetched = [(rkey, c, b, -1, v, x) for rkey, c, b, v, x in fetched]
                 agg: dict = {}
-                for rkey, c, b, v, x in fetched:
-                    cell = agg.setdefault((rkey, am_name(c, b)), [0.0, 0.0])
+                for rkey, c, b, k, v, x in fetched:
+                    cell = agg.setdefault((rkey, am_name(c, b, k)), [0.0, 0.0])
                     cell[0] += float(v or 0); cell[1] += float(x or 0)
                 fetched = [(rkey, n, v, x) for (rkey, n), (v, x) in agg.items()]
             per = {r: [] for r in REGIONS}
@@ -209,7 +226,7 @@ def data_version():
 
 # Everything built from NetSuite sales or stock: rebuilt as soon as a new load lands.
 SALES_CACHE_PREFIXES = ("sales_daily", "sales_tops", "sales_fresh", "sales_ic",
-                        "sx_day", "sx_month", "sx_items", "sx_opts", "sx_ram", "item", "st_weekly",
+                        "sx_day", "sx_month", "sx_mix", "sx_items", "sx_opts", "sx_ram", "item", "st_weekly",
                         "targets_actuals", "targets_years", "bp_lines")
 
 

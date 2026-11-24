@@ -42,7 +42,7 @@ warehouse host in the droplet `.env` broke the warm-up — compare the host, not
 | `/reports/brand-profit` | Brand Profitability — NP by PM / brand after rebates, freight, vendor rebates, MDF (LOCAL only) | staff with the area + Margin |
 | `/brand-profit/settings` | Brand Profitability settings — rates by month, PMs, freight / VR uploads, change log (LOCAL only) | staff with the area |
 | `/admin/users` | User management | admins |
-| `/admin/portfolios` | Portfolios — PM teams (senior PM ← PMs) and account managers by retailer × brand, overriding NetSuite's rep (LOCAL only so far) | admins |
+| `/admin/portfolios` | Portfolios — PM teams (senior PM ← PMs) and account managers by retailer × brand, overriding NetSuite's rep (LIVE 2026-11-24, commit 5c3cd08; seeded on the cluster) | admins |
 
 **Adding a report or tool** takes three edits: a tile in `REPORTS` or `TOOLS`
 (`app/main.py`), its key in `perms.REPORT_KEYS` / `TOOL_KEYS` + `AREA_LABELS`
@@ -234,8 +234,15 @@ area AND `sell_in_value` (route-checked; not listed in menus without it); never 
   history. Everything resolves through `portfolio.am_map()` (Sales Explorer `names()` → `_am(c, b, nm)`,
   home `tops`, Sales Explorer targets per retailer × brand). Seeded from the user's `AM PM Assignment.xlsx`
   (`python -m app.portfolio <xlsx>`: AU key accounts; JB HIFI / TGG split by brand; Harvey Norman + Costco
-  AU → Samantha Musson though NetSuite says Jeremy Sedley). TGG's "Eufy Security / Floorcare / Baby" split
-  was NOT loaded — NetSuite has only EUFY (needs an item-category rule if wanted). PM teams (user
+  AU → Samantha Musson though NetSuite says Jeremy Sedley). A row can also name an ITEM CATEGORY
+  (`am_assignment.category`, `dim_item.category`) within the brand — AU The Good Guys EUFY: Security →
+  Chris O'Donohue, Appliances (= the sheet's "Floorcare") + Baby → Mike Bihary (user, 2026-11-24). Those
+  customer × brand pairs' Sales Explorer summary rows are split by category from the line facts
+  (`portfolio.split_rows`; the category id rides in the cube's rep column, deductions/rebates shared by
+  revenue), home `tops` re-reads them by category. Targets are set by retailer × brand only, so such a
+  target is split by the last 12 months' category sales mix (`sales_explorer.category_mix`, moves with
+  sales — user's choice over freezing it). Verified locally 2026-11-24: TGG EUFY FY27 YTD Chris 2,322,081 /
+  Mike 1,247,623 = the warehouse by category; AU total unchanged (106,612,537). PM teams (user
   2026-11-24): David ← Prasanna (Oct 2026), Rachel ← Jeffrey, Mia (assumed Apr 2026), Dale ← Charles,
   Carlo (Sep 2026); Brand Profitability's PM filter has "<senior> (team)" = brands whose PM that month
   is the senior or reports to them (`data.report(pm="team:…")`). Reassigning ends the old row the month

@@ -87,8 +87,59 @@ def test_workbook_seed_rows():
     assert key[("Harvey Norman", "")] == "Samantha Musson"
     assert key[("Big W", "")] == key[("Duke Living Pty Ltd", "")] == "Deborah Clucas"
     assert ("The Good Guys", "WITHINGS") in key
-    assert len([s for s in skipped if "EUFY" in s.upper()]) == 3          # Security / Floorcare / Baby
+    cats = {r["category"]: r["am"] for r in rows if r["retailer"] == "The Good Guys" and r["brand"] == "EUFY"}
+    assert cats == {"Security": "Chris O'Donohue", "Appliances": "Mike Bihary", "Baby": "Mike Bihary"}
+    assert not skipped
     assert all(r["region"] == "AU" for r in rows)
+
+
+SEC, APP, BABY = (portfolio.category_id(c) for c in ("Security", "Appliances", "Baby"))
+
+
+def test_category_row_wins_for_its_items_only():
+    rows = [{"region": "AU", "retailer": "The Good Guys", "brand": "EUFY", "category": "Appliances",
+             "am": "Mike Bihary", "valid_from": D(2026, 4, 1), "valid_to": None}]
+    ov = portfolio.am_overrides("AU", D(2026, 11, 24), rows)
+    assert portfolio.resolve(ov, "The Good Guys", "Eufy", "Chris O'Donohue", "appliances") == "Mike Bihary"
+    assert portfolio.resolve(ov, "The Good Guys", "Eufy", "Chris O'Donohue", "Security") == "Chris O'Donohue"
+    assert portfolio.resolve(ov, "The Good Guys", "Eufy", "Chris O'Donohue") == "Chris O'Donohue"
+    assert portfolio.category_id("Baby") == portfolio.category_id(" baby ") >= 0
+    assert portfolio.category_id(None) == -1
+
+
+def test_split_rows_by_category_keeps_the_totals():
+    # (k, customer, brand, rep, revenue, cost incl. deductions, qty, rebates)
+    rows = [(202610, 1, 9, None, 100.0, 70.0, 5.0, 4.0), (202610, 2, 9, None, 50.0, 30.0, 1.0, 0.0)]
+    fine = [(202610, 1, 9, SEC, 60.0, 30.0, 3.0), (202610, 1, 9, APP, 40.0, 20.0, 2.0)]
+    out = portfolio.split_rows(rows, {(1, 9)}, fine)
+    assert len(out) == 3 and any(r[1] == 2 and r[3] is None for r in out)          # other pairs untouched
+    sec = next(r for r in out if r[3] == SEC)
+    app_ = next(r for r in out if r[3] == APP)
+    assert sec[4] == 60 and app_[4] == 40
+    assert sec[5] == 30 + 20 * 0.6 and app_[5] == 20 + 20 * 0.4           # deductions by revenue share
+    assert abs(sec[7] + app_[7] - 4.0) < 1e-9
+    assert abs(sum(r[4] for r in out) - 150) < 1e-9 and abs(sum(r[5] for r in out) - 100) < 1e-9
+
+
+def test_category_managers_in_sales_explorer_and_targets(monkeypatch):
+    nm = {"cust": {1: ("TGG Store", "The Good Guys", 10)}, "brand": {9: "EUFY"},
+          "am_cbk": {(1, 9, APP): 20, (1, 9, BABY): 20}, "rep": {10: "Chris", 20: "Mike"},
+          "am_rbk": {("AU", "THE GOOD GUYS", "EUFY", APP): 20, ("AU", "THE GOOD GUYS", "EUFY", BABY): 20}}
+    assert sales_explorer._am(1, 9, nm, APP) == 20 and sales_explorer._am(1, 9, nm, SEC) == 10
+    assert sales_explorer._am(1, 9, nm) == 10
+    assert sales_explorer._label("rep", 1, 9, BABY, 202610, nm) == "Mike"
+    monkeypatch.setattr(sales_explorer, "target_lines", lambda: {"AU": [
+        (D(2026, 10, 1), "EUFY", "The Good Guys", 1000.0), (D(2026, 10, 1), "ANKER", "The Good Guys", 10.0)]})
+    mix = portfolio.category_mix([(1, 9, SEC, 65.0), (1, 9, APP, 31.0), (1, 9, BABY, 4.0)],
+                                 {1: "The Good Guys"}, {9: "EUFY"})
+    ams = {"The Good Guys": 10}
+    tot, rows = sales_explorer.targets("AU", D(2026, 10, 1), D(2026, 10, 31), ["rep"], {}, nm, ams, mix)
+    assert round(tot, 6) == 1010
+    assert round(rows[("Chris",)], 6) == 660 and round(rows[("Mike",)], 6) == 350
+    tot, _ = sales_explorer.targets("AU", D(2026, 10, 1), D(2026, 10, 31), [], {"rep": 20}, nm, ams, mix)
+    assert round(tot, 6) == 350
+    tot, rows = sales_explorer.targets("AU", D(2026, 10, 1), D(2026, 10, 31), ["rep"], {}, nm, ams, {})
+    assert rows == {("Chris",): 1010.0}                    # no sales mix yet: the brand's manager
 
 
 # ---- database --------------------------------------------------------------------------------
@@ -138,6 +189,14 @@ def test_account_manager_rows_reassign_and_same_month_replaces(conn):
     assert len(rows) == 1 and rows[0]["valid_to"] == D(2026, 10, 1)
     with pytest.raises(Invalid):
         portfolio.assign_am(conn, {**f, "region": "UK"}, "a@x")
+    with pytest.raises(Invalid, match="needs a brand"):
+        portfolio.assign_am(conn, {**f, "brand": "", "category": "Baby"}, "a@x")
+    # a category row sits beside the brand row, not instead of it
+    portfolio.assign_am(conn, {**f, "brand": "EUFY", "category": "Baby", "am": "Mike Bihary"}, "a@x")
+    portfolio.assign_am(conn, {**f, "brand": "EUFY", "am": "Chris O'Donohue"}, "a@x")
+    eufy = conn.execute("SELECT category, am FROM am_assignment WHERE brand = 'EUFY' ORDER BY category").fetchall()
+    assert [(r["category"], r["am"]) for r in eufy] == [("", "Chris O'Donohue"), ("Baby", "Mike Bihary")]
+    conn.execute("DELETE FROM am_assignment WHERE brand = 'EUFY'")
     portfolio.delete_row(conn, "am_assignment", rows[0]["id"], "a@x")
     assert not conn.execute("SELECT * FROM am_assignment").fetchall()
 

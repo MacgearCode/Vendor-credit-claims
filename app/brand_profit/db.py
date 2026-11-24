@@ -131,6 +131,9 @@ CREATE TABLE IF NOT EXISTS am_assignment (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (valid_to IS NULL OR valid_to >= valid_from)
 );
+-- 2026-11-24: an item category (dim_item.category, e.g. EUFY Security / Appliances / Baby)
+-- within a retailer x brand; '' = the whole brand
+ALTER TABLE am_assignment ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS gl_account (
     region      TEXT    NOT NULL CHECK (region IN ('AU', 'NZ')),
