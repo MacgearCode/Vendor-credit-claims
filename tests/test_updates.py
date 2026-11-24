@@ -38,6 +38,23 @@ def test_parse_reads_headings_points_and_areas_newest_first():
     assert e[0]["points"] == ["one", "two"] and e[0]["text"] == ["Some words."]
 
 
+def test_feature_entries_are_marked():
+    e = updates.parse("## 2026-11-25 | Big new report | | feature\n- x\n## 2026-11-25 | Small tweak | sales\n- y\n"
+                      "## 2026-11-24 | Sales report | sales | Feature\n- z\n")
+    assert [(x["title"], x["feature"], x["areas"]) for x in e] == [
+        ("Big new report", True, []), ("Small tweak", False, ["sales"]), ("Sales report", True, ["sales"])]
+
+
+def test_bold_and_escaping():
+    e = updates.parse("## 2026-11-25 | T\n- use **Portfolios** <now>\n")
+    assert str(e[0]["points"][0]) == "use <b>Portfolios</b> &lt;now&gt;"
+
+
+def test_the_shipped_log_has_features_and_notes():
+    e = updates.load()
+    assert any(x["feature"] for x in e) and any(not x["feature"] for x in e)
+
+
 def test_visible_by_area():
     e = updates.parse(LOG)
     assert [x["title"] for x in updates.visible(e, set())] == ["For everyone"]

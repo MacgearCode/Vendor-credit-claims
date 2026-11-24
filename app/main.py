@@ -571,13 +571,18 @@ def my_updates(request: Request) -> list[dict]:
 
 
 def updates_latest(request: Request) -> str:
-    u = my_updates(request)
+    """The newest What's new FEATURE this user may see: the side menu's dot lights for those
+    only, not for release notes."""
+    u = [e for e in my_updates(request) if e.get("feature")]
     return u[0]["date"].isoformat() if u else ""
 
 
 @app.get("/updates", response_class=HTMLResponse)
 def updates_page(request: Request):
-    return templates.TemplateResponse(request, "updates.html", {"entries": my_updates(request)})
+    entries = my_updates(request)
+    return templates.TemplateResponse(request, "updates.html", {
+        "features": [e for e in entries if e.get("feature")],
+        "notes": [e for e in entries if not e.get("feature")]})
 
 
 templates.env.globals["updates_latest"] = updates_latest

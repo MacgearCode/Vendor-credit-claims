@@ -1,12 +1,18 @@
 {% extends "_rpt_base.html" %}
 {# What's new — the update log from app/updates.md (app/updates.py), filtered to
-   what this user can see. "New" marks entries since this browser last opened it. #}
+   what this user can see. Two columns (user, 2026-11-25): What's new = entries marked
+   "feature" (new report / tool pages, major capabilities); Release notes = everything
+   else, as a compact list. "New" marks features since this browser last opened it. #}
 {% block title %}What's new · Macgear Reporting{% endblock %}
 {% block pagename %}What's new{% endblock %}
 {% block head %}
 <style>
-  .up-wrap{max-width:860px}
-  .up-day{margin:26px 0 10px;font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--r-muted)}
+  .up-wrap{max-width:1240px}
+  .up-cols{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:28px;align-items:start;margin-top:8px}
+  @media (max-width:900px){ .up-cols{grid-template-columns:minmax(0,1fr)} }
+  .up-h{margin:22px 0 4px;font-size:18px;letter-spacing:-.01em}
+  .up-sub{margin:0 0 4px;font-size:13px;color:var(--r-muted)}
+  .up-day{margin:22px 0 10px;font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--r-muted)}
   .up-card{background:var(--r-card);border:1px solid var(--r-line);border-radius:14px;padding:16px 18px;margin-bottom:10px}
   .up-card h2{margin:0;font-size:16.5px;letter-spacing:-.01em;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
   .up-card ul{margin:8px 0 0;padding-left:20px;color:var(--r-ink-2);font-size:14px;line-height:1.55}
@@ -14,29 +20,59 @@
   .up-new{font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:2px 8px;border-radius:999px;
     background:var(--r-accent-soft);color:var(--r-accent)}
   .up-new[hidden]{display:none}
+  .up-notes{background:var(--r-card);border:1px solid var(--r-line);border-radius:14px;padding:4px 16px;margin-top:14px}
+  .up-note{padding:11px 0;border-bottom:1px solid var(--r-line)}
+  .up-note:last-child{border-bottom:0}
+  .up-note .d{font-size:11.5px;font-weight:700;color:var(--r-muted);letter-spacing:.02em}
+  .up-note h3{margin:2px 0 0;font-size:14px;font-weight:700}
+  .up-note ul{margin:4px 0 0;padding-left:18px;color:var(--r-ink-2);font-size:13px;line-height:1.5}
+  .up-note p{margin:4px 0 0;color:var(--r-ink-2);font-size:13px}
 </style>
 {% endblock %}
 {% block content %}
 <div class="up-wrap">
   <p class="r-eyebrow">Macgear Reporting · beta</p>
   <h1 style="margin:0">What's new</h1>
-  <p class="r-muted" style="margin:6px 0 0">Changes to the site, newest first. Spotted something wrong, or want something added? Tell the Macgear team.</p>
-  {% set ns = namespace(day=None) %}
-  {% for e in entries %}
-    {% if e.date != ns.day %}{% set ns.day = e.date %}<p class="up-day">{{ e.date.day }} {{ e.date.strftime('%B %Y') }}</p>{% endif %}
-    <article class="up-card" data-date="{{ e.date.isoformat() }}">
-      <h2>{{ e.title }} <span class="up-new" hidden>New</span></h2>
-      {% for t in e.text %}<p>{{ t }}</p>{% endfor %}
-      {% if e.points %}<ul>{% for p in e.points %}<li>{{ p }}</li>{% endfor %}</ul>{% endif %}
-    </article>
-  {% else %}
-    <p class="r-muted" style="margin-top:20px">No updates yet.</p>
-  {% endfor %}
+  <p class="r-muted" style="margin:6px 0 0">New reports, tools and major changes on the left; smaller changes and fixes in the release notes. Spotted something wrong, or want something added? Tell the Macgear team.</p>
+  <div class="up-cols">
+    <section>
+      <h2 class="up-h">New features</h2>
+      {% set ns = namespace(day=None) %}
+      {% for e in features %}
+        {% if e.date != ns.day %}{% set ns.day = e.date %}<p class="up-day">{{ e.date.day }} {{ e.date.strftime('%B %Y') }}</p>{% endif %}
+        <article class="up-card" data-date="{{ e.date.isoformat() }}">
+          <h2>{{ e.title }} <span class="up-new" hidden>New</span></h2>
+          {% for t in e.text %}<p>{{ t }}</p>{% endfor %}
+          {% if e.points %}<ul>{% for p in e.points %}<li>{{ p }}</li>{% endfor %}</ul>{% endif %}
+        </article>
+      {% else %}
+        <p class="r-muted" style="margin-top:20px">No updates yet.</p>
+      {% endfor %}
+    </section>
+    <section>
+      <h2 class="up-h">Release notes</h2>
+      <p class="up-sub">Smaller changes, tweaks and fixes.</p>
+      {% if notes %}
+      <div class="up-notes">
+        {% for e in notes %}
+        <div class="up-note">
+          <div class="d">{{ e.date.day }} {{ e.date.strftime('%b %Y') }}</div>
+          <h3>{{ e.title }}</h3>
+          {% for t in e.text %}<p>{{ t }}</p>{% endfor %}
+          {% if e.points %}<ul>{% for p in e.points %}<li>{{ p }}</li>{% endfor %}</ul>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+        <p class="r-muted" style="margin-top:14px">None yet.</p>
+      {% endif %}
+    </section>
+  </div>
 </div>
 {% endblock %}
 {% block scripts %}
 <script>
-  // mark what's new since this browser last looked, then remember the newest entry
+  // mark features new since this browser last looked, then remember the newest one
   (function(){
     var seen=''; try{ seen=localStorage.getItem('updates_seen')||''; }catch(e){}
     var newest='';

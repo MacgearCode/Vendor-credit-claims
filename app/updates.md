@@ -1,7 +1,12 @@
 How to add an update (shown at /updates, newest first):
 
-    ## YYYY-MM-DD | Short title | area keys (optional)
+    ## YYYY-MM-DD | Short title | area keys (optional) | feature (optional)
     - one line per change, in plain words for the people using the site
+
+"feature" puts an entry under What's new: a new report or tool page, or a major new
+capability. Everything else (cosmetic changes, tweaks, fixes) goes under Release
+notes. Leave the area keys empty when a feature is for everyone:
+    ## YYYY-MM-DD | Short title | | feature
 
 Area keys limit who sees an entry: the report/tool keys in perms.py (sales,
 st_weekly, field, ageing, items, st_table, sell_through, promos, vendor_bills) or
@@ -21,7 +26,7 @@ Add an entry with every commit people would notice. Everything above the first
 - An account manager can now be set for one product category of a brand at a retailer. At The Good Guys AU, Eufy Security is Chris O'Donohue's and Eufy floorcare (Appliances) and Baby are Mike Bihary's.
 - Their sales split exactly by each product's category. Targets are set by retailer and brand only, so each manager's share of the Eufy target is estimated from the last 12 months' sales mix (about 65% Security, 35% floorcare and Baby today), and moves as the mix does.
 
-## 2026-11-24 | Account managers by retailer and brand | sales, admin
+## 2026-11-24 | Account managers by retailer and brand | sales, admin | feature
 - Account managers can now be set by retailer, and by brand where a retailer is split, e.g. at JB Hi-Fi AU, Mova and Outin are Mike Bihary's and the other brands Chris O'Donohue's. Retailers not set keep the account manager on the NetSuite customer record.
 - The home page's account managers, Sales Explorer (rows, filter, targets) all follow it. As before, the current manager applies to the whole history, so each manager sees their full portfolio.
 - Admins set PM teams and account managers on the new **Portfolios** page (side menu, Admin). Rows that differ from NetSuite are marked so the customer record can be fixed too.
@@ -37,35 +42,35 @@ Add an entry with every commit people would notice. Everything above the first
 - **Download all settings (Excel)** on the settings page, for audit: every rate with the months it covers and whether it's in force now, PMs, GL accounts, manual adjustments, attached documents and the full change log. The change log tab also downloads on its own.
 - Attach a supporting PDF (e.g. the customer contract, up to 10 MB) when you enter a **New rate from**, add a rate, or to any existing row with **Attach PDF**. It's listed on the row, opens from there, and is never deleted.
 
-## 2026-11-20 | GL Accounts for PMs | gl_mova, gl_anker
+## 2026-11-20 | GL Accounts for PMs | gl_mova, gl_anker | feature
 - New reports: every NetSuite transaction on the balance-sheet accounts PMs look after, so you can check them during the month instead of waiting for finance at month end. One for Mova (recoverables, MDF accruals) and one for Anker / Eufy / Soundcore (recoverables, rebate and returns claims, CMF accruals by retailer, the EUFY MDF buffer).
 - Each account shows its opening balance, the movement in the months you pick and its closing balance (which matches NetSuite), and lists every transaction with its date, type, document, name, memo, brand and a running balance.
 - Pick any months (This month, Financial year to date or All history are one click), switch Australia / New Zealand, download to Excel. Refreshed from NetSuite about every 30 minutes.
 
-## 2026-11-19 | User activity log | admin
+## 2026-11-19 | User activity log | admin | feature
 - Users list: last sign-in (how long ago, with the date, time and number of sign-ins), last active, and a red flag when someone has failed to sign in since their last success.
 - Each user's page has an Activity card: last sign-in and IP, days used in the last 30, which reports they open, and their sign-in and account history.
 - New Activity log (Admin menu): sign-ins, failed sign-ins (and from which address), password resets, invites, and every change an admin makes to an account with what changed; which reports are used and by how many people; accounts never signed in or idle 30+ days.
 
-## 2026-11-19 | Open Orders | open_orders
+## 2026-11-19 | Open Orders | open_orders | feature
 - New report: everything customers have ordered that the warehouse hasn't shipped yet, refreshed from NetSuite about every 30 minutes — open value, picking lines, units, and how long orders have been waiting.
 - Top 10 charts for open value and for picking lines, by retailer, account or brand. Every order and product is listed below (oldest first, click an order to see its lines); download it all as CSV.
 - Every open order is split into **ready to ship now** (stock committed to it — it can be picked and invoiced today) and **back-ordered** (waiting on stock). The Top 10 bars show both (solid = ready, faded = back-ordered), and "Rank Top 10 by: Ready to ship now" puts first the customers the warehouse can actually ship.
 - Holding Orders (forward orders held for retailers), intercompany orders to NZ and samples are kept out of the figures unless you tick them in.
 - The home page has an Open orders card per country, and each item in the Item Explorer shows its open orders.
 
-## 2026-11-18 | Targets is live | targets
+## 2026-11-18 | Targets is live | targets | feature
 - Tools → Targets now works on the live site: build next year's sales targets from NetSuite actuals with growth %, monthly pacing and new lines, then Commit the final set as the official targets for that financial year.
 - Once a set is committed, the home page tiles and Sales Explorer show progress against it.
 - Scenarios made while it was being tested on a laptop weren't carried over, so the list starts empty.
 
-## 2026-11-17 | Brand Profitability report | brand_profit, brand_profit_settings
+## 2026-11-17 | Brand Profitability report | brand_profit, brand_profit_settings | feature
 - New report: net profit by PM and brand, after customer rebates, freight, vendor rebates and MDF — the CYA workbook's method, for AU and NZ, any month, quarter or year to date of the financial year. Open a brand to see its customers and the freight / vendor-rebate lines behind it; download to Excel.
 - Filter by PM; collapse to PMs, brands or customers. A PM's GP target is now their brands' targets weighted by sales, with the gap in dollars.
 - Freight and vendor rebates are coloured by their effect on profit: red reduces it, green (a vendor credit) adds to it.
 - Settings (for those who manage them): customer rebates by month, brand, item-category and SKU exceptions, store extras, MDF, GP targets, the PM for each brand (per region), and freight / vendor-rebate uploads. Every change is logged.
 
-## 2026-11-17 | Net profit instead of estimated GP | sales
+## 2026-11-17 | Net profit instead of estimated GP | sales | feature
 - Where the site showed estimated GP (home page, Sales Explorer, Item Explorer) it now shows net profit: revenue less cost, customer rebates, MDF, and each brand's freight and vendor rebates shared by sales — the same figures as the Brand Profitability report.
 - Net profit % is shown on gross sales and on net sales (after customer rebates). A month whose freight and vendor rebates aren't loaded yet is marked *.
 
@@ -98,7 +103,7 @@ Add an entry with every commit people would notice. Everything above the first
 - A customer's rebate can now be changed after the promo is set up: type it in the Rebate box on the customer's card. Support, margins and claims update straight away. "rebate x%" in the grid heading jumps to the card.
 - Separate groups of products in the grid, like the blank rows in the Excel form: blank rows in what you paste become separators, or click "⎯ gap" at the end of a product row. A separator can have a heading (e.g. "Laptop stands").
 
-## 2026-11-12 | Vendor Promos: claims from actual sales | promos
+## 2026-11-12 | Vendor Promos: claims from actual sales | promos | feature
 - Once you type actual sales, the vendor claim follows them: the vendor credit request and the totals now show the expected and the actual claim, and claim the actual. Lines without actual sales count as 0 and are flagged.
 - Leave the vendor amount blank to claim the calculated figure; a typed amount overrides it, and "Use the calculated amount" switches back.
 - New Claim view and Excel export — the claim to send the vendor: support per unit × units sold, per customer, with the claim total.
@@ -119,19 +124,19 @@ Add an entry with every commit people would notice. Everything above the first
 - Sales Explorer, Weekly Sell-Through, Sell-Through, Inventory Ageing and the home page now read from pre-summed tables, so a page that has to be built fresh (the first visit after an update, or a brand-limited view) is several times quicker.
 - After the site is updated, its pages are ready about twice as soon, and Inventory Ageing and Field Activity are now prepared in advance too.
 
-## 2026-10-23 | New: Inventory Ageing | ageing
+## 2026-10-23 | New: Inventory Ageing | ageing | feature
 - How old Macgear's stock is, from NetSuite's daily ageing report since January: totals, what's past 90 / 180 / 370 days, and how that has moved.
 - One table by brand: open a brand to see its products, and a product to see its locations. Sort by any column, switch between value and units, pick a location, or list only stock past 90, 180 or 370 days.
 - "Aged since" shows when a product's stock first crossed the line and has stayed there. Download what the table lists as a CSV.
 - Third-party (3PL) and consignment stock are kept out of the figures; 3PL units are shown on their own.
 
-## 2026-10-23 | Sales Explorer shows targets | sales
+## 2026-10-23 | Sales Explorer shows targets | sales | feature
 - Sales Explorer now shows the official targets: a Target card (with % of target), a target line on the by-month chart, and Target / % of target columns in the table and the Excel.
 - Account managers can see their own target progress: pick yourself under Account manager, or build the table by Account manager. A retailer's target counts towards the account manager NetSuite has on that retailer.
 - Targets are set by retailer, brand and month, so the table doesn't show them by store/account or item (the totals still do).
 - For a period still running, the target is counted to date (a part month by its share of weekdays), so it compares like with like.
 
-## 2026-10-22 | New: Targets | targets
+## 2026-10-22 | New: Targets | targets | feature
 - The Targets planner now lives here under Tools: build next year's targets on NetSuite sales (any financial year, or this year to date) with growth %, monthly pacing and new lines. No spreadsheets to upload.
 - New "Commit" button: when a scenario is final, commit it as the official targets for that financial year. Earlier commits stay in the history ("Committed"), each with a CSV.
 - The home page measures sales against the latest committed targets.
@@ -165,7 +170,7 @@ Add an entry with every commit people would notice. Everything above the first
 ## 2026-10-21 | Pages use the full screen
 - Every page now uses the full width of your screen instead of a centred column. Phones look the same as before.
 
-## 2026-10-21 | New: Weekly Sell-Through report (beta) | st_weekly
+## 2026-10-21 | New: Weekly Sell-Through report (beta) | st_weekly | feature
 - The consolidated weekly sell-through report on one full-screen page: sell-through vs sell-in, retailer stock and weeks of cover, Macgear stock.
 - Filter by market (AU / NZ), brand, customer and period (13 / 26 / 52 weeks / all).
 - Stores tab for the retailers that send store-level data; each product also lists its stores.
@@ -176,7 +181,7 @@ Add an entry with every commit people would notice. Everything above the first
 - Harvey Norman display now shows Graded (where HN's grading says it should be - the rep measure), Over and above (extra stores reps secured) and Total coverage (all HN stores).
 - One HN store tier now applies to Floorcare, Outdoor Living and Personal Care.
 
-## 2026-10-17 | New: Field Activity | field
+## 2026-10-17 | New: Field Activity | field | feature
 - Mova field reps from Repsly: dashboard, display compliance, activity feed and map, schedule, visits, reps and photos.
 
 ## 2026-10-16 | Sales update within minutes of NetSuite | sales
@@ -184,11 +189,11 @@ Add an entry with every commit people would notice. Everything above the first
 - Sales to NZ intercompany are shown separately (they're not counted as revenue).
 - Account manager figures use each customer's current account manager, for all history.
 
-## 2026-10-15 | New: Sales Explorer | sales
+## 2026-10-15 | New: Sales Explorer | sales | feature
 - Macgear revenue for any financial-year period vs last year, with a build-your-own table and Excel download.
 
-## 2026-10-15 | Email invites and "Forgot password?"
+## 2026-10-15 | Email invites and "Forgot password?" |  | feature
 - New accounts get an invite email to choose their own password, and "Forgot password?" on the sign-in page sends a reset link.
 
-## 2026-10-15 | Macgear Reporting launched
+## 2026-10-15 | Macgear Reporting launched |  | feature
 - One site for Macgear's reports and tools at reporting.macgeargroup.com, with a login per person.
