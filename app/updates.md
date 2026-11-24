@@ -13,6 +13,10 @@ Add an entry with every commit people would notice. Everything above the first
 - Brand Profitability's PM filter now lists each senior PM's team, e.g. "Rachel Harris (team)": their own brands plus those of the PMs who report to them, with the team total. Picking one PM still shows just that PM's brands.
 - Teams follow the month: someone who joined a team in September counts in it from September on.
 
+## 2026-11-25 | Month target dial on the home page | sales
+- This month's target is now a dial. The solid fill is sales so far, the faded fill is where the current pace lands, and the tick is the target. It shows amber when behind pace and green when on pace to beat it.
+- The dial runs to the next whole million above the target (or above sales, if they're higher), so going past target shows.
+
 ## 2026-11-24 | Account managers by product category | sales, admin
 - An account manager can now be set for one product category of a brand at a retailer. At The Good Guys AU, Eufy Security is Chris O'Donohue's and Eufy floorcare (Appliances) and Baby are Mike Bihary's.
 - Their sales split exactly by each product's category. Targets are set by retailer and brand only, so each manager's share of the Eufy target is estimated from the last 12 months' sales mix (about 65% Security, 35% floorcare and Baby today), and moves as the mix does.

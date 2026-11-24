@@ -242,7 +242,11 @@ area AND `sell_in_value` (route-checked; not listed in menus without it); never 
   revenue), home `tops` re-reads them by category. Targets are set by retailer × brand only, so such a
   target is split by the last 12 months' category sales mix (`sales_explorer.category_mix`, moves with
   sales — user's choice over freezing it). Verified locally 2026-11-24: TGG EUFY FY27 YTD Chris 2,322,081 /
-  Mike 1,247,623 = the warehouse by category; AU total unchanged (106,612,537). PM teams (user
+  Mike 1,247,623 = the warehouse by category; AU total unchanged (106,612,537). FY27 targets reconciliation
+  decisions (user, 2026-11-24): PMs follow the site, not PBI_TARGETS.xlsx; Amazon VC AU = Mike Bihary
+  (NetSuite already); NZ account managers stay per NetSuite (no NZ Portfolios rows). FY27 targets LOADED to the
+  cluster 2026-11-24: local commit 2 copied as cluster `targets.target_commit` id 1 (5,279 cells, identical
+  to the cent: AU 120,854,795.52, NZ 41,085,533.21); scenarios were not copied (none on the cluster). PM teams (user
   2026-11-24): David ← Prasanna (Oct 2026), Rachel ← Jeffrey, Mia (assumed Apr 2026), Dale ← Charles,
   Carlo (Sep 2026); Brand Profitability's PM filter has "<senior> (team)" = brands whose PM that month
   is the senior or reports to them (`data.report(pm="team:…")`). Reassigning ends the old row the month

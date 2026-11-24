@@ -7,7 +7,7 @@
   .h-greet h1{margin:0;font-size:clamp(26px,3.6vw,38px);font-weight:800;letter-spacing:-.03em}
   .h-regions{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   .h-region .big{font-size:clamp(34px,4.4vw,52px);font-weight:800;letter-spacing:-.035em;line-height:1;margin:6px 0 10px}
-  .h-region .big small{font-size:.32em;font-weight:700;color:var(--r-muted);letter-spacing:0;margin-left:6px}
+  .h-region .big small{font-size:.32em;font-weight:700;color:var(--r-muted);letter-spacing:0;margin-left:6px;white-space:nowrap;display:inline-block}
   .h-mini{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:14px 0}
   .h-mini > div{background:var(--r-card-2);border:1px solid var(--r-line);border-radius:12px;padding:10px 12px;min-width:0}
   .h-mini .l{font-size:11.5px;font-weight:600;color:var(--r-muted)}
@@ -17,6 +17,14 @@
   .h-bar i{display:block;height:100%;border-radius:6px;background:var(--r-accent)}
   .h-bar i.ok{background:var(--r-pos)} .h-bar i.behind{background:var(--r-warn)}
   .h-tgt{display:flex;justify-content:space-between;font-size:12.5px;color:var(--r-muted);margin:6px 0 2px}
+  .h-top{display:flex;justify-content:space-between;align-items:center;gap:8px 20px;flex-wrap:wrap;margin-bottom:6px}
+  .h-top .h-main{flex:1 1 320px;min-width:0}
+  .h-dial{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;margin:0 auto}
+  .h-dial svg{width:200px;max-width:100%}
+  .h-dial .info{font-size:12.5px;color:var(--r-muted);line-height:1.6;text-align:center;margin-top:2px}
+  .h-dial .info b{color:var(--r-ink);font-weight:700}
+  .h-dial .st{display:inline-block;font-size:12px;font-weight:700;padding:2px 10px;border-radius:999px}
+  .h-dial .st.ok{background:var(--r-pos-soft);color:var(--r-pos)} .h-dial .st.behind{background:var(--r-warn-soft);color:var(--r-warn)}
   .h-region .r-chart{height:190px}
   .h-lead{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   .h-row{display:grid;grid-template-columns:22px 1fr auto;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--r-line);text-decoration:none}
@@ -161,17 +169,48 @@
   {% if sales %}
   var S = {{ sales|tojson }}, MARGIN = {{ margin|tojson }};
   var NAMES = {AU: "Australia", NZ: "New Zealand"};
-  var col = {acc: RPT.css("--r-accent"), muted: RPT.css("--r-muted"), amb: RPT.css("--r-amber"), pos: RPT.css("--r-pos")};
+  var col = {acc: RPT.css("--r-accent"), muted: RPT.css("--r-muted"), amb: RPT.css("--r-amber"), pos: RPT.css("--r-pos"),
+             warn: RPT.css("--r-warn") || RPT.css("--r-amber"), ink: RPT.css("--r-ink"), track: RPT.css("--r-line-2")};
 
   function growth(g) {
     var d = RPT.delta(g);
     return '<span class="' + d.cls + '">' + d.arrow + " " + d.txt + "</span>";
   }
-  function target(b, cur) {
+  // The month's target dial (user, 2026-11-25): the scale runs to the target, pace or sales,
+  // whichever is highest, rounded UP to the next million so going past target shows. Solid fill =
+  // sales to date, faded fill = where the weekday pace lands, tick = the target.
+  function target(b, pace, cur) {
     if (!b.target) return '<div class="h-tgt"><span>No target loaded</span><span></span></div>';
-    var p = b.to_target;
-    return '<div class="h-tgt"><span>' + p.toFixed(0) + "% of " + RPT.money(b.target, cur) + " target</span><span>" + RPT.money(b.target - b.value, cur) + " to go</span></div>" +
-      '<div class="h-bar"><i class="' + (p >= 100 ? "ok" : "") + '" style="width:' + Math.min(100, p).toFixed(1) + '%"></i></div>';
+    var top = Math.max(b.target, b.value, pace || 0), M = 1e6;
+    var max = Math.max(M, Math.ceil(top / M) * M);
+    function pt(v, r) {
+      var f = Math.max(0, Math.min(1, v / max)), a = Math.PI * (1 - f);
+      return [100 + r * Math.cos(a), 100 - r * Math.sin(a)];
+    }
+    function arc(v, cls, colr, op) {
+      if (v <= 0) return "";
+      var e = pt(v, 80);
+      return '<path d="M20 100 A80 80 0 0 1 ' + e[0].toFixed(2) + " " + e[1].toFixed(2) + '" fill="none" stroke="' + colr +
+        '" stroke-width="16" stroke-linecap="butt"' + (op ? ' opacity="' + op + '"' : "") + "/>";
+    }
+    var ahead = (pace != null ? pace : b.value) >= b.target, colr = ahead ? col.pos : col.warn;
+    var t1 = pt(b.target, 66), t2 = pt(b.target, 96), tl = pt(b.target, 112);
+    var svg = '<svg viewBox="-34 -16 268 136" role="img" aria-label="' + b.to_target.toFixed(0) + "% of " + RPT.money(b.target, cur) + ' target">' +
+      '<path d="M20 100 A80 80 0 0 1 180 100" fill="none" stroke="' + col.track + '" stroke-width="16"/>' +
+      (pace != null && pace > b.value ? arc(pace, "", colr, 0.3) : "") + arc(b.value, "", colr) +
+      '<line x1="' + t1[0].toFixed(2) + '" y1="' + t1[1].toFixed(2) + '" x2="' + t2[0].toFixed(2) + '" y2="' + t2[1].toFixed(2) +
+        '" stroke="' + col.ink + '" stroke-width="3"/>' +
+      '<text x="' + tl[0].toFixed(1) + '" y="' + tl[1].toFixed(1) + '" text-anchor="middle" font-size="10.5" fill="' + col.muted + '">Target</text>' +
+      '<text x="100" y="86" text-anchor="middle" font-size="26" font-weight="800" fill="' + col.ink + '">' + b.to_target.toFixed(0) + "%</text>" +
+      '<text x="100" y="104" text-anchor="middle" font-size="11" fill="' + col.muted + '">of target</text>' +
+      '<text x="20" y="117" text-anchor="middle" font-size="10.5" fill="' + col.muted + '">0</text>' +
+      '<text x="180" y="117" text-anchor="middle" font-size="10.5" fill="' + col.muted + '">' + RPT.money(max, cur) + "</text></svg>";
+    var left = b.target - b.value;
+    return '<div class="h-dial" title="Solid = sales to date · faded = where the weekday pace lands · tick = target">' + svg +
+      '<div class="info"><span class="st ' + (ahead ? "ok" : "behind") + '">' +
+      (b.value >= b.target ? "Target reached" : ahead ? "On pace to beat target" : "Behind pace") + "</span><br>" +
+      "Target <b>" + RPT.money(b.target, cur) + "</b> · " +
+      (left > 0 ? RPT.money(left, cur) + " to go" : RPT.money(-left, cur) + " over") + "</div></div>";
   }
   function mini(label, b, cur) {
     return '<div><div class="l">' + label + '</div><div class="v">' + RPT.money(b.value, cur) + '</div><div class="s">' + growth(b.growth) + " vs LY" +
@@ -189,11 +228,11 @@
       (MARGIN && M.gp_pct != null ? '<span class="r-chip" title="Net profit % on gross' + (M.np_net_pct != null ? ' · ' + M.np_net_pct.toFixed(1) + '% on net sales' : '') +
         (M.np_gl_missing ? ' — this month’s freight and vendor rebates aren’t loaded yet, so they aren’t in it' : '') + '">NP <b>&nbsp;' + M.gp_pct.toFixed(1) + "%" +
         (M.np_gl_missing ? "*" : "") + "</b></span>" : "") + "</div></div>" +
-      '<div class="big">' + RPT.money(M.value, cur, true) + "<small>LY " + RPT.money(M.ly, cur) + "</small></div>" +
+      '<div class="h-top"><div class="h-main"><div class="big">' + RPT.money(M.value, cur, true) + "<small>LY " + RPT.money(M.ly, cur) + "</small></div>" +
       '<div class="r-meta" style="margin:0 0 10px">' + paceTxt + '<span class="r-chip">Today <b>&nbsp;' + RPT.money(R.today, cur) + "</b></span>" +
         (R.intercompany_mtd ? '<span class="r-chip" title="Sales to MacGear NZ on the sales account — not counted as revenue here. Add it to match a NetSuite search that includes intercompany.">Excl. ' +
-          RPT.money(R.intercompany_mtd, cur) + " intercompany to NZ</span>" : "") + "</div>" +
-      target(M, cur) +
+          RPT.money(R.intercompany_mtd, cur) + " intercompany to NZ</span>" : "") + "</div></div>" +
+      target(M, M.pace, cur) + "</div>" +
       '<div class="h-mini">' + mini(S.fq + " to date", R.qtd, cur) + mini(S.fy + " to date", R.ytd, cur) +
         (MARGIN ? '<div><div class="l">' + S.fy + ' net profit</div><div class="v">' + RPT.money(R.ytd.gp, cur) + '</div><div class="s r-muted">' +
           (R.ytd.gp_pct == null ? "—" : R.ytd.gp_pct.toFixed(1) + "% on gross" + (R.ytd.np_net_pct == null ? "" : " · " + R.ytd.np_net_pct.toFixed(1) + "% on net")) + "</div></div>"
