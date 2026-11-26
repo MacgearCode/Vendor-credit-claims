@@ -350,6 +350,39 @@ def summary(today: date, margin: bool) -> dict:
             return outl
         lm_days = calendar.monthrange(lm0.year, lm0.month)[1]
         ly_days = calendar.monthrange(ly0.year, ly0.month)[1]
+
+        def tline(start, n):
+            """Cumulative target by day: each month's target spread evenly over its days. The
+            line stops after the last month that has a target (AU FY27 Q4 isn't set yet, user
+            2026-11-27) instead of running flat through months with none."""
+            acc, outl, last = 0.0, [], -1
+            for i in range(n):
+                dd = start + timedelta(days=i)
+                mt = t.get(dd.replace(day=1))
+                if mt and mt >= 1:              # AU Q4 FY27 holds a few −$1 lines, not a target
+                    last = i
+                acc += (mt or 0) / calendar.monthrange(dd.year, dd.month)[1]
+                outl.append(round(acc))
+            if last < 0:
+                return None
+            end = start + timedelta(days=last)
+            stop = (end.replace(day=calendar.monthrange(end.year, end.month)[1]) - start).days + 1
+            return outl[:stop]
+
+        def span(a, b):
+            return (b - a).days + 1
+        # the chart's Quarter and Year views (user, 2026-11-27): cumulative by day over the
+        # financial quarter / year, against the previous quarter and the same period LY
+        q_end = (q0.replace(day=28) + timedelta(days=70)).replace(day=1) - timedelta(days=1)
+        pq0 = fq_start(q0 - timedelta(days=1))
+        y_end = date(fy0.year + 1, 3, 31)
+        cum_q = {"start": q0.isoformat(), "days": span(q0, q_end), "this": cum(q0, span(q0, today)),
+                 "prev": cum(pq0, span(pq0, q0 - timedelta(days=1))),
+                 "last_year": cum(last_year(q0), span(last_year(q0), last_year(q_end))),
+                 "target": tline(q0, span(q0, q_end))}
+        cum_y = {"start": fy0.isoformat(), "days": span(fy0, y_end), "this": cum(fy0, span(fy0, today)),
+                 "last_year": cum(last_year(fy0), span(last_year(fy0), last_year(y_end))),
+                 "target": tline(fy0, span(fy0, y_end))}
         # last 14 days by day, for the bars
         recent = [{"d": (today - timedelta(days=i)).isoformat(),
                    "v": round(d.get(today - timedelta(days=i), [0])[0])} for i in range(13, -1, -1)]
@@ -363,6 +396,7 @@ def summary(today: date, margin: bool) -> dict:
             "cum": {"this": cum(m0, today.day), "last_month": cum(lm0, lm_days),
                     "last_year": cum(ly0, ly_days), "month_days": month_days,
                     "month_target": round(month_t) if month_t else None},
+            "cum_q": cum_q, "cum_y": cum_y,
             "recent": recent,
             # GP rides in the cached lists; drop it here for anyone without margin
             "top": {k: [x if margin else {kk: vv for kk, vv in x.items() if kk != "gp"} for x in v]

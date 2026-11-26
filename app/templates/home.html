@@ -45,6 +45,7 @@
   .h-card.tool .ic{background:var(--r-card-2);color:var(--r-muted)}
   .h-card b{display:block;font-size:15.5px;margin-bottom:3px}
   .h-card span{font-size:13px;color:var(--r-muted);line-height:1.4}
+  .h-chartmode{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin:0 0 10px;font-size:13px}
   .h-sec-h{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin:26px 0 12px;flex-wrap:wrap}
   .h-sec-h h2{margin:0;font-size:19px;font-weight:800;letter-spacing:-.01em}
   @media (max-width:900px){.h-regions,.h-lead{grid-template-columns:1fr}}
@@ -66,32 +67,17 @@
 
 {% if sales %}
 {# ---- internal sales: AU and NZ side by side, never added together ---- #}
+<div class="h-chartmode"><span class="r-muted">Charts show</span>
+  <div class="r-tabs" id="chartMode">
+    <button class="r-tab" data-m="m" aria-pressed="true">Month</button>
+    <button class="r-tab" data-m="q">Quarter</button>
+    <button class="r-tab" data-m="y">Year</button>
+  </div></div>
 <div class="h-regions" id="regions"></div>
 {% if not sales.has_targets %}
 <p class="r-note" style="margin-top:10px">No sales targets yet — once a set is committed in <a href="/targets">Tools → Targets</a>,
   every tile shows progress against it.</p>
 {% endif %}
-
-<div class="h-sec-h">
-  <h2>Who's driving {{ sales.month }}</h2>
-  <div class="r-filters">
-    <div class="r-tabs" id="leadTabs">
-      <button class="r-tab" data-l="customers" aria-pressed="true">Customers</button>
-      <button class="r-tab" data-l="brands">Brands</button>
-      <button class="r-tab" data-l="reps">Account managers</button>
-      <button class="r-tab" data-l="items">Items</button>
-    </div>
-  </div>
-</div>
-<div class="h-lead" id="leaders"></div>
-{% endif %}
-
-{% if st %}
-<div class="h-sec-h">
-  <h2>Sell-through last week</h2>
-  <span class="r-muted" style="font-size:13px">Retailer-reported units · week ending {{ st_week }}{% if scoped %} · your brands{% endif %}</span>
-</div>
-<div class="h-st" id="stSnap"></div>
 {% endif %}
 
 {% if oo and oo.regions %}
@@ -127,6 +113,30 @@
   {% endfor %}
 </div>
 {% endif %}
+
+{% if sales %}
+<div class="h-sec-h">
+  <h2>Who's driving {{ sales.month }}</h2>
+  <div class="r-filters">
+    <div class="r-tabs" id="leadTabs">
+      <button class="r-tab" data-l="customers" aria-pressed="true">Customers</button>
+      <button class="r-tab" data-l="brands">Brands</button>
+      <button class="r-tab" data-l="reps">Account managers</button>
+      <button class="r-tab" data-l="items">Items</button>
+    </div>
+  </div>
+</div>
+<div class="h-lead" id="leaders"></div>
+{% endif %}
+
+{% if st %}
+<div class="h-sec-h">
+  <h2>Sell-through last week</h2>
+  <span class="r-muted" style="font-size:13px">Retailer-reported units · week ending {{ st_week }}{% if scoped %} · your brands{% endif %}</span>
+</div>
+<div class="h-st" id="stSnap"></div>
+{% endif %}
+
 
 <div class="h-sec-h"><h2>Reports</h2></div>
 {% if reports %}
@@ -241,27 +251,62 @@
       '<div class="r-chart" id="cum' + r + '"></div><div class="r-legend" id="leg' + r + '"></div></section>';
   }).join("");
 
-  ["AU", "NZ"].forEach(function (r) {
-    var R = S.regions[r], C = R.cum, n = C.month_days, cur = R.currency;
-    var t0 = S.today.slice(0, 8), labels = [];
-    for (var i = 1; i <= n; i++) labels.push(t0 + (i < 10 ? "0" : "") + i);
-    function fit(a) { var o = []; for (var i = 0; i < n; i++) o.push(i < a.length ? a[i] : null); return o; }
-    var series = [
-      {name: S.month + " " + S.today.slice(0, 4), values: fit(C["this"]), color: col.acc, type: "area"},
-      {name: "Last month", values: fit(C.last_month), color: col.muted, type: "line", dash: true},
-      {name: "Same month LY", values: fit(C.last_year), color: col.amb, type: "line", dash: true}
-    ];
-    if (C.month_target) {
-      var tl = []; for (var j = 1; j <= n; j++) tl.push(Math.round(C.month_target * j / n));
-      series.push({name: "Target (straight line)", values: tl, color: col.pos, type: "line", dash: true});
-    }
-    RPT.chart(document.getElementById("cum" + r), {labels: labels, series: series,
-      fmt: function (v) { return RPT.money(v, cur, true); }, axis: function (v) { return RPT.money(v, cur); },
-      tipLabel: function (l, i) { return "Day " + (i + 1) + " · cumulative"; }});
-    document.getElementById("leg" + r).innerHTML = series.map(function (s) {
-      return '<span><i style="background:' + s.color + '"></i>' + RPT.esc(s.name) + "</span>";
-    }).join("");
+  // ---- the cumulative charts: this month, quarter or financial year (one switch for both) ----
+  function isoAdd(iso, n) {
+    var d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + n);
+    return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2);
+  }
+  function drawCharts(mode) {
+    ["AU", "NZ"].forEach(function (r) {
+      var R = S.regions[r], cur = R.currency, labels = [], series, n, tipDay;
+      function fit(a) { var o = []; for (var i = 0; i < n; i++) o.push(a && i < a.length ? a[i] : null); return o; }
+      if (mode === "m" || !R.cum_q) {
+        var C = R.cum, t0 = S.today.slice(0, 8);
+        n = C.month_days;
+        for (var i = 1; i <= n; i++) labels.push(t0 + (i < 10 ? "0" : "") + i);
+        series = [
+          {name: S.month + " " + S.today.slice(0, 4), values: fit(C["this"]), color: col.acc, type: "area"},
+          {name: "Last month", values: fit(C.last_month), color: col.muted, type: "line", dash: true},
+          {name: "Same month LY", values: fit(C.last_year), color: col.amb, type: "line", dash: true}
+        ];
+        if (C.month_target) {
+          var tl = []; for (var j = 1; j <= n; j++) tl.push(Math.round(C.month_target * j / n));
+          series.push({name: "Target (straight line)", values: tl, color: col.pos, type: "line", dash: true});
+        }
+        tipDay = function (l, i) { return "Day " + (i + 1) + " · cumulative"; };
+      } else {
+        var P = mode === "q" ? R.cum_q : R.cum_y, lbl = mode === "q" ? S.fy + " " + S.fq : S.fy;
+        n = P.days;
+        for (var k = 0; k < n; k++) labels.push(isoAdd(P.start, k));
+        series = [{name: lbl + " to date", values: fit(P["this"]), color: col.acc, type: "area"}];
+        if (P.prev) series.push({name: "Last quarter", values: fit(P.prev), color: col.muted, type: "line", dash: true});
+        series.push({name: mode === "q" ? "Same quarter LY" : "Last year", values: fit(P.last_year), color: col.amb, type: "line", dash: true});
+        if (P.target) series.push({name: "Target (monthly targets, spread by day)", values: fit(P.target), color: col.pos, type: "line", dash: true});
+        tipDay = function (l, i) { return RPT.wk(l) + " · day " + (i + 1) + " · cumulative"; };
+      }
+      RPT.chart(document.getElementById("cum" + r), {labels: labels, series: series,
+        fmt: function (v) { return RPT.money(v, cur, true); }, axis: function (v) { return RPT.money(v, cur); },
+        tipLabel: tipDay});
+      document.getElementById("leg" + r).innerHTML = series.map(function (s) {
+        return '<span><i style="background:' + s.color + '"></i>' + RPT.esc(s.name) + "</span>";
+      }).join("");
+    });
+  }
+  var chartMode = "m";
+  try { chartMode = localStorage.getItem("home_chart_mode") || "m"; } catch (e) {}
+  if (["m", "q", "y"].indexOf(chartMode) < 0) chartMode = "m";
+  function setMode(m) {
+    chartMode = m;
+    document.querySelectorAll("#chartMode [data-m]").forEach(function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-m") === m ? "true" : "false");
+    });
+    try { localStorage.setItem("home_chart_mode", m); } catch (e) {}
+    drawCharts(m);
+  }
+  document.getElementById("chartMode").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-m]"); if (b) setMode(b.getAttribute("data-m"));
   });
+  setMode(chartMode);
 
   // ---- leaders ----
   var lead = "customers";

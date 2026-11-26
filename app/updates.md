@@ -18,6 +18,10 @@ Add an entry with every commit people would notice. Everything above the first
 - Brand Profitability's PM filter now lists each senior PM's team, e.g. "Rachel Harris (team)": their own brands plus those of the PMs who report to them, with the team total. Picking one PM still shows just that PM's brands.
 - Teams follow the month: someone who joined a team in September counts in it from September on.
 
+## 2026-11-27 | Home page: quarter and year charts, open orders higher up | sales
+- A Month / Quarter / Year switch above the two sales cards changes both charts. Quarter compares with last quarter and the same quarter last year; Year with last year. The target line adds up each month's target spread over its days. The page remembers your choice.
+- Open orders now sits straight under the sales cards, above Who's driving.
+
 ## 2026-11-25 | Sales Explorer: product manager filter and rows | sales
 - Filter Sales Explorer by product manager, or by a senior PM's team (their own brands plus those of the PMs who report to them). Targets follow the filter.
 - "Product manager" is also a level in Build your table, e.g. Product manager › Brand. As with account managers, a brand's PM today applies to all its past sales, so last year compares like with like.
