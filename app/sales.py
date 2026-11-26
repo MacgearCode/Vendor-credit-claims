@@ -247,18 +247,24 @@ def intercompany(start: date, end: date) -> dict:
     return {rk[r]: round(float(v or 0)) for r, v in rows if r in rk}
 
 
+# The official targets the site may show: each FY up to its "show up to" month, if one is set.
+SHOWN_TARGETS = ("from sales_target s left join site_visibility v on v.target_fy = s.target_fy "
+                 "where v.show_through is null or s.month_start <= v.show_through")
+
+
 def targets() -> dict:
     """{region: {month_start: amount}} — the official (committed) targets from the
     Targets tool: targets.sales_target, the newest commit per financial year
     (app/targets), read through the Targets connection (TARGETS_DB_URL) — where they
     were committed. {} until something is committed or when Targets isn't configured.
-    Finer rows (brand, customer) are summed."""
+    Finer rows (brand, customer) are summed. Months after an FY's "show up to" month
+    (targets.site_visibility, set by admins) are left out."""
     from .targets import db as tdb
     try:
         with tdb.connect() as conn:
             rows = [(r["country_code"], r["month_start"], r["amount"]) for r in conn.execute(
                 "select country_code, month_start, sum(amount) as amount "
-                "from sales_target group by 1, 2")]
+                f"{SHOWN_TARGETS} group by 1, 2")]
     except Exception:
         return {}
     out: dict = {}
@@ -278,7 +284,7 @@ def target_lines() -> dict:
             rows = [(r["country_code"], r["month_start"], r["brand"], r["customer"], r["amount"])
                     for r in conn.execute(
                         "select country_code, month_start, brand, customer, sum(amount) as amount "
-                        "from sales_target group by 1, 2, 3, 4")]
+                        f"{SHOWN_TARGETS} group by 1, 2, 3, 4")]
     except Exception:
         return {}
     out: dict = {}

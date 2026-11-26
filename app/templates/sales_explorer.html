@@ -259,6 +259,7 @@
   function targetStat() {
     var K = D.kpis, T = D.targets;
     if (!T.has) return stat("Target", "—", "none committed");
+    if (!K.t && T.full == null) return stat("Target", "—", "none shown for this period");
     var sub = K.to_t == null ? "" : '<span class="' + (K.to_t >= 100 ? "up" : "down") + '">' + K.to_t.toFixed(0) + "% of target</span>";
     if (T.full != null && Math.abs(T.full - K.t) > 1) sub += (sub ? " · " : "") + "period " + money(T.full);
     return stat("Target" + (T.full != null && Math.abs(T.full - K.t) > 1 ? " to date" : ""), money(K.t), sub);

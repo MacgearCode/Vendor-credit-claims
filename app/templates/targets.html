@@ -50,6 +50,10 @@
 
   <div id="banner" class="banner hidden"></div>
 
+  {# How far the rest of the site shows each FY's official targets (user, 2026-11-27). Admins
+     set it; everyone else sees what's shown. The Targets tool itself always shows everything. #}
+  <section class="tg-vis" id="tgVis" hidden></section>
+
   <section class="totals-strip" id="totalsStrip"></section>
 
   <div class="tabs-row">
@@ -171,4 +175,57 @@
   <!-- Generic dialog host (alert / confirm / form) — populated by app.js -->
   <div id="dialogHost"></div>
 {% endblock %}
-{% block scripts %}<script src="/static/targets.js?v={{ asset_ver }}"></script>{% endblock %}
+{% block scripts %}<script src="/static/targets.js?v={{ asset_ver }}"></script>
+<style>
+  .tg-vis{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin:0 0 12px;padding:10px 14px;
+    border:1px solid var(--r-line);border-radius:12px;background:var(--r-card);font-size:13px}
+  .tg-vis[hidden]{display:none}
+  .tg-vis .lbl{font-weight:700}
+  .tg-vis .yr{display:flex;align-items:center;gap:8px}
+  .tg-vis select{padding:4px 8px;border-radius:8px;border:1px solid var(--r-line-2);background:var(--r-card-2);color:var(--r-ink)}
+  .tg-vis .hint{color:var(--r-muted)}
+  .tg-vis .ok{color:var(--r-pos)} .tg-vis .err{color:var(--r-neg)}
+</style>
+<script>
+(function () {
+  "use strict";
+  var el = document.getElementById("tgVis");
+  var MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  function mlabel(ym) { return MON[+ym.slice(5, 7) - 1] + " " + ym.slice(0, 4); }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]; }); }
+  function render(d, msg, bad) {
+    if (!d.years || !d.years.length) { el.hidden = true; return; }
+    el.hidden = false;
+    el.innerHTML = '<span class="lbl">Shown on the site</span>' + d.years.map(function (y) {
+      var last = y.with_targets.length ? y.with_targets[y.with_targets.length - 1] : null;
+      var state = y.show_through ? "up to " + mlabel(y.show_through) : "every month";
+      if (!d.can_edit) return '<span class="yr">' + esc(y.target_fy) + ": " + esc(state) + "</span>";
+      var opts = '<option value="">Every month' + (last ? " (targets to " + mlabel(last) + ")" : "") + "</option>" +
+        y.months.map(function (m) {
+          return '<option value="' + m + '"' + (y.show_through === m ? " selected" : "") + ">Up to " + mlabel(m) +
+            (y.with_targets.indexOf(m) < 0 ? " · no targets" : "") + "</option>";
+        }).join("");
+      return '<span class="yr">' + esc(y.target_fy) + ' <select data-fy="' + esc(y.target_fy) + '">' + opts + "</select></span>";
+    }).join("") +
+    '<span class="hint">Home page and Sales Explorer show official targets only up to this month; the Targets tool always shows them all.' +
+      (d.can_edit ? " Admins only." : "") + "</span>" +
+    (msg ? '<span class="' + (bad ? "err" : "ok") + '">' + esc(msg) + "</span>" : "");
+  }
+  function load() {
+    fetch("/targets/api/visibility", {credentials: "same-origin"}).then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { if (d) render(d); }).catch(function () {});
+  }
+  el.addEventListener("change", function (e) {
+    var s = e.target.closest("select[data-fy]"); if (!s) return;
+    fetch("/targets/api/visibility", {method: "POST", credentials: "same-origin",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({target_fy: s.getAttribute("data-fy"), show_through: s.value})})
+      .then(function (r) { return r.json().then(function (j) { return {ok: r.ok, j: j}; }); })
+      .then(function (x) {
+        if (x.ok) render(x.j, "Saved — the site follows now.");
+        else { load(); alert(x.j.detail || "Couldn't save that."); }
+      }).catch(function () { alert("Couldn't save that."); });
+  });
+  load();
+})();
+</script>{% endblock %}

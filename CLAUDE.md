@@ -806,6 +806,12 @@ projection, manual lines — see memory `project_targets_budget`); front end `st
   Postgres: "FY27 current targets (PBI_TARGETS 13 Oct)", period Apr–Dec, 660 lines, AU
   $120,854,796 (Apr–Dec) / NZ $11,752,106 (Apr–Sep; the file has no NZ Q3) = the file less
   $1,218,887 intercompany. Not committed — the user decides.
+- **"Shown on the site" (user, 2026-11-27):** `targets.site_visibility` (target_fy → `show_through` month),
+  set by ADMINS on the Targets page strip (`/targets/api/visibility`, GET/POST; non-admins see it read-only).
+  The site's readers (`sales.SHOWN_TARGETS` in `sales.targets()` / `target_lines()`) drop later months; the
+  Targets tool itself (official base, compare, commit preview) still sees every month. No row = all months.
+  Use: commit targets ahead, release them later. FY27 is meant to show only to Dec 2026 (AU Q4 not set yet).
+  The home chart's target line also stops after the last month with a positive target.
 - New scenarios target the year after their actuals (FY26 → "FY27"); `target_fy` must look like
   FYnn for a commit (fiscal month 0 = April of the year before: FY27 → Apr 2026).
 - **Local:** `run.ps1` (8030) takes `TARGETS_DB_URL` from `.env` = the local Postgres (added

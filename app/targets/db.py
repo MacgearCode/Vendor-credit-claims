@@ -155,6 +155,16 @@ CREATE TABLE IF NOT EXISTS base_line (
 ALTER TABLE target_commit ADD COLUMN IF NOT EXISTS countries TEXT[] NOT NULL
     DEFAULT ARRAY['Australia', 'New Zealand'];
 
+-- How far the site shows each FY's official targets (user, 2026-11-27): management may commit
+-- targets before they're to be seen. No row = every month shows. Admins set it on the Targets
+-- page; only the site's readers (app/sales.py) apply it — the Targets tool itself sees everything.
+CREATE TABLE IF NOT EXISTS site_visibility (
+    target_fy    TEXT PRIMARY KEY,
+    show_through DATE NOT NULL,                -- first day of the last month shown
+    updated_by   TEXT NOT NULL DEFAULT '',
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- What the rest of the site reads: the official targets, one row per country x brand x
 -- customer x month. For each FY, month AND country, the NEWEST commit covering it wins
 -- (a Q4 commit replaces Jan-Mar only, and only for the countries it was committed for).

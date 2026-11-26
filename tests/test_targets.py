@@ -291,3 +291,30 @@ def test_import_merges_spellings_netsuite_has_no_sales_for():
     rows = [("New Zealand", "Rivacase", "PB Tech", 0, 25.0), ("New Zealand", "RIVACASE", "PB Tech", 0, 150.0)]
     lines, rep = importer.clean(rows, set(), set())
     assert dict(lines) == {("New Zealand", "RIVACASE", "PB Tech"): [175.0] + [0.0] * 11}
+
+
+# ---- how far the site shows each FY's targets (2026-11-27) ----------------------------------
+def test_show_up_to_month_hides_later_targets_from_the_site(client):
+    sid = scenario(client)["id"]
+    client.post(f"/targets/api/scenarios/{sid}/commit", json={})
+    v = client.get("/targets/api/visibility").json()
+    assert v["can_edit"] and v["years"][0]["target_fy"] == "FY27" and v["years"][0]["show_through"] is None
+    assert v["years"][0]["with_targets"] == ["2026-04", "2026-05"]
+    r = client.post("/targets/api/visibility", json={"target_fy": "FY27", "show_through": "2026-04"})
+    assert r.status_code == 200 and r.json()["years"][0]["show_through"] == "2026-04"
+    t = sales.targets()
+    assert t["AU"] == {date(2026, 4, 1): pytest.approx(1100)}             # May is hidden on the site
+    assert {m for m, *_ in sales.target_lines()["AU"]} == {date(2026, 4, 1)}
+    assert client.post("/targets/api/visibility", json={"target_fy": "FY27", "show_through": "2027-06"}).status_code == 400
+    client.post("/targets/api/visibility", json={"target_fy": "FY27", "show_through": ""})
+    assert set(sales.targets()["AU"]) == {date(2026, 4, 1), date(2026, 5, 1)}
+
+
+def test_only_admins_set_what_the_site_shows(client):
+    mk("admin", [], "boss@example.com")
+    client.cookies.set(main.COOKIE_NAME, sign(str(mk("user", ["targets"], "planner@example.com")), main.APP_SECRET))
+    sid = scenario(client)["id"]
+    client.post(f"/targets/api/scenarios/{sid}/commit", json={})
+    assert client.get("/targets/api/visibility").json()["can_edit"] is False
+    r = client.post("/targets/api/visibility", json={"target_fy": "FY27", "show_through": "2026-04"})
+    assert r.status_code == 403

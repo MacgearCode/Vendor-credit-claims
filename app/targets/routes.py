@@ -14,6 +14,8 @@ trend) for the period, the scenario's commit status, and commits can preview the
 and be limited to one country.
 """
 import json
+import re
+from datetime import date
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request
@@ -128,6 +130,12 @@ def _db():
         return connect()
     except NotConfigured:
         raise HTTPException(503, "The Targets database isn't configured (TARGETS_DB_URL).")
+
+
+def _is_admin(request: Request) -> bool:
+    from .. import perms
+    user = getattr(request.state, "user", None)
+    return user is None or perms.is_admin(user)          # None = auth off (local dev)
 
 
 def _who(request: Request) -> str:
@@ -656,6 +664,64 @@ def commit(sid: int, body: CommitIn, request: Request):
         row = conn.execute("SELECT * FROM target_commit WHERE id = %s", (cid,)).fetchone()
     warehouse.drop(("sales_targets",))      # the home page shows the new targets at once
     return _commit_meta(row)
+
+
+# ---- how far the site shows each FY's targets (user, 2026-11-27) ----------------------
+class VisibilityIn(BaseModel):
+    target_fy: str
+    show_through: str = ""          # "YYYY-MM" = the last month shown; "" = every month
+
+
+def _fy_months(fy: str) -> list[date]:
+    y = 2000 + int(fy[2:]) - 1
+    return [date(y + (1 if i >= 9 else 0), (i + 3) % 12 + 1, 1) for i in range(12)]
+
+
+@router.get("/api/visibility")
+def get_visibility(request: Request):
+    """Per FY with a commit: the last month the site shows (None = all) and the months
+    that have official targets, for the Targets page's setting."""
+    with _db() as conn:
+        fys = [r["target_fy"] for r in conn.execute(
+            "SELECT DISTINCT target_fy FROM target_commit WHERE target_fy ~ '^FY[0-9]{2}$' ORDER BY 1 DESC")]
+        vis = {r["target_fy"]: r for r in conn.execute("SELECT * FROM site_visibility")}
+        months = {}
+        for r in conn.execute("SELECT target_fy, month_start, sum(amount) AS amt FROM sales_target "
+                              "GROUP BY 1, 2"):
+            if float(r["amt"] or 0) >= 1:
+                months.setdefault(r["target_fy"], []).append(r["month_start"].isoformat()[:7])
+    return {"can_edit": _is_admin(request), "years": [{
+        "target_fy": fy,
+        "months": [m.isoformat()[:7] for m in _fy_months(fy)],
+        "with_targets": sorted(months.get(fy, [])),
+        "show_through": vis[fy]["show_through"].isoformat()[:7] if fy in vis else None,
+        "updated_by": vis[fy]["updated_by"] if fy in vis else "",
+        "updated_at": vis[fy]["updated_at"].isoformat() if fy in vis else None} for fy in fys]}
+
+
+@router.post("/api/visibility")
+def set_visibility(body: VisibilityIn, request: Request):
+    if not _is_admin(request):
+        raise HTTPException(403, "Only admins can change which targets the site shows.")
+    fy = (body.target_fy or "").strip().upper()
+    if not re.fullmatch(r"FY\d{2}", fy):
+        raise HTTPException(400, "Pick a financial year.")
+    months = _fy_months(fy)
+    with _db() as conn, conn.transaction():
+        if not body.show_through:
+            conn.execute("DELETE FROM site_visibility WHERE target_fy = %s", (fy,))
+        else:
+            try:
+                m = date.fromisoformat(body.show_through + "-01")
+            except ValueError:
+                raise HTTPException(400, "Pick a month.")
+            if m not in months:
+                raise HTTPException(400, f"That month isn't in {fy}.")
+            conn.execute("INSERT INTO site_visibility (target_fy, show_through, updated_by) VALUES (%s, %s, %s) "
+                         "ON CONFLICT (target_fy) DO UPDATE SET show_through = EXCLUDED.show_through, "
+                         "updated_by = EXCLUDED.updated_by, updated_at = now()", (fy, m, _who(request)))
+    warehouse.drop(("sales_targets",))      # home page and Sales Explorer follow at once
+    return get_visibility(request)
 
 
 @router.get("/api/commits")

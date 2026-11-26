@@ -666,7 +666,7 @@ def explore(region: str, code: str, fy: int, today: date, dims: list, f: dict,
     full = targets(region, p["a"], p["end"], [], f, nm, ams, mix)
     out["targets"] = {"has": tg is not None or full is not None,
                       "rows": bool(tg and tg[1] is not None),
-                      "full": round(full[0]) if full else None}
+                      "full": round(full[0]) if full and abs(full[0]) >= 1 else None}
     if tg and tg[1] is not None:
         idx = {tuple(r["k"]): r for r in out["rows"]}
         for key, t in tg[1].items():
