@@ -353,7 +353,10 @@ def period(code: str, fy: int, today: date) -> dict:
         a, b = fy0, date(fy, 3, 31)
         label = f"FY{fy % 100:02d}"
     if a > today:
-        return {"label": label, "a": a, "b": a - timedelta(days=1), "end": b, "future": True}
+        # a period that hasn't started (user, 2026-11-27: "I cannot select Dec"): selectable,
+        # with no sales yet, the whole period's targets and the same whole period last year
+        return {"label": label, "a": a, "b": b, "end": b, "ly_a": sales.last_year(a),
+                "ly_b": sales.last_year(b), "future": True}
     partial = b > today
     end, b = b, min(b, today)
     return {"label": label + (" (to date)" if partial and code not in
@@ -659,24 +662,24 @@ def explore(region: str, code: str, fy: int, today: date, dims: list, f: dict,
                       "future": p["future"]},
            "dims": dims, "dim_labels": [DIMS[x] for x in dims], "rows": [], "margin": margin,
            "currency": sales.CURRENCY[region], "region": region}
-    if not p["future"]:
-        out["period"].update({"ly_from": p["ly_a"].isoformat(), "ly_to": p["ly_b"].isoformat()})
-        if "item" in dims:
-            key = ("sx_items", region, p["a"], p["b"], tuple(dims), tuple(sorted(
-                (k, v) for k, v in f.items() if v not in (None, ""))))
-            acc = warehouse.cached(key, lambda: _items_sql(region, p, dims, f, nm), ttl=DAILY_TTL)
-        else:
-            acc = {}
-            _sum_range(m, d, p["a"], p["b"], dims, f, nm, 0, acc)
-            _sum_range(m, d, p["ly_a"], p["ly_b"], dims, f, nm, 1, acc)
-            acc = _shift_month_labels(acc, dims)
-        for key, (cur, ly) in acc.items():
-            row = {"k": list(key), "v": round(cur[0], 2), "ly": round(ly[0], 2),
-                   "q": round(cur[2]), "lq": round(ly[2])}
-            if margin:
-                row["gp"] = round(cur[0] - cur[1], 2)          # net profit (see top)
-                row["ns"] = round(cur[0] - cur[3], 2)          # net sales, after customer rebates
-            out["rows"].append(row)
+    # future periods too (no sales yet): LY rows and targets
+    out["period"].update({"ly_from": p["ly_a"].isoformat(), "ly_to": p["ly_b"].isoformat()})
+    if "item" in dims:
+        key = ("sx_items", region, p["a"], p["b"], tuple(dims), tuple(sorted(
+            (k, v) for k, v in f.items() if v not in (None, ""))))
+        acc = warehouse.cached(key, lambda: _items_sql(region, p, dims, f, nm), ttl=DAILY_TTL)
+    else:
+        acc = {}
+        _sum_range(m, d, p["a"], p["b"], dims, f, nm, 0, acc)
+        _sum_range(m, d, p["ly_a"], p["ly_b"], dims, f, nm, 1, acc)
+        acc = _shift_month_labels(acc, dims)
+    for key, (cur, ly) in acc.items():
+        row = {"k": list(key), "v": round(cur[0], 2), "ly": round(ly[0], 2),
+               "q": round(cur[2]), "lq": round(ly[2])}
+        if margin:
+            row["gp"] = round(cur[0] - cur[1], 2)          # net profit (see top)
+            row["ns"] = round(cur[0] - cur[3], 2)          # net sales, after customer rebates
+        out["rows"].append(row)
     # targets: to date for the dates shown, and for the whole period
     ams = retailer_ams(region, today)
     mix = category_mix(region, today)

@@ -327,6 +327,8 @@ def summary(today: date, margin: bool) -> dict:
     tg = warehouse.cached(("sales_targets",), targets)
     top = warehouse.cached(("sales_tops", m0, today), lambda: tops(m0, today), ttl=SALES_TTL)
     ic = warehouse.cached(("sales_ic", m0, today), lambda: intercompany(m0, today), ttl=SALES_TTL)
+    ic_q = warehouse.cached(("sales_ic", q0, today), lambda: intercompany(q0, today), ttl=SALES_TTL)
+    ic_y = warehouse.cached(("sales_ic", fy0, today), lambda: intercompany(fy0, today), ttl=SALES_TTL)
 
     out = {"today": today.isoformat(), "fy": fy_label(today), "fq": fq_label(today),
            "month": today.strftime("%B"), "fy_start": fy0.isoformat(),
@@ -389,14 +391,44 @@ def summary(today: date, margin: bool) -> dict:
         cum_y = {"start": fy0.isoformat(), "days": span(fy0, y_end), "this": cum(fy0, span(fy0, today)),
                  "last_year": cum(last_year(fy0), span(last_year(fy0), last_year(y_end))),
                  "target": tline(fy0, span(fy0, y_end))}
+        def period(a, end, blk):
+            """The Quarter / Year view of the main number (user, 2026-11-27): the dial measures
+            against the whole period's target and a weekday pace to the period end, like the
+            month's. Where only some months have a shown target (FY27 to Dec while Q4 is
+            unreleased) the dial — sales, pace and target — runs to the last such month
+            ("dial_end"), never comparing a full year's sales with nine months of targets."""
+            tm = [k for k, v in t.items() if a <= k <= end and v >= 1]
+            stop = end
+            if tm:
+                last = max(tm)
+                stop = last.replace(day=calendar.monthrange(last.year, last.month)[1])
+                tgt = sum(v for k, v in t.items() if a <= k <= stop)
+            else:
+                tgt = None
+            upto = min(today, stop)
+            val = _sum(d, a, upto)[0]
+            done, all_ = weekdays(a, upto), weekdays(a, stop)
+            blk["dial_value"] = round(val)
+            blk["dial_target"] = round(tgt) if tgt else None
+            blk["dial_pct"] = (val / tgt * 100) if tgt else None
+            blk["dial_end"] = stop.isoformat() if stop != end else None
+            blk["pace"] = round(val / done * all_) if done else None
+            blk["pace_to_target"] = (blk["pace"] / tgt * 100) if tgt and blk["pace"] is not None else None
+            return blk
+        qtd = period(q0, q_end, _block(d, q0, today, q_t, margin))
+        ytd = period(fy0, y_end, _block(d, fy0, today, y_t, margin))
+        if margin:
+            qtd["np_gl_missing"] = ytd["np_gl_missing"] = mtd["np_gl_missing"]
+        qtd["intercompany"] = ic_q.get(r, 0)
+        ytd["intercompany"] = ic_y.get(r, 0)
         # last 14 days by day, for the bars
         recent = [{"d": (today - timedelta(days=i)).isoformat(),
                    "v": round(d.get(today - timedelta(days=i), [0])[0])} for i in range(13, -1, -1)]
         out["regions"][r] = {
             "currency": CURRENCY[r],
             "mtd": mtd,
-            "qtd": _block(d, q0, today, q_t, margin),
-            "ytd": _block(d, fy0, today, y_t, margin),
+            "qtd": qtd,
+            "ytd": ytd,
             "today": round(d.get(today, [0])[0]),
             "intercompany_mtd": ic.get(r, 0),
             "cum": {"this": cum(m0, today.day), "last_month": cum(lm0, lm_days),

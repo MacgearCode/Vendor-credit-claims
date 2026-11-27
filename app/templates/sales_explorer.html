@@ -12,7 +12,7 @@
     font-size:13px;font-weight:600;cursor:pointer}
   .sx-pill:hover{border-color:var(--r-muted);color:var(--r-ink)}
   .sx-pill[aria-pressed="true"]{background:var(--r-accent);border-color:var(--r-accent);color:#fff}
-  .sx-pill.future{opacity:.35;cursor:not-allowed}
+  .sx-pill.future{opacity:.6;font-style:italic}
   .sx-quick{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:16px}
   .sx-quick button{all:unset;cursor:pointer;display:block}
   .sx-quick .r-stat{height:100%}
@@ -196,13 +196,14 @@
         fut = new Date(qy, qm, 1) > cur;
       }
       var quick = ["today", "yesterday", "week", "mtd", "qtd", "ytd"].indexOf(p) >= 0;
+      // not started yet: still selectable — it shows last year and the targets (user, 2026-11-27)
       b.classList.toggle("future", fut);
-      b.disabled = fut;
+      b.title = fut ? "Not started yet — shows last year and the targets" : "";
       if (quick) b.title = S.fy !== curFy ? "Always the current period" : "";
     });
   }
   document.getElementById("periods").addEventListener("click", function (e) {
-    var b = e.target.closest("[data-p]"); if (!b || b.disabled) return;
+    var b = e.target.closest("[data-p]"); if (!b) return;
     S.p = b.getAttribute("data-p"); paintPeriods(); load();
   });
   document.getElementById("fySel").addEventListener("change", function (e) {
@@ -238,8 +239,13 @@
     var K = D.kpis, P = D.period;
     var html = '<p class="r-eyebrow">' + RPT.esc(P.label) + " · " + D.region + "</p>";
     if (P.future) {
-      document.getElementById("kpiCard").innerHTML = html + '<p class="r-muted">That period hasn\'t started yet.</p>' +
-        (D.targets.full ? '<div class="r-stats" style="margin-top:14px">' + stat("Target", money(D.targets.full), "for the whole period") + "</div>" : "");
+      var need = D.targets.full != null && K.ly > 0 ? (D.targets.full - K.ly) / K.ly * 100 : null;
+      document.getElementById("kpiCard").innerHTML = html + '<p class="r-muted" style="margin:6px 0 0">Not started yet — no sales to show.</p>' +
+        '<div class="r-stats" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-top:14px">' +
+        stat("Last year", money(K.ly), fmtDate(P.ly_from) + " – " + fmtDate(P.ly_to)) +
+        stat("Target", D.targets.full != null ? money(D.targets.full) : "—", D.targets.full != null ? "for the whole period" : (D.targets.has ? "none shown for this period" : "none loaded")) +
+        (need != null ? stat("Target vs LY", gtxt(need), (D.targets.full >= K.ly ? "+" : "−") + money(Math.abs(D.targets.full - K.ly))) : "") +
+        "</div>";
       return;
     }
     html += '<div class="sx-big">' + money(K.v, true) + "</div>" +
@@ -331,6 +337,9 @@
       else if (k === "gpp") { x = a.v ? a.gp / a.v : -1e9; y = b.v ? b.gp / b.v : -1e9; }
       else if (k === "npn") { x = a.ns ? a.gp / a.ns : -1e9; y = b.ns ? b.gp / b.ns : -1e9; }
       else if (k === "tp") { x = a.t ? a.v / a.t : -1e9; y = b.t ? b.v / b.t : -1e9; }
+      else if (k === "v" && D.period.future) {          // nothing sold yet: by target, then LY
+        return ((a.t || 0) - (b.t || 0)) * d || (a.ly - b.ly) * d;
+      }
       else { x = a[k]; y = b[k]; }
       return (x - y) * d;
     });
@@ -373,9 +382,9 @@
       (K.v >= K.ly ? "+" : "−") + money(Math.abs(K.v - K.ly), true) + "</td><td>" + (K.growth == null ? "—" : growth(K.growth)) + "</td><td>100%</td><td>" + RPT.int(K.q) + "</td>" +
       (D.margin ? "<td>" + money(K.gp, true) + "</td><td>" + (K.gp_pct == null ? "—" : K.gp_pct.toFixed(1) + "%") + "</td><td>" + (K.np_net_pct == null ? "—" : K.np_net_pct.toFixed(1) + "%") + "</td>" : "") +
       (TR ? tcells(K.v, K.t || 0) : "") + "</tr>";
-    document.getElementById("tbl").innerHTML = head + "<tbody>" + (D.period.future ? "" : tot) + rows.join("") + "</tbody>";
+    document.getElementById("tbl").innerHTML = head + "<tbody>" + tot + rows.join("") + "</tbody>";
     document.getElementById("tblTitle").textContent = "By " + D.dim_labels.join(" › ");
-    document.getElementById("tblNote").textContent = D.period.future ? "" :
+    document.getElementById("tblNote").textContent = (D.period.future ? "Not started yet — last year and targets only · " : "") +
       RPT.int(top.length) + " " + D.dim_labels[0].toLowerCase() + (top.length === 1 ? "" : "s") + (top.length > 500 ? " — showing the top 500 (the Excel has them all)" : "") +
       " · " + D.period.label + " vs the same dates last year" + (nd > 1 ? " · + opens the next level" : "");
     document.getElementById("tblActions").hidden = nd < 2;

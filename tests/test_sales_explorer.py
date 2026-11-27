@@ -38,6 +38,14 @@ def test_future_period_is_flagged():
     assert sx.period("m9", 2027, TODAY)["future"] is True        # Dec 2026
 
 
+def test_future_period_covers_the_whole_period_and_last_year():
+    """A month that hasn't started is selectable (user, 2026-11-27): no sales yet, but the
+    whole month's targets and the same whole month last year."""
+    p = sx.period("m9", 2027, TODAY)
+    assert (p["a"], p["b"], p["end"]) == (date(2026, 12, 1), date(2026, 12, 31), date(2026, 12, 31))
+    assert (p["ly_a"], p["ly_b"]) == (date(2025, 12, 1), date(2025, 12, 31))
+
+
 def test_ranges_use_whole_months_and_days_only_at_the_edges():
     assert sx._parts(date(2026, 4, 1), date(2026, 10, 15)) == [("m", 202604, 202609), ("d", 20261001, 20261015)]
     assert sx._parts(date(2026, 9, 28), date(2026, 10, 4)) == [("d", 20260928, 20260930), ("d", 20261001, 20261004)]

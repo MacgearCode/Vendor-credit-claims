@@ -67,7 +67,7 @@
 
 {% if sales %}
 {# ---- internal sales: AU and NZ side by side, never added together ---- #}
-<div class="h-chartmode"><span class="r-muted">Charts show</span>
+<div class="h-chartmode"><span class="r-muted">Show</span>
   <div class="r-tabs" id="chartMode">
     <button class="r-tab" data-m="m" aria-pressed="true">Month</button>
     <button class="r-tab" data-m="q">Quarter</button>
@@ -189,7 +189,7 @@
   // The month's target dial (user, 2026-11-25): the scale runs to the target, pace or sales,
   // whichever is highest, rounded UP to the next million so going past target shows. Solid fill =
   // sales to date, faded fill = where the weekday pace lands, tick = the target.
-  function target(b, pace, cur) {
+  function target(b, pace, cur, endLbl) {
     if (!b.target) return '<div class="h-tgt"><span>No target loaded</span><span></span></div>';
     var top = Math.max(b.target, b.value, pace || 0), M = 1e6;
     var max = Math.max(M, Math.ceil(top / M) * M);
@@ -219,7 +219,7 @@
     return '<div class="h-dial" title="Solid = sales to date · faded = where the weekday pace lands · tick = target">' + svg +
       '<div class="info"><span class="st ' + (ahead ? "ok" : "behind") + '">' +
       (b.value >= b.target ? "Target reached" : ahead ? "On pace to beat target" : "Behind pace") + "</span><br>" +
-      "Target <b>" + RPT.money(b.target, cur) + "</b> · " +
+      "Target" + (endLbl ? " to " + endLbl : "") + " <b>" + RPT.money(b.target, cur) + "</b> · " +
       (left > 0 ? RPT.money(left, cur) + " to go" : RPT.money(-left, cur) + " over") + "</div></div>";
   }
   function mini(label, b, cur) {
@@ -227,29 +227,44 @@
       (b.to_target != null ? " · " + b.to_target.toFixed(0) + "% tgt" : "") + "</div></div>";
   }
 
-  var regionsEl = document.getElementById("regions");
-  regionsEl.innerHTML = ["AU", "NZ"].map(function (r) {
-    var R = S.regions[r], M = R.mtd, cur = R.currency;
+  // One switch drives the whole card (user, 2026-11-27): Month, Quarter or Year sets the main
+  // number, its pills and the dial; the small tiles show the other two periods.
+  var MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  function renderRegions(mode) {
+  document.getElementById("regions").innerHTML = ["AU", "NZ"].map(function (r) {
+    var R = S.regions[r], cur = R.currency;
+    var M = mode === "q" ? R.qtd : mode === "y" ? R.ytd : R.mtd;
+    var title = mode === "q" ? S.fy + " " + S.fq + " to date" : mode === "y" ? S.fy + " to date" : S.month + " to date";
+    var endLbl = M.dial_end ? MON[+M.dial_end.slice(5, 7) - 1] : "";
+    var dialB = mode === "m" ? M : {value: M.dial_value, target: M.dial_target, to_target: M.dial_pct};
+    var icAmt = mode === "m" ? R.intercompany_mtd : M.intercompany;
     var paceTxt = M.pace == null ? "" : '<span class="r-chip">On pace for <b>&nbsp;' + RPT.money(M.pace, cur) + "</b>" +
+      (endLbl ? "&nbsp;by " + endLbl : "") +
       (M.pace_to_target != null ? "&nbsp;· " + M.pace_to_target.toFixed(0) + "% of target" : "") + "</span>";
+    var tiles = [];
+    if (mode !== "m") tiles.push(mini(S.month + " to date", R.mtd, cur));
+    if (mode !== "q") tiles.push(mini(S.fq + " to date", R.qtd, cur));
+    if (mode !== "y") tiles.push(mini(S.fy + " to date", R.ytd, cur));
+    var NPB = mode === "y" ? R.mtd : R.ytd, npLbl = mode === "y" ? S.month : S.fy;
     return '<section class="r-card h-region">' +
-      '<div class="r-card-h" style="margin-bottom:0"><div><p class="r-eyebrow">' + NAMES[r] + " · " + cur + "</p><h2>" + S.month + " to date</h2></div>" +
+      '<div class="r-card-h" style="margin-bottom:0"><div><p class="r-eyebrow">' + NAMES[r] + " · " + cur + "</p><h2>" + title + "</h2></div>" +
       '<div class="r-meta" style="margin:0">' + '<span class="r-chip ' + (M.growth >= 0 ? "pos" : "neg") + '">' + growth(M.growth).replace(/<\/?span[^>]*>/g, "") + " vs LY</span>" +
       (MARGIN && M.gp_pct != null ? '<span class="r-chip" title="Net profit % on gross' + (M.np_net_pct != null ? ' · ' + M.np_net_pct.toFixed(1) + '% on net sales' : '') +
         (M.np_gl_missing ? ' — this month’s freight and vendor rebates aren’t loaded yet, so they aren’t in it' : '') + '">NP <b>&nbsp;' + M.gp_pct.toFixed(1) + "%" +
         (M.np_gl_missing ? "*" : "") + "</b></span>" : "") + "</div></div>" +
       '<div class="h-top"><div class="h-main"><div class="big">' + RPT.money(M.value, cur, true) + "<small>LY " + RPT.money(M.ly, cur) + "</small></div>" +
       '<div class="r-meta" style="margin:0 0 10px">' + paceTxt + '<span class="r-chip">Today <b>&nbsp;' + RPT.money(R.today, cur) + "</b></span>" +
-        (R.intercompany_mtd ? '<span class="r-chip" title="Sales to MacGear NZ on the sales account — not counted as revenue here. Add it to match a NetSuite search that includes intercompany.">Excl. ' +
-          RPT.money(R.intercompany_mtd, cur) + " intercompany to NZ</span>" : "") + "</div></div>" +
-      target(M, M.pace, cur) + "</div>" +
-      '<div class="h-mini">' + mini(S.fq + " to date", R.qtd, cur) + mini(S.fy + " to date", R.ytd, cur) +
-        (MARGIN ? '<div><div class="l">' + S.fy + ' net profit</div><div class="v">' + RPT.money(R.ytd.gp, cur) + '</div><div class="s r-muted">' +
-          (R.ytd.gp_pct == null ? "—" : R.ytd.gp_pct.toFixed(1) + "% on gross" + (R.ytd.np_net_pct == null ? "" : " · " + R.ytd.np_net_pct.toFixed(1) + "% on net")) + "</div></div>"
-        : '<div><div class="l">Units ' + S.fy + '</div><div class="v">' + RPT.compact(R.ytd.units) + '</div><div class="s r-muted">' + RPT.compact(M.units) + " this month</div></div>") +
+        (icAmt ? '<span class="r-chip" title="Sales to MacGear NZ on the sales account — not counted as revenue here. Add it to match a NetSuite search that includes intercompany.">Excl. ' +
+          RPT.money(icAmt, cur) + " intercompany to NZ</span>" : "") + "</div></div>" +
+      target(dialB, M.pace, cur, endLbl) + "</div>" +
+      '<div class="h-mini">' + tiles.join("") +
+        (MARGIN ? '<div><div class="l">' + npLbl + ' net profit</div><div class="v">' + RPT.money(NPB.gp, cur) + '</div><div class="s r-muted">' +
+          (NPB.gp_pct == null ? "—" : NPB.gp_pct.toFixed(1) + "% on gross" + (NPB.np_net_pct == null ? "" : " · " + NPB.np_net_pct.toFixed(1) + "% on net")) + "</div></div>"
+        : '<div><div class="l">Units ' + title.replace(" to date", "") + '</div><div class="v">' + RPT.compact(M.units) + '</div><div class="s r-muted">' + (mode === "m" ? RPT.compact(R.ytd.units) + " " + S.fy : RPT.compact(R.mtd.units) + " this month") + "</div></div>") +
       "</div>" +
       '<div class="r-chart" id="cum' + r + '"></div><div class="r-legend" id="leg' + r + '"></div></section>';
   }).join("");
+  }
 
   // ---- the cumulative charts: this month, quarter or financial year (one switch for both) ----
   function isoAdd(iso, n) {
@@ -301,6 +316,7 @@
       b.setAttribute("aria-pressed", b.getAttribute("data-m") === m ? "true" : "false");
     });
     try { localStorage.setItem("home_chart_mode", m); } catch (e) {}
+    renderRegions(m);
     drawCharts(m);
   }
   document.getElementById("chartMode").addEventListener("click", function (e) {

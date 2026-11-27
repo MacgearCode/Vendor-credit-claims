@@ -18,6 +18,10 @@ Add an entry with every commit people would notice. Everything above the first
 - Brand Profitability's PM filter now lists each senior PM's team, e.g. "Rachel Harris (team)": their own brands plus those of the PMs who report to them, with the team total. Picking one PM still shows just that PM's brands.
 - Teams follow the month: someone who joined a team in September counts in it from September on.
 
+## 2026-11-27 | Home switch changes the whole card; Sales Explorer opens future months | sales
+- The Month / Quarter / Year switch on the home page now changes the main number, its pills and the target dial as well as the chart. In Quarter or Year view the dial measures against the whole period's target, and the small tiles show the other two periods. Where targets are only released to a month (e.g. to December), the year's dial, pace and target run to that month.
+- Sales Explorer: months and quarters that haven't started (e.g. December) can now be selected. They show last year's sales and the targets, by whatever rows you've built.
+
 ## 2026-11-27 | Choose how far targets show on the site | targets, admin
 - Admins can now set, per financial year, the last month whose targets the site shows (Targets page, "Shown on the site"). Later months stay in the Targets tool but don't appear on the home page or in Sales Explorer until you move it on, so targets can be committed before they're released.
 
