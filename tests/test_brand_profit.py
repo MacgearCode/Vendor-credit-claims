@@ -316,7 +316,7 @@ def _fake_np(monkeypatch, rows, gl, rules):
     monkeypatch.setattr(bp_np.db, "load_pms", lambda conn, region: [])
     monkeypatch.setattr(data, "gl_lines", lambda conn, region, fy: (gl, {}))
     monkeypatch.setattr(warehouse, "query", lambda sql, params=None: rows)
-    warehouse.drop(("bp_np",))
+    warehouse.drop(bp_np.CACHE_PREFIXES)
     return bp_np
 
 
@@ -577,3 +577,21 @@ def test_audit_export_has_every_setting_with_periods_status_documents_and_the_lo
     assert {r[2] for r in log[1:]} >= {"rate_rule", "document", "manual_adjustment"}
     body, name = settings_export.build(["AU"], "auditor@x", log_only=True)
     assert load_workbook(BytesIO(body)).sheetnames == ["About", "Change log"] and "change_log" in name
+
+
+def test_a_finished_year_is_not_rebuilt_on_every_sales_load(monkeypatch):
+    """CPU alerts 2026-11-27: only the current FY's net-profit lines go with each NetSuite load."""
+    from app import warehouse
+    from app.brand_profit import np as bp_np
+    built = []
+    monkeypatch.setattr(bp_np, "_current_fy", lambda: 2027)
+    monkeypatch.setattr(bp_np, "_build", lambda region, fy: built.append((region, fy)) or bp_np.Fine())
+    warehouse.drop(bp_np.CACHE_PREFIXES)
+    bp_np.fine("AU", 2026); bp_np.fine("AU", 2027)
+    warehouse.drop(bp_np.SALES_DROP)                     # what a NetSuite load drops
+    bp_np.fine("AU", 2026); bp_np.fine("AU", 2027)
+    assert built == [("AU", 2026), ("AU", 2027), ("AU", 2027)]
+    warehouse.drop(bp_np.CACHE_PREFIXES)                 # a settings change rebuilds both
+    bp_np.fine("AU", 2026)
+    assert built[-1] == ("AU", 2026)
+    warehouse.drop(bp_np.CACHE_PREFIXES)

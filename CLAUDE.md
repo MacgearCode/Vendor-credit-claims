@@ -569,6 +569,12 @@ is in the queries. Two layers:
   publish done, commit 3ce95b9 pushed (droplet redeploy by the user — no SSH key from the PC) — see `Sell Through/CLAUDE.md`,
   "Summary tables". Until then the sales summaries go stale at the next NetSuite load and
   the site uses the original queries.
+- *DB CPU alerts (2026-11-27):* DO alerted CPU > 90% on the cluster; Insights showed a ~20% floor and a spike
+  every ~30 min (each NetSuite load → the sales watch rebuilds the site's caches), not user load. Two
+  rebuilds trimmed: net-profit lines (`bp_np`) for a FINISHED FY are kept a day (`bp_closed`, `np.SALES_DROP`
+  drops only the current FY; AU FY26 was ~3.3 s, NZ ~1.5 s per load), and the Portfolios category split
+  keeps months before last month (`sx_split`, 24 h) and re-reads only last + this month (3.8 s → ~0.6 s;
+  identical rows). Next steps if still tight: stagger post-load rebuilds, then a 2-vCPU cluster.
 - Front end: GZip on responses; item links prefetch on hover/touch and the top
   search hit is prefetched as results appear; a thin progress bar shows while a
   page loads.

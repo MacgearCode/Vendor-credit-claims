@@ -215,7 +215,8 @@ def _monthly(region: str) -> Cube:
         from reporting.fact_sales_line s
         where s.region_key = %(rk)s and s.net_sales is not null
         group by 1, 2, 3 order by 1""", {"rk": rk})
-    return Cube(_split(region, bp_np.adjust_cube_rows(region, rows, monthly=True), "s.date_key / 100", "", {}))
+    return Cube(_split(region, bp_np.adjust_cube_rows(region, rows, monthly=True), "s.date_key / 100", "", {},
+                       history=True))
 
 
 def daily_window(today: date) -> tuple[date, date, date, date]:
@@ -248,20 +249,37 @@ def _daily(region: str, today: date) -> Cube:
                        {"lo": _key(lo), "hi": _key(hi), "llo": _key(ly_lo), "lhi": _key(ly_hi)}))
 
 
-def _split(region: str, rows: list, kcol: str, extra_where: str, prm: dict) -> list:
+def _split(region: str, rows: list, kcol: str, extra_where: str, prm: dict, history: bool = False) -> list:
     """Split the rows of customer x brand pairs a Portfolios category row covers by item
-    category (portfolio.split_rows). Filtered on customer only (see _items_sql on brand)."""
+    category (portfolio.split_rows). Filtered on customer only (see _items_sql on brand).
+    history (the monthly summary): months before last month come from a copy kept a day
+    ("sx_split", dropped by Portfolios changes, not by sales loads) and only last month and
+    this month are re-read on each NetSuite load — the whole history was a ~3.6 s full scan
+    of the sales lines every time (user's CPU alerts, 2026-11-27)."""
     pairs = portfolio.category_pairs(region)
     if not pairs:
         return rows
-    fine = warehouse.query(f"""
-        select {kcol}, s.customer_id, s.brand_id, i.category,
-               sum(s.net_sales), sum(s.net_sales_est_cost), sum(s.net_sales_qty)
-        from reporting.fact_sales_line s
-        left join reporting.dim_item i on i.item_key = s.item_key
-        where s.region_key = %(rk)s and s.net_sales is not null and s.customer_id = any(%(c)s) {extra_where}
-        group by 1, 2, 3, 4""", {"rk": warehouse.region_key(region), "c": sorted({c for c, _ in pairs}), **prm})
-    fine = [(k, c, b, portfolio.category_id(cat), v, x, q) for k, c, b, cat, v, x, q in fine if (c, b) in pairs]
+    custs = sorted({c for c, _ in pairs})
+    rk = warehouse.region_key(region)
+
+    def read(where: str, params: dict) -> list:
+        got = warehouse.query(f"""
+            select {kcol}, s.customer_id, s.brand_id, i.category,
+                   sum(s.net_sales), sum(s.net_sales_est_cost), sum(s.net_sales_qty)
+            from reporting.fact_sales_line s
+            left join reporting.dim_item i on i.item_key = s.item_key
+            where s.region_key = %(rk)s and s.net_sales is not null and s.customer_id = any(%(c)s) {where}
+            group by 1, 2, 3, 4""", {"rk": rk, "c": custs, **params})
+        return [(k, c, b, portfolio.category_id(cat), v, x, q) for k, c, b, cat, v, x, q in got if (c, b) in pairs]
+    if history:
+        t = date.today()
+        lm = (t.replace(day=1) - timedelta(days=1)).replace(day=1)
+        cut = lm.year * 10000 + lm.month * 100 + 1          # first day of last month, as a date_key
+        old = warehouse.cached(("sx_split", region, tuple(sorted(pairs)), cut),
+                               lambda: read("and s.date_key < %(cut)s", {"cut": cut}), ttl=24 * 60 * 60)
+        fine = old + read("and s.date_key >= %(cut)s", {"cut": cut})
+    else:
+        fine = read(extra_where, prm)
     return portfolio.split_rows(rows, pairs, fine)
 
 

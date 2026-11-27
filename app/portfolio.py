@@ -40,7 +40,7 @@ log = logging.getLogger(__name__)
 ALL = ""                                  # am_assignment.brand for "every brand"
 # entries that resolve an account manager or a team; dropped after every change here
 # (sx_month / sx_day: the explorer's summaries carry the category split, see split_rows)
-CACHE_PREFIXES = ("pf_", "sx_names", "sx_ram", "sx_opts", "sx_items", "sx_month", "sx_day", "sx_mix",
+CACHE_PREFIXES = ("pf_", "sx_names", "sx_ram", "sx_opts", "sx_items", "sx_month", "sx_day", "sx_mix", "sx_split",
                   "sales_tops")
 
 

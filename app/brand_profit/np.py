@@ -35,7 +35,20 @@ from .. import warehouse
 from . import calc, data, db
 
 NP_TTL = 30 * 60
-CACHE_PREFIXES = ("bp_np",)
+# A finished financial year barely changes, so it isn't rebuilt on every NetSuite load (each AU year
+# re-reads ~4 s of sales lines on the cluster; user's CPU alerts, 2026-11-27): the current year is
+# "bp_np" and goes with every sales load (SALES_DROP); earlier years are "bp_closed", kept a day.
+# Settings changes drop both (CACHE_PREFIXES).
+CLOSED_TTL = 24 * 60 * 60
+SALES_DROP = ("bp_np",)
+CACHE_PREFIXES = ("bp_np", "bp_closed")
+
+
+def _current_fy() -> int:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    t = datetime.now(ZoneInfo("Australia/Sydney")).date()
+    return t.year + 1 if t.month >= 4 else t.year
 
 
 class Fine:
@@ -110,6 +123,8 @@ def _build(region: str, fy: int) -> Fine:
 
 
 def fine(region: str, fy: int) -> Fine:
+    if fy < _current_fy():
+        return warehouse.cached(("bp_closed", region, fy), lambda: _build(region, fy), ttl=CLOSED_TTL)
     return warehouse.cached(("bp_np", region, fy), lambda: _build(region, fy), ttl=NP_TTL)
 
 
